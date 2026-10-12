@@ -36,12 +36,10 @@ jobs:
         run: dotnet --info
 
       # 先做一次普通编译：XAML/C# 有错时能快速失败，不用等 AOT 全程
-      # UseXamlCompilerExecutable=false：dotnet CLI 默认会调用 net472 的 XamlCompiler.exe，
-      # 该 exe 在报错时找不到自身错误消息资源，把真实错误吞成 WMC9999；改用进程内编译器可拿到真实错误。
       - name: Build (Release / x64)
         id: build
         continue-on-error: true
-        run: dotnet build "$env:PROJECT" -c Release -p:Platform=x64 -p:UseXamlCompilerExecutable=false
+        run: dotnet build "$env:PROJECT" -c Release -p:Platform=x64
 
       # XAML 编译器 Pass2 失败时只会抛 WMC9999（信息被吞），真实错误在 output.json 里
       - name: 诊断 · 打印 XAML 编译器 output.json
@@ -69,7 +67,7 @@ jobs:
 
       # Native AOT + Windows App SDK 自包含：产物零运行时依赖
       - name: Publish (Native AOT / self-contained)
-        run: dotnet publish "$env:PROJECT" -c Release -r win-x64 -p:Platform=x64 -p:UseXamlCompilerExecutable=false -o publish
+        run: dotnet publish "$env:PROJECT" -c Release -r win-x64 -p:Platform=x64 -o publish
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

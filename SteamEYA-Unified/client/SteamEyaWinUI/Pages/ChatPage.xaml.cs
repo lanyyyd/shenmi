@@ -416,7 +416,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             FileUrl = absolute,
             FileName = dto.FileName ?? string.Empty,
             FileSizeText = sizeText,
-            Image = image,
+            Thumbnail = image,
             Recalled = dto.Recalled,
             CanRecall = isMine && !dto.Recalled && DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - dto.CreatedAt <= 120000,
             HeaderText = isMine
@@ -549,7 +549,7 @@ public sealed class ChatMessageVm
     public string FileUrl { get; init; } = string.Empty;
     public string FileName { get; init; } = string.Empty;
     public string FileSizeText { get; init; } = string.Empty;
-    public ImageSource? Image { get; init; }
+    public ImageSource? Thumbnail { get; init; }
     public bool Recalled { get; init; }
     public bool CanRecall { get; init; }
     public string HeaderText { get; init; } = string.Empty;
@@ -563,7 +563,7 @@ public sealed class ChatMessageVm
         Recalled || Kind == "text" ? Visibility.Visible : Visibility.Collapsed;
 
     public Visibility ImageVisibility =>
-        !Recalled && Image is not null ? Visibility.Visible : Visibility.Collapsed;
+        !Recalled && Thumbnail is not null ? Visibility.Visible : Visibility.Collapsed;
 
     public Visibility FileVisibility =>
         !Recalled && (Kind is "file" or "video") ? Visibility.Visible : Visibility.Collapsed;
