@@ -18,6 +18,9 @@ jobs:
       PROJECT: SteamEYA-Unified/client/SteamEyaWinUI/SteamEyaWinUI.csproj
       DOTNET_NOLOGO: 'true'
       DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+      # 固定英文 UI 文化：XAML 编译器报错时若找不到本地化资源，会把真实错误吞成 WMC9999
+      DOTNET_CLI_UI_LANGUAGE: en-US
+      VSLANG: '1033'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,7 +37,33 @@ jobs:
 
       # 先做一次普通编译：XAML/C# 有错时能快速失败，不用等 AOT 全程
       - name: Build (Release / x64)
+        id: build
+        continue-on-error: true
         run: dotnet build "$env:PROJECT" -c Release -p:Platform=x64
+
+      # XAML 编译器 Pass2 失败时只会抛 WMC9999（信息被吞），真实错误在 output.json 里
+      - name: 诊断 · 打印 XAML 编译器 output.json
+        if: always()
+        shell: pwsh
+        run: |
+          $projDir = Split-Path $env:PROJECT
+          $files = Get-ChildItem -Path "$projDir\obj" -Recurse -Filter output.json -ErrorAction SilentlyContinue
+          if ($files) {
+            foreach ($f in $files) {
+              Write-Host "===== $($f.FullName) ====="
+              Get-Content $f.FullName -Raw
+            }
+          } else {
+            Write-Host "未找到 output.json，列出 obj 下全部文件："
+            Get-ChildItem -Recurse "$projDir\obj" | Select-Object -ExpandProperty FullName
+          }
+
+      - name: 构建失败则终止
+        if: steps.build.outcome != 'success'
+        shell: pwsh
+        run: |
+          Write-Error "dotnet build 失败，见上方日志"
+          exit 1
 
       # Native AOT + Windows App SDK 自包含：产物零运行时依赖
       - name: Publish (Native AOT / self-contained)
