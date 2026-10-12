@@ -56,17 +56,6 @@
                         x:Name="LanPeersList"
                         MaxHeight="140"
                         SelectionMode="None">
-                        <ListView.ItemTemplate>
-                            <DataTemplate x:DataType="local:LanPeerVm">
-                                <StackPanel Padding="0,4">
-                                    <TextBlock Text="{x:Bind Name}" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                    <TextBlock
-                                        Text="{x:Bind Endpoint}"
-                                        Style="{StaticResource CaptionTextBlockStyle}"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
                     </ListView>
                     <TextBlock
                         x:Name="LanEmptyText"
@@ -119,59 +108,6 @@
                 Grid.Row="3"
                 SelectionMode="Single"
                 SelectionChanged="UsersList_SelectionChanged">
-                <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="local:ChatUserVm">
-                        <Grid Padding="0,6" ColumnSpacing="10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <Grid Grid.Column="0" Width="34" Height="34">
-                                <Border
-                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                    CornerRadius="17">
-                                    <TextBlock
-                                        Text="{x:Bind AvatarText}"
-                                        Foreground="White"
-                                        HorizontalAlignment="Center"
-                                        VerticalAlignment="Center" />
-                                </Border>
-                                <Image
-                                    Source="{x:Bind Avatar}"
-                                    Stretch="UniformToFill"
-                                    Width="34"
-                                    Height="34" />
-                            </Grid>
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                <TextBlock Text="{x:Bind DisplayName}" TextTrimming="CharacterEllipsis" />
-                                <TextBlock
-                                    Text="{x:Bind LastSeenText}"
-                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                                <Border
-                                    MinWidth="18"
-                                    Background="{ThemeResource SystemFillColorCriticalBrush}"
-                                    CornerRadius="9"
-                                    Padding="5,1"
-                                    Visibility="{x:Bind BadgeVisibility}">
-                                    <TextBlock
-                                        Text="{x:Bind BadgeText}"
-                                        Foreground="White"
-                                        FontSize="11"
-                                        HorizontalAlignment="Center" />
-                                </Border>
-                                <TextBlock
-                                    Text="{x:Bind OnlineText}"
-                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                    Foreground="{ThemeResource SystemFillColorSuccessBrush}"
-                                    HorizontalAlignment="Right" />
-                            </StackPanel>
-                        </Grid>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
             </ListView>
         </Grid>
 
@@ -227,12 +163,6 @@
                                             Foreground="{x:Bind ContentForeground}"
                                             TextWrapping="Wrap"
                                             Visibility="{x:Bind TextVisibility}" />
-                                        <Image
-                                            Source="{x:Bind Image}"
-                                            MaxWidth="360"
-                                            MaxHeight="360"
-                                            Stretch="Uniform"
-                                            Visibility="{x:Bind ImageVisibility}" />
                                         <Button
                                             Visibility="{x:Bind FileVisibility}"
                                             HorizontalAlignment="Left"
