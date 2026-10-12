@@ -76,6 +76,8 @@ internal static class SessionState
         BaseUrl = LocalGatewayUrl;
         Apply();
         SaveValue("nickname", nickname);
+        // 离线同样拉起常驻聊天：BaseUrl 已指向本机网关（调用方此前已确保网关在跑）。
+        ChatHub.EnsureStarted();
     }
 
     /// <summary>退出登录：清空令牌与用户名（供「远程账号」退出使用）。</summary>

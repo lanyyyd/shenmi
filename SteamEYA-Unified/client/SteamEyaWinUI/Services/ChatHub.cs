@@ -33,11 +33,11 @@ internal static class ChatHub
 
     /// <summary>
     /// 建立常驻连接（幂等）。登录成功后调用。
-    /// 离线/局域网模式没有统一账号，不启动常驻连接。
+    /// 离线/局域网模式同样适用：此时 BaseUrl 指向本机网关，用它签发的 JWT 连本机 /ws。
     /// </summary>
     public static void EnsureStarted()
     {
-        if (SessionState.Offline || string.IsNullOrWhiteSpace(SessionState.Token))
+        if (string.IsNullOrWhiteSpace(SessionState.Token))
         {
             return;
         }
