@@ -314,10 +314,44 @@ internal sealed class ChatService : IAsyncDisposable
         }
     }
 
-    public Task SendChatAsync(string kind, string content, ChatFileDto? file = null, int? to = null, CancellationToken ct = default)
+    public Task SendChatAsync(string kind, string content, ChatFileDto? file = null, int? to = null,
+        string[]? mentions = null, CancellationToken ct = default)
     {
-        var dto = new ChatSendDto { MsgType = kind, Content = content, File = file, To = to };
+        var dto = new ChatSendDto { MsgType = kind, Content = content, File = file, To = to, Mentions = mentions };
         return SendRawAsync(JsonSerializer.Serialize(dto, ChatJsonContext.Default.ChatSendDto), ct);
+    }
+
+    /// <summary>发送表情包：只传 stickerId，由服务端按 id 回填 file 字段并累加发送次数。</summary>
+    public Task SendStickerAsync(long stickerId, int? to = null, CancellationToken ct = default)
+    {
+        var dto = new ChatSendDto { MsgType = "sticker", Content = string.Empty, StickerId = stickerId, To = to };
+        return SendRawAsync(JsonSerializer.Serialize(dto, ChatJsonContext.Default.ChatSendDto), ct);
+    }
+
+    /// <summary>表情包列表（GET /api/stickers）。sort=hot 按发送次数，time 按最新。</summary>
+    public async Task<ChatStickersResponse> GetStickersAsync(string sort = "hot", CancellationToken ct = default)
+    {
+        using var req = NewRequest(HttpMethod.Get, $"/api/stickers?sort={Uri.EscapeDataString(sort)}&limit=300");
+        using var resp = await _http.SendAsync(req, ct);
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        return await JsonSerializer.DeserializeAsync(stream, ChatJsonContext.Default.ChatStickersResponse, ct)
+               ?? new ChatStickersResponse();
+    }
+
+    /// <summary>上传表情包（POST /api/stickers，multipart）。</summary>
+    public async Task<ChatStickerUploadResponse> UploadStickerAsync(string filePath, CancellationToken ct = default)
+    {
+        using var req = NewRequest(HttpMethod.Post, "/api/stickers");
+        using var form = new MultipartFormDataContent();
+        var bytes = await File.ReadAllBytesAsync(filePath, ct);
+        var content = new ByteArrayContent(bytes);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        form.Add(content, "file", Path.GetFileName(filePath));
+        req.Content = form;
+        using var resp = await _http.SendAsync(req, ct);
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        return await JsonSerializer.DeserializeAsync(stream, ChatJsonContext.Default.ChatStickerUploadResponse, ct)
+               ?? new ChatStickerUploadResponse();
     }
 
     public Task RecallAsync(long id, CancellationToken ct = default)

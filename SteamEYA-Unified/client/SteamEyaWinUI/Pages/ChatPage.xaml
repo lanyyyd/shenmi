@@ -6,289 +6,386 @@
     xmlns:local="using:SteamEyaWinUI.Pages">
 
     <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="280" />
-            <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-        <!-- ================= 左栏：连接状态 / 局域网互传 / 会话与用户 ================= -->
-        <Grid Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
+        <!-- ================= 顶部命令条（网页版 / 原生版共用） ================= -->
+        <Grid
+            Grid.Row="0"
+            Padding="16,10"
+            ColumnSpacing="10"
+            Background="{ThemeResource LayerFillColorDefaultBrush}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-            <!-- 连接状态 -->
-            <StackPanel Grid.Row="0" Padding="16,14,16,10" Spacing="2">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <TextBlock
                     x:Name="HeaderText"
-                    Style="{StaticResource SubtitleTextBlockStyle}" />
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <Ellipse
-                        x:Name="ConnDot"
-                        Width="8"
-                        Height="8"
-                        VerticalAlignment="Center"
-                        Fill="{ThemeResource SystemFillColorCautionBrush}" />
-                    <TextBlock
-                        x:Name="ConnText"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        VerticalAlignment="Center" />
-                </StackPanel>
+                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                    VerticalAlignment="Center" />
+                <Ellipse
+                    x:Name="ConnDot"
+                    Width="8"
+                    Height="8"
+                    VerticalAlignment="Center"
+                    Fill="{ThemeResource SystemFillColorCautionBrush}" />
+                <TextBlock
+                    x:Name="ConnText"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    VerticalAlignment="Center" />
             </StackPanel>
 
-            <!-- 局域网互传面板 -->
-            <Expander
-                Grid.Row="1"
-                Margin="12,0,12,8"
-                HorizontalAlignment="Stretch"
-                Header="{x:Bind Strings.Get('Chat_Lan_Title'), Mode=OneWay}">
-                <StackPanel Spacing="6">
-                    <TextBlock
-                        x:Name="LanSelfText"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        TextWrapping="Wrap" />
-                    <ListView
-                        x:Name="LanPeersList"
-                        MaxHeight="140"
-                        SelectionMode="None">
-                        <ListView.ItemTemplate>
-                            <DataTemplate x:DataType="local:LanPeerVm">
-                                <StackPanel Padding="0,4">
-                                    <TextBlock Text="{x:Bind Name}" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                    <TextBlock
-                                        Text="{x:Bind Endpoint}"
-                                        Style="{StaticResource CaptionTextBlockStyle}"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
-                    <TextBlock
-                        x:Name="LanEmptyText"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Button x:Name="AddPeerButton" Click="AddPeer_Click">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon FontSize="14" Glyph="&#xE710;" />
-                                <TextBlock x:Name="AddPeerText" />
-                            </StackPanel>
-                        </Button>
-                        <Button x:Name="RefreshLanButton" Click="RefreshLan_Click">
-                            <FontIcon FontSize="14" Glyph="&#xE72C;" />
-                        </Button>
-                    </StackPanel>
-                </StackPanel>
-            </Expander>
-
-            <!-- 群聊入口 -->
             <Button
-                x:Name="GroupButton"
-                Grid.Row="2"
-                Margin="12,0,12,6"
-                HorizontalAlignment="Stretch"
-                HorizontalContentAlignment="Left"
-                Click="Group_Click">
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                    <FontIcon FontSize="16" Glyph="&#xE8BD;" />
-                    <TextBlock x:Name="GroupText" />
-                    <Border
-                        x:Name="GroupBadge"
-                        MinWidth="18"
-                        Background="{ThemeResource SystemFillColorCriticalBrush}"
-                        CornerRadius="9"
-                        Padding="5,1"
-                        Visibility="Collapsed">
-                        <TextBlock
-                            x:Name="GroupBadgeText"
-                            Foreground="White"
-                            FontSize="11"
-                            HorizontalAlignment="Center" />
-                    </Border>
+                x:Name="LanButton"
+                Grid.Column="2"
+                Click="Lan_Click"
+                VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="14" Glyph="&#xE839;" />
+                    <TextBlock x:Name="LanButtonText" />
                 </StackPanel>
             </Button>
 
-            <!-- 用户列表 -->
-            <ListView
-                x:Name="UsersList"
-                Grid.Row="3"
-                SelectionMode="Single"
-                SelectionChanged="UsersList_SelectionChanged">
-                <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="local:ChatUserVm">
-                        <Grid Padding="0,6" ColumnSpacing="10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <Grid Grid.Column="0" Width="34" Height="34">
-                                <Border
-                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                    CornerRadius="17">
-                                    <TextBlock
-                                        Text="{x:Bind AvatarText}"
-                                        Foreground="White"
-                                        HorizontalAlignment="Center"
-                                        VerticalAlignment="Center" />
-                                </Border>
-                                <Image
-                                    Source="{x:Bind Avatar}"
-                                    Stretch="UniformToFill"
-                                    Width="34"
-                                    Height="34" />
-                            </Grid>
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                <TextBlock Text="{x:Bind DisplayName}" TextTrimming="CharacterEllipsis" />
-                                <TextBlock
-                                    Text="{x:Bind LastSeenText}"
-                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                                <Border
-                                    MinWidth="18"
-                                    Background="{ThemeResource SystemFillColorCriticalBrush}"
-                                    CornerRadius="9"
-                                    Padding="5,1"
-                                    Visibility="{x:Bind BadgeVisibility}">
-                                    <TextBlock
-                                        Text="{x:Bind BadgeText}"
-                                        Foreground="White"
-                                        FontSize="11"
-                                        HorizontalAlignment="Center" />
-                                </Border>
-                                <TextBlock
-                                    Text="{x:Bind OnlineText}"
-                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                    Foreground="{ThemeResource SystemFillColorSuccessBrush}"
-                                    HorizontalAlignment="Right" />
-                            </StackPanel>
-                        </Grid>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
+            <!-- 网页版 / 原生版 切换 -->
+            <Button
+                x:Name="ModeButton"
+                Grid.Column="3"
+                Click="Mode_Click"
+                VerticalAlignment="Center" />
         </Grid>
 
-        <!-- ================= 右栏：会话 ================= -->
-        <Grid Grid.Column="1">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
+        <!-- ================= 原生界面（网页版不可用时的兜底） ================= -->
+        <Grid x:Name="NativeRoot" Grid.Row="1" Visibility="Collapsed">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="280" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-            <!-- 会话标题 -->
-            <Border
-                Grid.Row="0"
-                BorderThickness="0,0,0,1"
-                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                Padding="20,14">
-                <TextBlock x:Name="RoomTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
-            </Border>
+            <!-- 左栏：群聊入口 + 用户列表 -->
+            <Grid Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
 
-            <!-- 消息列表 -->
-            <ListView
-                x:Name="MessagesList"
-                Grid.Row="1"
-                Padding="12,8"
-                SelectionMode="None">
-                <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="local:ChatMessageVm">
-                        <Grid Margin="0,6" HorizontalAlignment="{x:Bind RowAlign}">
-                            <StackPanel MaxWidth="600" Spacing="2">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button
+                    x:Name="GroupButton"
+                    Grid.Row="0"
+                    Margin="12,12,12,6"
+                    HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Left"
+                    Click="Group_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <FontIcon FontSize="16" Glyph="&#xE8BD;" />
+                        <TextBlock x:Name="GroupText" />
+                        <Border
+                            x:Name="GroupBadge"
+                            MinWidth="18"
+                            Background="{ThemeResource SystemFillColorCriticalBrush}"
+                            CornerRadius="9"
+                            Padding="5,1"
+                            Visibility="Collapsed">
+                            <TextBlock
+                                x:Name="GroupBadgeText"
+                                Foreground="White"
+                                FontSize="11"
+                                HorizontalAlignment="Center" />
+                        </Border>
+                    </StackPanel>
+                </Button>
+
+                <ListView
+                    x:Name="UsersList"
+                    Grid.Row="1"
+                    SelectionMode="Single"
+                    SelectionChanged="UsersList_SelectionChanged">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:ChatUserVm">
+                            <Grid Padding="0,6" ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Grid Grid.Column="0" Width="34" Height="34">
+                                    <Border
+                                        Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                        CornerRadius="17">
+                                        <TextBlock
+                                            Text="{x:Bind AvatarText}"
+                                            Foreground="White"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center" />
+                                    </Border>
+                                    <Image
+                                        Source="{x:Bind Avatar}"
+                                        Stretch="UniformToFill"
+                                        Width="34"
+                                        Height="34" />
+                                </Grid>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="{x:Bind DisplayName}" TextTrimming="CharacterEllipsis" />
                                     <TextBlock
-                                        Text="{x:Bind MetaText}"
+                                        Text="{x:Bind LastSeenText}"
                                         Style="{StaticResource CaptionTextBlockStyle}"
                                         Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                                    <Button
-                                        Padding="0"
-                                        Background="Transparent"
-                                        BorderThickness="0"
-                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                        FontSize="12"
-                                        Visibility="{x:Bind RecallVisibility}"
-                                        Click="Recall_Click"
-                                        Content="{x:Bind RecallLabel}" />
                                 </StackPanel>
-                                <Border
-                                    Background="{x:Bind BubbleBrush}"
-                                    CornerRadius="8"
-                                    Padding="10,8">
-                                    <StackPanel Spacing="4">
+                                <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                    <Border
+                                        MinWidth="18"
+                                        Background="{ThemeResource SystemFillColorCriticalBrush}"
+                                        CornerRadius="9"
+                                        Padding="5,1"
+                                        Visibility="{x:Bind BadgeVisibility}">
                                         <TextBlock
-                                            Text="{x:Bind DisplayContent}"
-                                            Foreground="{x:Bind ContentForeground}"
-                                            TextWrapping="Wrap"
-                                            Visibility="{x:Bind TextVisibility}" />
-                                        <Image
-                                            Source="{x:Bind Image}"
-                                            MaxWidth="360"
-                                            MaxHeight="360"
-                                            Stretch="Uniform"
-                                            Visibility="{x:Bind ImageVisibility}" />
-                                        <Button
-                                            Visibility="{x:Bind FileVisibility}"
-                                            HorizontalAlignment="Left"
-                                            Click="Attachment_Click"
-                                            Content="{x:Bind FileLabel}" />
-                                    </StackPanel>
-                                </Border>
-                            </StackPanel>
-                        </Grid>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
-
-            <!-- 输入区 -->
-            <Grid
-                Grid.Row="2"
-                BorderThickness="0,1,0,0"
-                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                Padding="16,12"
-                ColumnSpacing="8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBox
-                    x:Name="InputBox"
-                    Grid.Column="0"
-                    MaxHeight="120"
-                    AcceptsReturn="True"
-                    TextWrapping="Wrap"
-                    KeyDown="InputBox_KeyDown" />
-                <Button
-                    x:Name="ImageButton"
-                    Grid.Column="1"
-                    Click="Image_Click"
-                    VerticalAlignment="Bottom">
-                    <FontIcon FontSize="16" Glyph="&#xEB9F;" />
-                </Button>
-                <Button
-                    x:Name="FileButton"
-                    Grid.Column="2"
-                    Click="File_Click"
-                    VerticalAlignment="Bottom">
-                    <FontIcon FontSize="16" Glyph="&#xE8B7;" />
-                </Button>
-                <Button
-                    x:Name="SendButton"
-                    Grid.Column="3"
-                    Style="{StaticResource AccentButtonStyle}"
-                    Click="Send_Click"
-                    VerticalAlignment="Bottom">
-                    <FontIcon FontSize="16" Glyph="&#xE724;" />
-                </Button>
+                                            Text="{x:Bind BadgeText}"
+                                            Foreground="White"
+                                            FontSize="11"
+                                            HorizontalAlignment="Center" />
+                                    </Border>
+                                    <TextBlock
+                                        Text="{x:Bind OnlineText}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                        HorizontalAlignment="Right" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
             </Grid>
+
+            <!-- 右栏：会话 -->
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border
+                    Grid.Row="0"
+                    BorderThickness="0,0,0,1"
+                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Padding="20,14">
+                    <TextBlock x:Name="RoomTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                </Border>
+
+                <!-- 消息列表 -->
+                <ListView
+                    x:Name="MessagesList"
+                    Grid.Row="1"
+                    Padding="12,8"
+                    SelectionMode="None">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:ChatMessageVm">
+                            <Grid Margin="0,6" ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <!-- 对方头像（左侧） -->
+                                <Grid
+                                    Grid.Column="0"
+                                    Width="34"
+                                    Height="34"
+                                    VerticalAlignment="Top"
+                                    Visibility="{x:Bind AvatarLeftVisibility}">
+                                    <Border Background="{x:Bind AvatarBrush}" CornerRadius="17">
+                                        <TextBlock
+                                            Text="{x:Bind AvatarText}"
+                                            Foreground="White"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center" />
+                                    </Border>
+                                    <Image
+                                        Source="{x:Bind AvatarImage}"
+                                        Width="34"
+                                        Height="34"
+                                        Stretch="UniformToFill" />
+                                </Grid>
+
+                                <!-- 消息体 -->
+                                <StackPanel
+                                    Grid.Column="1"
+                                    MaxWidth="600"
+                                    Spacing="2"
+                                    HorizontalAlignment="{x:Bind RowAlign}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock
+                                            Text="{x:Bind MetaText}"
+                                            Style="{StaticResource CaptionTextBlockStyle}"
+                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                        <Button
+                                            Padding="0"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                            FontSize="12"
+                                            Visibility="{x:Bind RecallVisibility}"
+                                            Click="Recall_Click"
+                                            Content="{x:Bind RecallLabel}" />
+                                    </StackPanel>
+                                    <Border
+                                        Background="{x:Bind BubbleBrush}"
+                                        CornerRadius="8"
+                                        Padding="10,8">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock
+                                                Text="{x:Bind DisplayContent}"
+                                                Foreground="{x:Bind ContentForeground}"
+                                                TextWrapping="Wrap"
+                                                Visibility="{x:Bind TextVisibility}" />
+                                            <Image
+                                                Source="{x:Bind Image}"
+                                                MaxWidth="360"
+                                                MaxHeight="360"
+                                                Stretch="Uniform"
+                                                Visibility="{x:Bind ImageVisibility}" />
+                                            <Button
+                                                Visibility="{x:Bind FileVisibility}"
+                                                HorizontalAlignment="Left"
+                                                Click="Attachment_Click"
+                                                Content="{x:Bind FileLabel}" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+
+                                <!-- 自己头像（右侧） -->
+                                <Grid
+                                    Grid.Column="2"
+                                    Width="34"
+                                    Height="34"
+                                    VerticalAlignment="Top"
+                                    Visibility="{x:Bind AvatarRightVisibility}">
+                                    <Border Background="{x:Bind AvatarBrush}" CornerRadius="17">
+                                        <TextBlock
+                                            Text="{x:Bind AvatarText}"
+                                            Foreground="White"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center" />
+                                    </Border>
+                                    <Image
+                                        Source="{x:Bind AvatarImage}"
+                                        Width="34"
+                                        Height="34"
+                                        Stretch="UniformToFill" />
+                                </Grid>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+
+                <!-- 输入区 -->
+                <Grid
+                    Grid.Row="2"
+                    BorderThickness="0,1,0,0"
+                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Padding="16,12"
+                    ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBox
+                        x:Name="InputBox"
+                        Grid.Column="0"
+                        MaxHeight="120"
+                        AcceptsReturn="True"
+                        TextWrapping="Wrap"
+                        KeyDown="InputBox_KeyDown"
+                        TextChanged="InputBox_TextChanged" />
+
+                    <Button x:Name="StickerButton" Grid.Column="1" VerticalAlignment="Bottom">
+                        <Button.Flyout>
+                            <Flyout Placement="Top" Opening="StickerFlyout_Opening">
+                                <StackPanel Width="380" Spacing="8">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock
+                                            Text="{x:Bind Strings.Get('Chat_Stickers'), Mode=OneWay}"
+                                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                                            VerticalAlignment="Center" />
+                                        <Button x:Name="UploadStickerButton" Click="UploadSticker_Click">
+                                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                                <FontIcon FontSize="12" Glyph="&#xE710;" />
+                                                <TextBlock Text="{x:Bind Strings.Get('Chat_Sticker_Upload'), Mode=OneWay}" />
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                    <TextBlock
+                                        x:Name="StickerEmptyText"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        Visibility="Collapsed" />
+                                    <GridView
+                                        x:Name="StickerGrid"
+                                        MaxHeight="300"
+                                        SelectionMode="None"
+                                        IsItemClickEnabled="True"
+                                        ItemClick="StickerGrid_ItemClick">
+                                        <GridView.ItemTemplate>
+                                            <DataTemplate x:DataType="local:StickerVm">
+                                                <Image
+                                                    Source="{x:Bind Image}"
+                                                    Width="72"
+                                                    Height="72"
+                                                    Margin="4"
+                                                    Stretch="UniformToFill" />
+                                            </DataTemplate>
+                                        </GridView.ItemTemplate>
+                                    </GridView>
+                                </StackPanel>
+                            </Flyout>
+                        </Button.Flyout>
+                        <FontIcon FontSize="16" Glyph="&#xE76E;" />
+                    </Button>
+
+                    <Button
+                        x:Name="ImageButton"
+                        Grid.Column="2"
+                        Click="Image_Click"
+                        VerticalAlignment="Bottom">
+                        <FontIcon FontSize="16" Glyph="&#xEB9F;" />
+                    </Button>
+                    <Button
+                        x:Name="FileButton"
+                        Grid.Column="3"
+                        Click="File_Click"
+                        VerticalAlignment="Bottom">
+                        <FontIcon FontSize="16" Glyph="&#xE8B7;" />
+                    </Button>
+                    <Button
+                        x:Name="SendButton"
+                        Grid.Column="4"
+                        Style="{StaticResource AccentButtonStyle}"
+                        Click="Send_Click"
+                        VerticalAlignment="Bottom">
+                        <FontIcon FontSize="16" Glyph="&#xE724;" />
+                    </Button>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <!-- ================= 网页版界面（默认；加载失败回退原生） ================= -->
+        <Grid x:Name="WebRoot" Grid.Row="1" Visibility="Collapsed">
+            <WebView2 x:Name="ChatWeb" />
+            <ProgressRing
+                x:Name="WebLoading"
+                Width="48"
+                Height="48"
+                IsActive="False" />
         </Grid>
     </Grid>
 </Page>

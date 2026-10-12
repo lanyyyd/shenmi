@@ -73,6 +73,34 @@ jobs:
         shell: pwsh
         run: Get-ChildItem -Path publish -Filter *.pdb -File -ErrorAction SilentlyContinue | Remove-Item -Force
 
+      # ---- 离线/局域网网关 + 网页聊天前端 ----
+      # 客户端在离线模式会拉起本机网关（<安装目录>\gateway\steameya-gateway.exe），
+      # 并由网关托管网页版聊天前端（<安装目录>\web）。两者都必须随安装包一起下发。
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 构建本机网关（PyInstaller onefile）
+        shell: pwsh
+        working-directory: SteamEYA-Unified/server
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+          python -m PyInstaller --noconfirm --clean --onefile --name steameya-gateway `
+            --collect-submodules uvicorn --collect-submodules fastapi `
+            --add-data "app;app" --add-data "..\web;web" gateway_main.py
+          if (-not (Test-Path "dist\steameya-gateway.exe")) { throw "网关 exe 未生成" }
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\publish\gateway" | Out-Null
+          Copy-Item "dist\steameya-gateway.exe" "$env:GITHUB_WORKSPACE\publish\gateway\" -Force
+
+      - name: 拷贝网页聊天前端（web → publish\web）
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\publish\web" | Out-Null
+          Copy-Item "SteamEYA-Unified\web\*" "$env:GITHUB_WORKSPACE\publish\web\" -Recurse -Force
+          Get-ChildItem "$env:GITHUB_WORKSPACE\publish\web" | Select-Object -ExpandProperty Name
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup -y --no-progress

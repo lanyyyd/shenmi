@@ -37,11 +37,16 @@ public sealed partial class MainWindow : Window
     /// <summary>主窗口句柄，供文件/目录选择器等 WinRT 互操作（InitializeWithWindow）使用；在 ConfigureWindowSize 中赋值。</summary>
     public static nint Hwnd => s_hwnd;
 
+    /// <summary>主窗口当前是否处于激活（前台）状态：聊天室据此判断是否需要弹系统通知/闪任务栏。</summary>
+    public static bool IsActive { get; private set; } = true;
+
     public MainWindow()
     {
         Instance = this;
 
         InitializeComponent();
+
+        Activated += (_, e) => IsActive = e.WindowActivationState != WindowActivationState.Deactivated;
 
         // 背景视频的播放器：MediaPlayerElement.MediaPlayer 只读，必须显式创建再 SetMediaPlayer，
         // 否则永远是 null、视频背景播不出来。

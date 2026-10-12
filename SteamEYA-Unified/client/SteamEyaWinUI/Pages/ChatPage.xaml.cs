@@ -1,10 +1,11 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Microsoft.Web.WebView2.Core;
 using SteamEyaWinUI.Localization;
 using SteamEyaWinUI.Models;
 using SteamEyaWinUI.Services;
@@ -15,9 +16,10 @@ using Windows.System;
 namespace SteamEyaWinUI.Pages;
 
 /// <summary>
-/// 原生聊天室页面：Group/私聊、文本/图片/文件/视频、撤回、在线状态与「上次登录时间」、
-/// 以及局域网互传面板。用原生 WinUI3 控件取代原先的 WebView2 内嵌方案，
-/// 以修复部分 Win10 上点开聊天室卡死的问题。
+/// 聊天室页面。默认内嵌「网页版」聊天界面（WebView2 指向服务端 /api/autologin 免二次登录，
+/// 与浏览器里完全一致：表情包 / @提及 / 头像 / 搜索 / 个人中心一应俱全）；若 WebView2 运行时不
+/// 可用或加载失败，则自动回退到原生 WinUI 界面（Win10 上 WebView2 初始化卡死时的兜底）。
+/// 原生界面本身也补齐了表情包、@提及、头像与回车发送。
 /// </summary>
 public sealed partial class ChatPage : Page, INotifyPropertyChanged
 {
@@ -25,6 +27,11 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     private static readonly Brush OtherBubble = (Brush)Application.Current.Resources["LayerFillColorDefaultBrush"];
     private static readonly Brush OnAccentBrush = (Brush)Application.Current.Resources["TextOnAccentFillColorPrimaryBrush"];
     private static readonly Brush PrimaryTextBrush = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"];
+    private static readonly Brush TertiaryTextBrush = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"];
+
+    /// <summary>头像底色的确定性调色板（按用户 id 取模，保证同一人颜色稳定）。</summary>
+    private static readonly string[] AvatarColors =
+        ["#5865F2", "#EB459E", "#57F287", "#FEE75C", "#ED4245", "#00B0F4", "#9B59B6", "#E67E22"];
 
     private readonly ChatService _chat = new();
     // 同时 using 了 Microsoft.UI.Dispatching 与 Windows.System，两者都有 DispatcherQueue，必须写全名消歧义。
@@ -32,7 +39,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
     private readonly ObservableCollection<ChatMessageVm> _messages = [];
     private readonly ObservableCollection<ChatUserVm> _users = [];
-    private readonly ObservableCollection<LanPeerVm> _peers = [];
+    private readonly ObservableCollection<StickerVm> _stickers = [];
 
     private readonly List<ChatMessageDto> _rawMessages = [];
     private ChatUserDto[] _rawUsers = [];
@@ -41,13 +48,21 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     private string _room = "group";
     private bool _initialized;
 
+    // 网页版 / 原生版
+    private bool _webMode;
+
+    // @提及：显示名 -> 用户 id（-1 表示“所有人”）
+    private readonly Dictionary<string, int> _mentionPicks = [];
+    private readonly StackPanel _mentionPanel = new() { Spacing = 2, MinWidth = 200 };
+    private Flyout? _mentionFlyout;
+
     public ChatPage()
     {
         InitializeComponent();
 
         MessagesList.ItemsSource = _messages;
         UsersList.ItemsSource = _users;
-        LanPeersList.ItemsSource = _peers;
+        StickerGrid.ItemsSource = _stickers;
 
         _chat.MessageReceived += OnMessageReceived;
         _chat.MessageRecalled += OnMessageRecalled;
@@ -90,12 +105,14 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             AppLog.Error("聊天室初始化失败。", ex);
         }
 
-        _ = LoadLanAsync();
+        await InitializeModeAsync();
+        _ = EnsureLanAsync();
     }
 
     private async void OnUnloaded(object sender, RoutedEventArgs e)
     {
         Loc.LanguageChanged -= OnLanguageChanged;
+        _mentionFlyout?.Hide();
         await _chat.DisposeAsync();
     }
 
@@ -114,15 +131,139 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     {
         HeaderText.Text = Loc.T("Nav_Chat");
         GroupText.Text = Loc.T("Chat_Group");
-        AddPeerText.Text = Loc.T("Chat_Lan_Add");
-        RoomTitle.Text = _room == "group" ? Loc.T("Chat_Group") : RoomTitle.Text;
+        LanButtonText.Text = Loc.T("Chat_Lan_Title");
+        ModeButton.Content = Loc.T(_webMode ? "Chat_Mode_ToNative" : "Chat_Mode_ToWeb");
+        if (_room == "group")
+        {
+            RoomTitle.Text = Loc.T("Chat_Group");
+        }
         SetConnectionText(_chat.IsConnected);
     }
+
+    // ---------------- 网页版 / 原生版 ----------------
+    /// <summary>优先尝试网页版（在线且持有 JWT 时）；不可用则回退原生。</summary>
+    private async Task InitializeModeAsync()
+    {
+        if (SessionState.Offline || string.IsNullOrWhiteSpace(SessionState.Token))
+        {
+            // 离线（局域网）无统一账号，网页版登录态无从取得，直接用原生。
+            SwitchMode(false);
+            ModeButton.IsEnabled = false;
+            return;
+        }
+
+        var ok = await TryStartWebAsync();
+        SwitchMode(ok);
+        if (!ok)
+        {
+            MainWindow.Instance?.ShowStatus(Loc.T("Chat_WebFailed"), InfoBarSeverity.Warning);
+        }
+    }
+
+    private void SwitchMode(bool web)
+    {
+        _webMode = web;
+        WebRoot.Visibility = web ? Visibility.Visible : Visibility.Collapsed;
+        NativeRoot.Visibility = web ? Visibility.Collapsed : Visibility.Visible;
+        ModeButton.Content = Loc.T(web ? "Chat_Mode_ToNative" : "Chat_Mode_ToWeb");
+    }
+
+    private async void Mode_Click(object sender, RoutedEventArgs e)
+    {
+        if (_webMode)
+        {
+            SwitchMode(false);
+            return;
+        }
+
+        ModeButton.IsEnabled = false;
+        var ok = await TryStartWebAsync();
+        ModeButton.IsEnabled = true;
+        if (ok)
+        {
+            SwitchMode(true);
+        }
+        else
+        {
+            MainWindow.Instance?.ShowStatus(Loc.T("Chat_WebFailed"), InfoBarSeverity.Warning);
+        }
+    }
+
+    /// <summary>初始化 WebView2 并导航到免登录网页版；任一步失败/超时都返回 false（不改动界面）。</summary>
+    private async Task<bool> TryStartWebAsync()
+    {
+        if (SessionState.Offline || string.IsNullOrWhiteSpace(SessionState.Token))
+        {
+            return false;
+        }
+
+        try
+        {
+            WebLoading.IsActive = true;
+
+            // 用户数据目录放到用户 AppData：安装目录（如 Program Files）通常不可写，默认目录会导致初始化失败。
+            try
+            {
+                var dataFolder = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SteamEYA", "webview2");
+                Directory.CreateDirectory(dataFolder);
+                WebChat.CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = dataFolder };
+            }
+            catch (Exception ex)
+            {
+                AppLog.Warn($"设置 WebView2 数据目录失败：{ex.Message}");
+            }
+
+            // Win10 上 WebView2 初始化偶发卡死，加超时兜底，超时即回退原生。
+            var ensure = WebChat.EnsureCoreWebView2Async().AsTask();
+            if (await Task.WhenAny(ensure, Task.Delay(TimeSpan.FromSeconds(10))) != ensure)
+            {
+                AppLog.Warn("网页版聊天初始化超时，改用原生界面。");
+                return false;
+            }
+            await ensure;
+
+            if (WebChat.CoreWebView2 is { } core)
+            {
+                core.Settings.IsStatusBarEnabled = false;
+            }
+
+            var tcs = new TaskCompletionSource<bool>();
+            void OnNav(WebView2 sender, CoreWebView2NavigationCompletedEventArgs args) => tcs.TrySetResult(args.IsSuccess);
+
+            WebChat.NavigationCompleted += OnNav;
+            try
+            {
+                WebChat.Source = new Uri(AutologinUrl());
+                var done = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(15)));
+                return done == tcs.Task && tcs.Task.Result;
+            }
+            finally
+            {
+                WebChat.NavigationCompleted -= OnNav;
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"网页版聊天不可用，改用原生界面：{ex.Message}");
+            return false;
+        }
+        finally
+        {
+            WebLoading.IsActive = false;
+        }
+    }
+
+    /// <summary>服务端用统一 JWT 换聊天 cookie 并跳转网页版聊天界面，客户端免二次登录。</summary>
+    private static string AutologinUrl()
+        => SessionState.BaseUrl.TrimEnd('/') + "/api/autologin?jwt=" + Uri.EscapeDataString(SessionState.Token ?? string.Empty);
 
     // ---------------- 会话切换 ----------------
     private async Task OpenRoomAsync(string room)
     {
         _room = room;
+        _mentionPicks.Clear();
+        _mentionFlyout?.Hide();
         RoomTitle.Text = room == "group"
             ? Loc.T("Chat_Group")
             : _rawUsers.FirstOrDefault(u => PmRoom(u.Id) == room)?.DisplayName ?? Loc.T("Chat_Private");
@@ -168,6 +309,10 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             e.Handled = true;
             await SendTextAsync();
         }
+        else if (e.Key == VirtualKey.Escape)
+        {
+            HideMention();
+        }
     }
 
     private static bool IsShiftDown() =>
@@ -182,7 +327,9 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             return;
         }
         InputBox.Text = string.Empty;
-        await _chat.SendChatAsync("text", text, to: TargetId());
+        await _chat.SendChatAsync("text", text, to: TargetId(), mentions: BuildMentions(text));
+        _mentionPicks.Clear();
+        HideMention();
     }
 
     private async void Image_Click(object sender, RoutedEventArgs e)
@@ -247,6 +394,186 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         return a == _myId ? b : a;
     }
 
+    // ---------------- 表情包 ----------------
+    private async void StickerFlyout_Opening(object sender, object e) => await LoadStickersAsync();
+
+    private async Task LoadStickersAsync()
+    {
+        try
+        {
+            var result = await _chat.GetStickersAsync();
+            _stickers.Clear();
+            foreach (var s in result.Stickers ?? [])
+            {
+                if (string.IsNullOrEmpty(s.Url))
+                {
+                    continue;
+                }
+                _stickers.Add(new StickerVm(s.Id, new BitmapImage(new Uri(Absolute(s.Url)))));
+            }
+            StickerEmptyText.Text = Loc.T("Chat_Sticker_Empty");
+            StickerEmptyText.Visibility = _stickers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("加载表情包失败。", ex);
+        }
+    }
+
+    private async void StickerGrid_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is StickerVm vm)
+        {
+            StickerButton.Flyout?.Hide();
+            await _chat.SendStickerAsync(vm.Id, TargetId());
+        }
+    }
+
+    private async void UploadSticker_Click(object sender, RoutedEventArgs e)
+    {
+        var file = await PickAsync([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"]);
+        if (file is null)
+        {
+            return;
+        }
+        try
+        {
+            var result = await _chat.UploadStickerAsync(file.Path);
+            if (result.Ok)
+            {
+                await LoadStickersAsync();
+            }
+            else
+            {
+                MainWindow.Instance?.ShowStatus(result.Error ?? Loc.T("Chat_Sticker_Empty"), InfoBarSeverity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("上传表情包失败。", ex);
+        }
+    }
+
+    // ---------------- @提及 ----------------
+    private void InputBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_room != "group")
+        {
+            HideMention();
+            return;
+        }
+
+        var text = InputBox.Text ?? string.Empty;
+        var at = text.LastIndexOf('@');
+        if (at < 0 || at < text.Length - 21)
+        {
+            HideMention();
+            return;
+        }
+
+        var tail = text[(at + 1)..];
+        if (tail.IndexOfAny([' ', '\n', '\r', '\t']) >= 0)
+        {
+            HideMention();
+            return;
+        }
+
+        ShowMention(tail);
+    }
+
+    private void ShowMention(string query)
+    {
+        _mentionPanel.Children.Clear();
+        var q = query.ToLowerInvariant();
+
+        if (q.Length == 0 || "所有人".Contains(q, StringComparison.Ordinal))
+        {
+            _mentionPanel.Children.Add(MentionRow(Loc.T("Chat_Mention_All"), -1));
+        }
+
+        var matches = _rawUsers
+            .Where(u => u.Id != _myId)
+            .Select(u => (User: u, Name: DisplayNameOf(u)))
+            .Where(t => q.Length == 0 || t.Name.ToLowerInvariant().Contains(q, StringComparison.Ordinal))
+            .OrderByDescending(t => t.User.Online)
+            .ThenBy(t => t.Name, StringComparer.Ordinal)
+            .Take(30);
+
+        foreach (var (user, name) in matches)
+        {
+            _mentionPanel.Children.Add(MentionRow(name, user.Id));
+        }
+
+        if (_mentionPanel.Children.Count == 0)
+        {
+            _mentionPanel.Children.Add(new TextBlock
+            {
+                Text = Loc.T("Chat_Mention_None"),
+                Margin = new Thickness(10, 8, 10, 8),
+                Foreground = TertiaryTextBrush
+            });
+        }
+
+        _mentionFlyout ??= new Flyout { Placement = FlyoutPlacementMode.Top, Content = _mentionPanel };
+        if (!_mentionFlyout.IsOpen)
+        {
+            _mentionFlyout.ShowAt(InputBox);
+        }
+    }
+
+    private Button MentionRow(string name, int id)
+    {
+        var button = new Button
+        {
+            Content = name,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left
+        };
+        button.Click += (_, _) => InsertMention(name, id);
+        return button;
+    }
+
+    private void InsertMention(string name, int id)
+    {
+        var text = InputBox.Text ?? string.Empty;
+        var at = text.LastIndexOf('@');
+        if (at < 0)
+        {
+            return;
+        }
+
+        var head = text[..at];
+        var insert = "@" + name + " ";
+        InputBox.Text = head + insert;
+        InputBox.SelectionStart = InputBox.Text.Length;
+        _mentionPicks[name] = id;
+        HideMention();
+        InputBox.Focus(FocusState.Programmatic);
+    }
+
+    private void HideMention() => _mentionFlyout?.Hide();
+
+    /// <summary>按「文本里仍然存在的 @对象」生成 mentions 数组（id 或 all），与网页版一致。</summary>
+    private string[]? BuildMentions(string text)
+    {
+        if (_room != "group" || _mentionPicks.Count == 0)
+        {
+            return null;
+        }
+        var ids = new List<string>();
+        foreach (var (name, id) in _mentionPicks)
+        {
+            if (text.Contains("@" + name, StringComparison.Ordinal))
+            {
+                ids.Add(id < 0 ? "all" : id.ToString());
+            }
+        }
+        return ids.Count > 0 ? [.. ids] : null;
+    }
+
+    private static string DisplayNameOf(ChatUserDto user) =>
+        string.IsNullOrWhiteSpace(user.DisplayName) ? user.Username : user.DisplayName;
+
     // ---------------- 撤回 / 附件 ----------------
     private async void Recall_Click(object sender, RoutedEventArgs e)
     {
@@ -269,6 +596,8 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     {
         _dispatcher.TryEnqueue(() =>
         {
+            MaybeNotify(dto);
+
             if (dto.Room != _room)
             {
                 if (dto.FromId != _myId)
@@ -283,6 +612,36 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             ScrollToBottom();
             _ = SafeMarkReadAsync(_room);
         });
+    }
+
+    /// <summary>系统提醒：只在“非自己发的、且当前没正看着这条消息”时弹横幅并闪任务栏。</summary>
+    private void MaybeNotify(ChatMessageDto dto)
+    {
+        if (dto.FromId == _myId || dto.Recalled)
+        {
+            return;
+        }
+        if (dto.Room == _room && MainWindow.IsActive)
+        {
+            return;
+        }
+
+        ChatNotifyService.Initialize();
+        var preview = dto.EffectiveKind switch
+        {
+            "image" => "[图片]",
+            "video" => "[视频]",
+            "file" => "[文件] " + (dto.FileName ?? string.Empty),
+            "sticker" => "[表情]",
+            _ => dto.Content
+        };
+        if (preview.Length > 80)
+        {
+            preview = preview[..80] + "…";
+        }
+
+        var title = Loc.Tf(dto.Room == "group" ? "Chat_Notify_Group" : "Chat_Notify_Private", dto.FromName);
+        ChatNotifyService.Notify(title, preview);
     }
 
     private void OnMessageRecalled(long id)
@@ -372,7 +731,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     private void RebuildUsers()
     {
         _users.Clear();
-        foreach (var u in _rawUsers.OrderByDescending(u => u.Online).ThenBy(u => u.DisplayName))
+        foreach (var u in _rawUsers.OrderByDescending(u => u.Online).ThenBy(u => DisplayNameOf(u)))
         {
             if (u.Id == _myId)
             {
@@ -401,6 +760,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         var kind = dto.EffectiveKind;
         var absolute = Absolute(dto.FilePath);
         var sizeText = FormatSize(dto.FileSize ?? 0);
+        var displayName = string.IsNullOrWhiteSpace(dto.FromName) ? "?" : dto.FromName;
 
         ImageSource? image = null;
         if (!dto.Recalled && (kind == "image" || kind == "sticker") && !string.IsNullOrEmpty(absolute))
@@ -421,13 +781,29 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             CanRecall = isMine && !dto.Recalled && DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - dto.CreatedAt <= 120000,
             MetaText = isMine
                 ? FormatTime(dto.CreatedAt)
-                : $"{dto.FromName} · {FormatTime(dto.CreatedAt)}",
+                : $"{displayName} · {FormatTime(dto.CreatedAt)}",
             RowAlign = isMine ? HorizontalAlignment.Right : HorizontalAlignment.Left,
             BubbleBrush = isMine ? MyBubble : OtherBubble,
             ContentForeground = isMine ? OnAccentBrush : PrimaryTextBrush,
             RecallLabel = Loc.T("Chat_Recall"),
-            RecalledLabel = Loc.T("Chat_Recalled")
+            RecalledLabel = Loc.T("Chat_Recalled"),
+            AvatarText = displayName[..1].ToUpperInvariant(),
+            AvatarImage = string.IsNullOrWhiteSpace(dto.FromAvatar) ? null : new BitmapImage(new Uri(Absolute(dto.FromAvatar))),
+            AvatarBrush = AvatarBrushFor(dto.FromId),
+            AvatarLeftVisibility = isMine ? Visibility.Collapsed : Visibility.Visible,
+            AvatarRightVisibility = isMine ? Visibility.Visible : Visibility.Collapsed
         };
+    }
+
+    private static Brush AvatarBrushFor(int userId)
+    {
+        var hex = AvatarColors[Math.Abs(userId) % AvatarColors.Length];
+        var color = Windows.UI.Color.FromArgb(
+            255,
+            Convert.ToByte(hex.Substring(1, 2), 16),
+            Convert.ToByte(hex.Substring(3, 2), 16),
+            Convert.ToByte(hex.Substring(5, 2), 16));
+        return new SolidColorBrush(color);
     }
 
     private static string Absolute(string? path)
@@ -477,46 +853,78 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     }
 
     // ---------------- 局域网互传 ----------------
-    private async Task LoadLanAsync()
+    /// <summary>确保本机网关起来（在线模式下默认没起），使局域网发现/互传可用。</summary>
+    private async Task EnsureLanAsync()
     {
-        var info = await _chat.GetLanInfoAsync();
-        if (!info.Enabled)
+        try
         {
-            // 在线模式下本机网关默认没起：这里补拉一次以启用局域网发现，让在线/离线都能互传。
-            await GatewayLauncher.EnsureStartedAsync(SessionState.Nickname);
-            info = await _chat.GetLanInfoAsync();
-        }
-
-        _dispatcher.TryEnqueue(() =>
-        {
-            LanSelfText.Text = info.Enabled
-                ? Loc.Tf("Chat_Lan_Self", info.Name, info.Port ?? 0)
-                : Loc.T("Chat_Lan_Off");
-        });
-
-        await RefreshPeersAsync();
-    }
-
-    private async Task RefreshPeersAsync()
-    {
-        var peers = await _chat.GetLanPeersAsync();
-        _dispatcher.TryEnqueue(() =>
-        {
-            _peers.Clear();
-            foreach (var p in peers.Peers ?? [])
+            var info = await _chat.GetLanInfoAsync();
+            if (!info.Enabled)
             {
-                _peers.Add(new LanPeerVm(p));
+                await GatewayLauncher.EnsureStartedAsync(SessionState.Nickname);
             }
-            LanEmptyText.Text = _peers.Count == 0 ? Loc.T("Chat_Lan_None") : string.Empty;
-        });
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"启动本机网关失败：{ex.Message}");
+        }
     }
 
-    private async void RefreshLan_Click(object sender, RoutedEventArgs e)
+    private async void Lan_Click(object sender, RoutedEventArgs e)
     {
-        await RefreshPeersAsync();
+        try
+        {
+            await EnsureLanAsync();
+            var info = await _chat.GetLanInfoAsync();
+            var peers = await _chat.GetLanPeersAsync();
+
+            var panel = new StackPanel { Spacing = 10, MinWidth = 320 };
+            panel.Children.Add(new TextBlock
+            {
+                Text = info.Enabled ? Loc.Tf("Chat_Lan_Self", info.Name, info.Port ?? 0) : Loc.T("Chat_Lan_Off"),
+                TextWrapping = TextWrapping.Wrap,
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"]
+            });
+
+            var peerList = peers.Peers ?? [];
+            if (peerList.Length == 0)
+            {
+                panel.Children.Add(new TextBlock { Text = Loc.T("Chat_Lan_None") });
+            }
+            else
+            {
+                panel.Children.Add(new TextBlock
+                {
+                    Text = Loc.T("Chat_Lan_Title"),
+                    Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"]
+                });
+                foreach (var p in peerList)
+                {
+                    panel.Children.Add(new TextBlock { Text = $"{p.Name}  ·  {p.Ip}:{p.Port}" });
+                }
+            }
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = Loc.T("Chat_Lan_Title"),
+                Content = panel,
+                PrimaryButtonText = Loc.T("Chat_Lan_Add"),
+                CloseButtonText = Loc.T("Chat_Cancel")
+            };
+
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            {
+                await AddPeerDialogAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("打开局域网面板失败。", ex);
+        }
     }
 
-    private async void AddPeer_Click(object sender, RoutedEventArgs e)
+    private async Task AddPeerDialogAsync()
     {
         var ipBox = new TextBox { Header = Loc.T("Chat_Lan_Ip"), PlaceholderText = "192.168.1.10" };
         var portBox = new TextBox { Header = Loc.T("Chat_Lan_Port"), Text = "8898" };
@@ -535,7 +943,6 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         if (int.TryParse(portBox.Text, out var port) && !string.IsNullOrWhiteSpace(ipBox.Text))
         {
             await _chat.AddLanPeerAsync(ipBox.Text.Trim(), port, string.Empty);
-            await RefreshPeersAsync();
         }
     }
 }
@@ -558,6 +965,13 @@ public sealed class ChatMessageVm
     public Brush ContentForeground { get; set; } = null!;
     public string RecallLabel { get; set; } = string.Empty;
     public string RecalledLabel { get; set; } = string.Empty;
+
+    // 头像
+    public string AvatarText { get; set; } = string.Empty;
+    public ImageSource? AvatarImage { get; set; }
+    public Brush AvatarBrush { get; set; } = null!;
+    public Visibility AvatarLeftVisibility { get; set; }
+    public Visibility AvatarRightVisibility { get; set; }
 
     public Visibility TextVisibility =>
         Recalled || Kind == "text" ? Visibility.Visible : Visibility.Collapsed;
@@ -584,6 +998,20 @@ public sealed class ChatMessageVm
                 : $"{icon}{FileName} ({FileSizeText})";
         }
     }
+}
+
+/// <summary>表情包列表项视图模型。</summary>
+public sealed class StickerVm
+{
+    internal StickerVm(long id, ImageSource image)
+    {
+        Id = id;
+        Image = image;
+    }
+
+    public long Id { get; }
+
+    public ImageSource Image { get; }
 }
 
 /// <summary>左侧用户列表项视图模型。</summary>
@@ -617,22 +1045,6 @@ public sealed class ChatUserVm
     public string BadgeText => _unread > 0 ? _unread.ToString() : string.Empty;
 
     public Visibility BadgeVisibility => _unread > 0 ? Visibility.Visible : Visibility.Collapsed;
-}
-
-/// <summary>局域网对端设备视图模型。</summary>
-public sealed class LanPeerVm
-{
-    private readonly LanPeerDto _peer;
-
-    // LanPeerDto 是 internal，构造函数只能是 internal，否则 CS0051（参数类型可见性低于方法）。
-    internal LanPeerVm(LanPeerDto peer)
-    {
-        _peer = peer;
-    }
-
-    public string Name => string.IsNullOrWhiteSpace(_peer.Name) ? _peer.Ip : _peer.Name;
-
-    public string Endpoint => $"{_peer.Ip}:{_peer.Port}";
 }
 
 /// <summary>供视图模型复用的时间格式化（与页面逻辑一致）。</summary>

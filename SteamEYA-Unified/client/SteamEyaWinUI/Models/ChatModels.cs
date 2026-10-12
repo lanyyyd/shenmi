@@ -150,6 +150,37 @@ internal sealed class ChatSendDto
     public ChatFileDto? File { get; set; }
     public int? To { get; set; }
     public string[]? Mentions { get; set; }
+
+    /// <summary>表情包消息只发这个 id，由服务端回填 file 字段。</summary>
+    public long? StickerId { get; set; }
+}
+
+/// <summary>GET /api/stickers 里的单个表情包。</summary>
+internal sealed class ChatStickerDto
+{
+    public long Id { get; set; }
+    public string Url { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public long Size { get; set; }
+    public int SendCount { get; set; }
+}
+
+internal sealed class ChatStickersResponse
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public ChatStickerDto[]? Stickers { get; set; }
+    public int Total { get; set; }
+    public bool IsAdmin { get; set; }
+}
+
+/// <summary>POST /api/stickers 的返回。</summary>
+internal sealed class ChatStickerUploadResponse
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public ChatStickerDto? Sticker { get; set; }
+    public bool Dedup { get; set; }
 }
 
 /// <summary>随消息发送的文件引用（服务器要求 url/name/size）。</summary>
@@ -191,6 +222,8 @@ internal sealed class ChatReadRequest
 [JsonSerializable(typeof(ChatUploadResultDto))]
 [JsonSerializable(typeof(ChatUnreadResponse))]
 [JsonSerializable(typeof(ChatMeResponse))]
+[JsonSerializable(typeof(ChatStickersResponse))]
+[JsonSerializable(typeof(ChatStickerUploadResponse))]
 [JsonSerializable(typeof(LanInfoDto))]
 [JsonSerializable(typeof(LanPeersResponse))]
 [JsonSerializable(typeof(LanAddPeerResponse))]
