@@ -33,7 +33,8 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     private static readonly string[] AvatarColors =
         ["#5865F2", "#EB459E", "#57F287", "#FEE75C", "#ED4245", "#00B0F4", "#9B59B6", "#E67E22"];
 
-    private readonly ChatService _chat = new();
+    // 复用全局常驻连接（ChatHub），离开本页也不断线，保证其它页面能收消息并提醒。
+    private readonly ChatService _chat = ChatHub.Chat;
     // 同时 using 了 Microsoft.UI.Dispatching 与 Windows.System，两者都有 DispatcherQueue，必须写全名消歧义。
     private readonly Microsoft.UI.Dispatching.DispatcherQueue _dispatcher =
         Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
@@ -88,16 +89,20 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         }
         _initialized = true;
 
+        // 标记“正在看聊天室”，用于抑制本页可见时的系统通知。
+        ChatHub.IsChatPageOpen = true;
+
         ApplyStaticText();
 
         try
         {
             var me = await _chat.GetMeAsync();
             _myId = me?.Id ?? 0;
+            ChatHub.SetMyId(_myId);
             _rawUsers = await _chat.GetUsersAsync();
             RebuildUsers();
             await OpenRoomAsync("group");
-            _chat.Start();
+            ChatHub.EnsureStarted();
             await RefreshUnreadAsync();
         }
         catch (Exception ex)
@@ -109,11 +114,17 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         _ = EnsureLanAsync();
     }
 
-    private async void OnUnloaded(object sender, RoutedEventArgs e)
+    private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         Loc.LanguageChanged -= OnLanguageChanged;
         _mentionFlyout?.Hide();
-        await _chat.DisposeAsync();
+        ChatHub.IsChatPageOpen = false;
+
+        // 连接由 ChatHub 常驻保持（离开本页仍收消息 + 弹系统提醒），这里只退订本页的 UI 回调。
+        _chat.MessageReceived -= OnMessageReceived;
+        _chat.MessageRecalled -= OnMessageRecalled;
+        _chat.UsersChanged -= OnUsersChanged;
+        _chat.ConnectionChanged -= OnConnectionChanged;
     }
 
     private void OnLanguageChanged()
@@ -270,6 +281,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     private async Task OpenRoomAsync(string room)
     {
         _room = room;
+        ChatHub.CurrentRoom = room;   // 供 ChatHub 判断“正在看这个房间”，避免多余提醒
         _mentionPicks.Clear();
         _mentionFlyout?.Hide();
         RoomTitle.Text = room == "group"
@@ -609,8 +621,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     {
         _dispatcher.TryEnqueue(() =>
         {
-            MaybeNotify(dto);
-
+            // 系统通知由 ChatHub 统一负责（它不区分当前页面），这里只做本页 UI 更新。
             if (dto.Room != _room)
             {
                 if (dto.FromId != _myId)
@@ -625,36 +636,6 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             ScrollToBottom();
             _ = SafeMarkReadAsync(_room);
         });
-    }
-
-    /// <summary>系统提醒：只在“非自己发的、且当前没正看着这条消息”时弹横幅并闪任务栏。</summary>
-    private void MaybeNotify(ChatMessageDto dto)
-    {
-        if (dto.FromId == _myId || dto.Recalled)
-        {
-            return;
-        }
-        if (dto.Room == _room && MainWindow.IsActive)
-        {
-            return;
-        }
-
-        ChatNotifyService.Initialize();
-        var preview = dto.EffectiveKind switch
-        {
-            "image" => "[图片]",
-            "video" => "[视频]",
-            "file" => "[文件] " + (dto.FileName ?? string.Empty),
-            "sticker" => "[表情]",
-            _ => dto.Content
-        };
-        if (preview.Length > 80)
-        {
-            preview = preview[..80] + "…";
-        }
-
-        var title = Loc.Tf(dto.Room == "group" ? "Chat_Notify_Group" : "Chat_Notify_Private", dto.FromName);
-        ChatNotifyService.Notify(title, preview);
     }
 
     private void OnMessageRecalled(long id)

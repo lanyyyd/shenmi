@@ -108,6 +108,7 @@ internal static class GatewayLauncher
         {
             return false;
         }
+        ChildProcessJob.Assign(_process);
 
         for (var i = 0; i < 30; i++)
         {
@@ -132,6 +133,7 @@ internal static class GatewayLauncher
             if (_process is { HasExited: false })
             {
                 _process.Kill(entireProcessTree: true);
+                _process.WaitForExit(3000);
             }
         }
         catch

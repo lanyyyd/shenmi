@@ -57,8 +57,18 @@ public sealed partial class MainWindow : Window
         };
         CustomBackgroundMedia.SetMediaPlayer(_backgroundPlayer);
 
-        // 关窗口时停掉背景视频，及时释放解码器与文件句柄。
-        Closed += (_, _) => StopBackgroundVideo();
+        // 通知需要回到 UI 线程，这里把窗口的派发器交给常驻聊天服务。
+        ChatHub.AttachUi(DispatcherQueue);
+
+        // 关窗口时：停背景视频释放解码器与文件句柄；断开常驻聊天；
+        // 结束本机拉起的网关 / 云游戏引擎（含 PyInstaller onefile 派生的子进程与浏览器驱动），避免残留。
+        Closed += (_, _) =>
+        {
+            StopBackgroundVideo();
+            ChatHub.Shutdown();
+            EngineLauncher.Stop();
+            GatewayLauncher.Stop();
+        };
 
         // 背景层按系统能力挑：Windows 11 用 Mica；Windows 10 没有 Mica（设了会让边框/内容缝隙透出黑色，
         // 表现为四周黑边），退一档到桌面亚克力；都不可用就不设背景层，由根 Grid 的渐变兜底。

@@ -63,6 +63,8 @@ internal static class SessionState
         Apply();
         SaveValue("username", username);
         SaveValue("nickname", nickname);
+        // 登录即拉起常驻聊天连接：之后切到任何页面都能收消息并弹系统提醒。
+        ChatHub.EnsureStarted();
     }
 
     public static void EnterOffline(string localToken, string nickname)
@@ -79,6 +81,7 @@ internal static class SessionState
     /// <summary>退出登录：清空令牌与用户名（供「远程账号」退出使用）。</summary>
     public static void Clear()
     {
+        ChatHub.Shutdown();
         Token = null;
         Username = string.Empty;
         Nickname = string.Empty;

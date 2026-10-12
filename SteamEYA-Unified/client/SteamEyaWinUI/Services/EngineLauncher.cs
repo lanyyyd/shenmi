@@ -82,6 +82,7 @@ internal static class EngineLauncher
         {
             return false;
         }
+        ChildProcessJob.Assign(_process);
 
         for (var i = 0; i < 20; i++)
         {
@@ -97,6 +98,27 @@ internal static class EngineLauncher
             }
         }
         return false;
+    }
+
+    /// <summary>关闭本机引擎进程（含 PyInstaller onefile 派生出的子进程与驱动）。应用退出时调用。</summary>
+    public static void Stop()
+    {
+        try
+        {
+            if (_process is { HasExited: false })
+            {
+                _process.Kill(entireProcessTree: true);
+                _process.WaitForExit(3000);
+            }
+        }
+        catch
+        {
+            // 忽略：进程可能已自行退出
+        }
+        finally
+        {
+            _process = null;
+        }
     }
 
     private static async Task<bool> HealthAsync(CancellationToken ct)

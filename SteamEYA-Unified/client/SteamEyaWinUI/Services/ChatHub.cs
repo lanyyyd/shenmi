@@ -1,0 +1,134 @@
+using SteamEyaWinUI.Localization;
+using SteamEyaWinUI.Models;
+
+namespace SteamEyaWinUI.Services;
+
+/// <summary>
+/// 聊天室常驻服务：登录成功后即建立并保持 WebSocket 连接，用户切到其它页面（登录/云游戏/设置…）
+/// 也能继续收消息并弹系统通知 + 闪烁任务栏。
+///
+/// 已读语义：本服务只收消息、不提交已读；只有用户真正停在聊天室页并查看对应房间时，
+/// 才由 <c>ChatPage</c> 调用 /api/read 提交已读。
+/// </summary>
+internal static class ChatHub
+{
+    private static readonly ChatService Instance = new();
+    private static Microsoft.UI.Dispatching.DispatcherQueue? _ui;
+    private static bool _wired;
+    private static int _myId;
+
+    public static ChatService Chat => Instance;
+
+    /// <summary>聊天室页是否打开（由 ChatPage 维护，用于抑制“正在看”时的通知）。</summary>
+    public static bool IsChatPageOpen { get; set; }
+
+    /// <summary>聊天室页当前查看的房间（由 ChatPage 维护）。</summary>
+    public static string CurrentRoom { get; set; } = "group";
+
+    /// <summary>由 MainWindow 创建时注入 UI 线程派发器（通知需要回到 UI 线程）。</summary>
+    public static void AttachUi(Microsoft.UI.Dispatching.DispatcherQueue ui) => _ui = ui;
+
+    /// <summary>当前登录用户 id（供判断“是不是自己发的”）。</summary>
+    public static void SetMyId(int id) => _myId = id;
+
+    /// <summary>
+    /// 建立常驻连接（幂等）。登录成功后调用。
+    /// 离线/局域网模式没有统一账号，不启动常驻连接。
+    /// </summary>
+    public static void EnsureStarted()
+    {
+        if (SessionState.Offline || string.IsNullOrWhiteSpace(SessionState.Token))
+        {
+            return;
+        }
+
+        Wire();
+        if (_ui is { } ui)
+        {
+            ui.TryEnqueue(ChatNotifyService.Initialize);
+        }
+        else
+        {
+            ChatNotifyService.Initialize();
+        }
+
+        Instance.Start();
+        _ = LoadMyIdAsync();
+    }
+
+    /// <summary>退出登录 / 切换模式时停掉连接。</summary>
+    public static void Shutdown()
+    {
+        _myId = 0;
+        _ = Instance.StopAsync();
+    }
+
+    private static void Wire()
+    {
+        if (_wired)
+        {
+            return;
+        }
+        _wired = true;
+        Instance.MessageReceived += OnMessageReceived;
+    }
+
+    private static async Task LoadMyIdAsync()
+    {
+        if (_myId != 0)
+        {
+            return;
+        }
+        try
+        {
+            var me = await Instance.GetMeAsync();
+            _myId = me?.Id ?? 0;
+        }
+        catch
+        {
+            // 取不到身份不影响收消息，只是可能对自己发的不做抑制。
+        }
+    }
+
+    private static void OnMessageReceived(ChatMessageDto dto)
+    {
+        if (dto.Recalled || (_myId != 0 && dto.FromId == _myId))
+        {
+            return;
+        }
+
+        // 正在聊天室页、窗口在前台、且正是当前房间 —— 用户看得到，不必打扰。
+        if (IsChatPageOpen && MainWindow.IsActive && dto.Room == CurrentRoom)
+        {
+            return;
+        }
+
+        if (_ui is { } ui)
+        {
+            ui.TryEnqueue(() => Notify(dto));
+        }
+        else
+        {
+            Notify(dto);
+        }
+    }
+
+    private static void Notify(ChatMessageDto dto)
+    {
+        var preview = dto.EffectiveKind switch
+        {
+            "image" => "[图片]",
+            "video" => "[视频]",
+            "file" => "[文件] " + (dto.FileName ?? string.Empty),
+            "sticker" => "[表情]",
+            _ => dto.Content
+        };
+        if (preview.Length > 80)
+        {
+            preview = preview[..80] + "…";
+        }
+
+        var title = Loc.Tf(dto.Room == "group" ? "Chat_Notify_Group" : "Chat_Notify_Private", dto.FromName);
+        ChatNotifyService.Notify(title, preview);
+    }
+}
