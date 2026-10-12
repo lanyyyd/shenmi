@@ -13,6 +13,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from .. import security
 from ..db import execute, query_one
 from ..deps import get_current_user, user_public
+# 邀请码校验与网页版注册共用同一套逻辑（同一张 invite_codes 表与后台开关）。
+from .chat import _consume_invite, _get_invite_config
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -50,6 +52,11 @@ def register(request: Request, payload: dict = Body(...)):
         raise HTTPException(400, "密码至少 6 位")
     if query_one("SELECT id FROM users WHERE username = ?", (username,)):
         raise HTTPException(409, "用户名已被占用")
+    # 与网页版注册保持一致：后台开启「注册必须填写邀请码」时校验并消耗邀请码。
+    if _get_invite_config().get("required"):
+        inv = _consume_invite(str(payload.get("inviteCode", "")))
+        if inv.get("error"):
+            raise HTTPException(400, inv["error"])
     uid = _create_user(username, password, nickname, email, _client_ip(request))
     u = query_one("SELECT * FROM users WHERE id = ?", (uid,))
     return _login_result(u)

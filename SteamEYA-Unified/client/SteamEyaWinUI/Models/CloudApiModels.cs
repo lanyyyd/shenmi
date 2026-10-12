@@ -34,6 +34,9 @@ internal sealed class AuthRequestDto
     public string Username { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
     public string? Nickname { get; set; }
+
+    /// <summary>注册邀请码（与网页版注册共用；后台未开启必填时可留空）。</summary>
+    public string? InviteCode { get; set; }
 }
 
 internal sealed class LocalLoginRequestDto

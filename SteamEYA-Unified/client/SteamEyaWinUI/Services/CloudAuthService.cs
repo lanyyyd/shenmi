@@ -17,9 +17,16 @@ internal sealed class CloudAuthService
                 CloudApiJsonContext.Default.AuthRequestDto), ct);
 
     public async Task<(bool ok, AuthResultDto? result, string? error)> RegisterAsync(
-        string username, string password, string nickname, CancellationToken ct = default)
+        string username, string password, string nickname, string inviteCode = "", CancellationToken ct = default)
         => await PostAsync("/api/auth/register",
-            JsonSerializer.Serialize(new AuthRequestDto { Username = username, Password = password, Nickname = nickname },
+            JsonSerializer.Serialize(
+                new AuthRequestDto
+                {
+                    Username = username,
+                    Password = password,
+                    Nickname = nickname,
+                    InviteCode = string.IsNullOrWhiteSpace(inviteCode) ? null : inviteCode.Trim()
+                },
                 CloudApiJsonContext.Default.AuthRequestDto), ct);
 
     /// <summary>离线模式：仅凭昵称登录本地网关。</summary>

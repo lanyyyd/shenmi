@@ -63,6 +63,7 @@ public sealed partial class LoginWindow : Window
         }
         var register = TabRegister.IsChecked == true;
         NickBox.Visibility = register ? Visibility.Visible : Visibility.Collapsed;
+        InviteBox.Visibility = register ? Visibility.Visible : Visibility.Collapsed;
         RememberBox.Visibility = register ? Visibility.Collapsed : Visibility.Visible;
         AuthButton.Content = register ? "注 册" : "登 录";
     }
@@ -82,7 +83,7 @@ public sealed partial class LoginWindow : Window
         {
             var register = TabRegister.IsChecked == true;
             var (ok, result, error) = register
-                ? await _auth.RegisterAsync(username, password, NickBox.Text.Trim())
+                ? await _auth.RegisterAsync(username, password, NickBox.Text.Trim(), InviteBox.Text)
                 : await _auth.LoginAsync(username, password);
 
             if (!ok || result?.AccessToken is null)
