@@ -204,7 +204,7 @@
                             <StackPanel MaxWidth="600" Spacing="2">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <TextBlock
-                                        Text="{x:Bind HeaderText}"
+                                        Text="{x:Bind MetaText}"
                                         Style="{StaticResource CaptionTextBlockStyle}"
                                         Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                                     <Button

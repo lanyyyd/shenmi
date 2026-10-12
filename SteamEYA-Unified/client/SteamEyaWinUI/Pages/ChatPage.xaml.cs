@@ -419,7 +419,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             Image = image,
             Recalled = dto.Recalled,
             CanRecall = isMine && !dto.Recalled && DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - dto.CreatedAt <= 120000,
-            HeaderText = isMine
+            MetaText = isMine
                 ? FormatTime(dto.CreatedAt)
                 : $"{dto.FromName} · {FormatTime(dto.CreatedAt)}",
             RowAlign = isMine ? HorizontalAlignment.Right : HorizontalAlignment.Left,
@@ -552,7 +552,7 @@ public sealed class ChatMessageVm
     public ImageSource? Image { get; set; }
     public bool Recalled { get; set; }
     public bool CanRecall { get; set; }
-    public string HeaderText { get; set; } = string.Empty;
+    public string MetaText { get; set; } = string.Empty;
     public HorizontalAlignment RowAlign { get; set; }
     public Brush BubbleBrush { get; set; } = null!;
     public Brush ContentForeground { get; set; } = null!;
