@@ -304,7 +304,12 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     // ---------------- 发送 / 上传 ----------------
     private async void Send_Click(object sender, RoutedEventArgs e) => await SendTextAsync();
 
-    private async void InputBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    /// <summary>
+    /// 回车发送、Shift+回车换行。这里必须用 PreviewKeyDown：AcceptsReturn=true 的 TextBox
+    /// 会在类处理阶段把 Enter 先标记为已处理（用来插入换行），普通 KeyDown 事件收不到，
+    /// 表现就是「回车没反应」。PreviewKeyDown 走隧道阶段，早于控件自身处理。
+    /// </summary>
+    private async void InputBox_PreviewKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
         if (e.Key == VirtualKey.Enter && !IsShiftDown())
         {
@@ -845,13 +850,25 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         return $"{value:0.#}{units[i]}";
     }
 
-    /// <summary>滚动到最新一条消息。</summary>
+    /// <summary>
+    /// 滚动到最新一条消息。刚插入条目时 ListView 的容器还没生成，同步调用 ScrollIntoView 会落空，
+    /// 所以先 UpdateLayout 强制完成一次布局，并把滚动放到下一个消息循环低优先级执行。
+    /// </summary>
     private void ScrollToBottom()
     {
-        if (_messages.Count > 0)
+        if (_messages.Count == 0)
         {
-            MessagesList.ScrollIntoView(_messages[^1]);
+            return;
         }
+        _dispatcher.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (_messages.Count == 0)
+            {
+                return;
+            }
+            MessagesList.UpdateLayout();
+            MessagesList.ScrollIntoView(_messages[^1], ScrollIntoViewAlignment.Default);
+        });
     }
 
     // ---------------- 局域网互传 ----------------

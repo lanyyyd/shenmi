@@ -41,15 +41,35 @@ internal sealed class LocalLoginRequestDto
     public string Nickname { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// 云游戏账号状态（GET /api/cloud/my）。服务端直接透出数据库列名（snake_case），
+/// 而 JSON 上下文用 camelCase 策略不会转换下划线，故 snake_case 字段必须显式映射，
+/// 否则 FreeDuration 等恒为 null（剩余免费时长就不显示）。
+/// </summary>
 internal sealed class CloudGameItem
 {
     public string Game { get; set; } = string.Empty;
+
+    [JsonPropertyName("updated_at")]
     public long UpdatedAt { get; set; }
+
     public int? Valid { get; set; }
+
+    [JsonPropertyName("checked_at")]
     public long CheckedAt { get; set; }
+
     public string Nickname { get; set; } = string.Empty;
+
+    [JsonPropertyName("game_uid")]
     public string GameUid { get; set; } = string.Empty;
+
+    /// <summary>剩余免费时长（分钟）；null 表示未查询到（未检测过 / 该游戏无此概念）。</summary>
+    [JsonPropertyName("free_duration")]
     public int? FreeDuration { get; set; }
+
+    /// <summary>剩余总时长（分钟，完美世界类游戏才有）。</summary>
+    [JsonPropertyName("total_duration")]
+    public int? TotalDuration { get; set; }
 
     public string GameName => Game switch
     {
@@ -71,7 +91,9 @@ internal sealed class CloudGameItem
         ? "暂无账号信息"
         : $"{Nickname} {GameUid}".Trim();
 
-    public string DurationText => FreeDuration is null ? string.Empty : $"剩余免费 {FreeDuration} 分钟";
+    public string DurationText => FreeDuration is not null
+        ? $"剩余免费 {FreeDuration} 分钟"
+        : (TotalDuration is not null ? $"剩余时长 {TotalDuration} 分钟" : string.Empty);
 }
 
 internal sealed class CloudMyDto
@@ -84,7 +106,10 @@ internal sealed class CloudDownloadDto
 {
     public bool Ok { get; set; }
     public JsonElement? Cookies { get; set; }
+
+    [JsonPropertyName("combo_token")]
     public string? ComboToken { get; set; }
+
     public string? Msg { get; set; }
 }
 
@@ -95,6 +120,13 @@ internal sealed class CloudActionResultDto
     public string? Detail { get; set; }
     public bool? Valid { get; set; }
     public string? Nickname { get; set; }
+
+    /// <summary>检测（/api/cloud/check）随结果一并返回的剩余免费时长（分钟）。</summary>
+    [JsonPropertyName("free_duration")]
+    public int? FreeDuration { get; set; }
+
+    [JsonPropertyName("total_duration")]
+    public int? TotalDuration { get; set; }
 }
 
 internal sealed class SyncMessage

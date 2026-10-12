@@ -306,7 +306,7 @@
                         MaxHeight="120"
                         AcceptsReturn="True"
                         TextWrapping="Wrap"
-                        KeyDown="InputBox_KeyDown"
+                        PreviewKeyDown="InputBox_PreviewKeyDown"
                         TextChanged="InputBox_TextChanged" />
 
                     <Button x:Name="StickerButton" Grid.Column="1" VerticalAlignment="Bottom">
@@ -339,9 +339,9 @@
                                             <DataTemplate x:DataType="local:StickerVm">
                                                 <Image
                                                     Source="{x:Bind Image}"
-                                                    Width="72"
-                                                    Height="72"
-                                                    Margin="4"
+                                                    Width="44"
+                                                    Height="44"
+                                                    Margin="3"
                                                     Stretch="UniformToFill" />
                                             </DataTemplate>
                                         </GridView.ItemTemplate>

@@ -28,7 +28,31 @@ public sealed partial class CloudGamePage : Page
         {
             await EnsureEngineAsync();
             await RefreshStatusAsync();
+            await AutoCheckAsync();
         };
+    }
+
+    /// <summary>
+    /// 打开页面时对已上传 Cookie 的游戏并行检测一次。
+    /// 剩余免费时长只在「检测」时由服务端向游戏方查询并回写，不检测就一直是空，
+    /// 这里主动刷新一次，用户进来即可看到时长。
+    /// </summary>
+    private async Task AutoCheckAsync()
+    {
+        var games = _status.Where(g => g.Valid != 0).Select(g => g.Game).ToArray();
+        if (games.Length == 0)
+        {
+            return;
+        }
+        try
+        {
+            await Task.WhenAll(games.Select(g => _cloud.CheckAsync(g)));
+            await RefreshStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"自动检测云游戏 Cookie 失败：{ex.Message}");
+        }
     }
 
     private async Task EnsureEngineAsync()
@@ -129,8 +153,11 @@ public sealed partial class CloudGamePage : Page
     private async void OnCheck(object sender, RoutedEventArgs e)
     {
         var result = await _cloud.CheckAsync(CurrentGame);
-        ShowInfo(result.Ok ? $"检测完成：{result.Detail}" : (result.Msg ?? "检测失败"),
-            result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Error);
+        // 服务端 check 的 msg 已含「有效，剩余免费时长 X 分钟」，优先展示它（detail 只有 upload 才返回）。
+        var text = result.Ok
+            ? (result.Msg ?? result.Detail ?? "检测完成")
+            : (result.Msg ?? result.Detail ?? "检测失败");
+        ShowInfo(text, result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Error);
         await RefreshStatusAsync();
     }
 
