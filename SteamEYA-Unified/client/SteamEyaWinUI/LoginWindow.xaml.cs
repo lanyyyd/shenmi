@@ -55,7 +55,7 @@ public sealed partial class LoginWindow : Window
         }
     }
 
-    private void OnTabChanged(object sender, RoutedEventArgs e)
+    private async void OnTabChanged(object sender, RoutedEventArgs e)
     {
         if (NickBox is null)
         {
@@ -63,9 +63,26 @@ public sealed partial class LoginWindow : Window
         }
         var register = TabRegister.IsChecked == true;
         NickBox.Visibility = register ? Visibility.Visible : Visibility.Collapsed;
-        InviteBox.Visibility = register ? Visibility.Visible : Visibility.Collapsed;
         RememberBox.Visibility = register ? Visibility.Collapsed : Visibility.Visible;
         AuthButton.Content = register ? "注 册" : "登 录";
+
+        // 邀请码框与网页版注册保持一致：由后台「注册必须填写邀请码」开关决定是否显示。
+        InviteBox.Visibility = Visibility.Collapsed;
+        if (register)
+        {
+            await RefreshInviteAsync();
+        }
+    }
+
+    /// <summary>按服务端开关决定是否显示邀请码输入框（读的是聊天室后台的同一个设置）。</summary>
+    private async Task RefreshInviteAsync()
+    {
+        var info = await _auth.GetInviteInfoAsync();
+        InviteBox.Visibility = info.Required ? Visibility.Visible : Visibility.Collapsed;
+        if (info.Required && info.Available == 0)
+        {
+            ShowInfo("当前注册需要邀请码，但暂无可用邀请码，请联系管理员", InfoBarSeverity.Warning);
+        }
     }
 
     private async void OnAuthClick(object sender, RoutedEventArgs e)

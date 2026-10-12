@@ -39,6 +39,14 @@ internal sealed class AuthRequestDto
     public string? InviteCode { get; set; }
 }
 
+/// <summary>GET /api/invite-info：注册是否需要邀请码、是否还有可用码（与网页版注册共用同一开关）。</summary>
+internal sealed class InviteInfoDto
+{
+    public bool Ok { get; set; }
+    public bool Required { get; set; }
+    public int Available { get; set; }
+}
+
 internal sealed class LocalLoginRequestDto
 {
     public string Nickname { get; set; } = string.Empty;
@@ -176,6 +184,7 @@ internal sealed class SyncMarkRequest
 [JsonSerializable(typeof(UserDto))]
 [JsonSerializable(typeof(AuthResultDto))]
 [JsonSerializable(typeof(AuthRequestDto))]
+[JsonSerializable(typeof(InviteInfoDto))]
 [JsonSerializable(typeof(LocalLoginRequestDto))]
 [JsonSerializable(typeof(CloudMyDto))]
 [JsonSerializable(typeof(CloudDownloadDto))]
