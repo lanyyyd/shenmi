@@ -15,8 +15,15 @@ internal sealed class UserDto
 /// <summary>统一账号登录/注册/离线登录的返回。</summary>
 internal sealed class AuthResultDto
 {
+    // 服务端返回下划线命名（access_token / token_type），而 JSON 上下文用 camelCase 策略，
+    // 不会把下划线转成驼峰——必须显式映射，否则 AccessToken 永远反序列化为 null，
+    // 登录流程会因 result.AccessToken is null 而弹出兜底文案「操作失败」。
+    [JsonPropertyName("access_token")]
     public string? AccessToken { get; set; }
+
+    [JsonPropertyName("token_type")]
     public string? TokenType { get; set; }
+
     public UserDto? User { get; set; }
     public string? Msg { get; set; }
     public string? Detail { get; set; }

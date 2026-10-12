@@ -69,10 +69,46 @@ jobs:
       - name: Publish (Native AOT / self-contained)
         run: dotnet publish "$env:PROJECT" -c Release -r win-x64 -p:Platform=x64 -o publish
 
-      - name: Upload artifact
+      - name: 清理符号文件（省安装包体积）
+        shell: pwsh
+        run: Get-ChildItem -Path publish -Filter *.pdb -File -ErrorAction SilentlyContinue | Remove-Item -Force
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      # 把 Native AOT 自包含发布目录整体压成单个安装包 exe：用户只需下载/运行这一个文件。
+      - name: Package installer (single setup.exe)
+        shell: pwsh
+        run: |
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) {
+            foreach ($c in @(
+              (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 7\ISCC.exe"),
+              (Join-Path $env:ProgramFiles "Inno Setup 7\ISCC.exe"),
+              (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
+              (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe")
+            )) { if ($c -and (Test-Path -LiteralPath $c)) { $iscc = $c; break } }
+          }
+          if (-not $iscc) { throw "ISCC.exe (Inno Setup) 未找到" }
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $version = "0.1.${{ github.run_number }}"
+          & $iscc "/DAppVersion=$version" "/DPublishDir=$env:GITHUB_WORKSPACE\publish" "/DOutputDir=$env:GITHUB_WORKSPACE\artifacts" "$env:GITHUB_WORKSPACE\build\installer\SteamEYA.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+          Get-ChildItem artifacts
+
+      - name: Upload installer (single exe)
         uses: actions/upload-artifact@v4
         with:
-          name: SteamEyaWinUI-win-x64
+          name: SteamEYA-setup-win-x64
+          path: artifacts/*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload portable folder (解压即用)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SteamEyaWinUI-win-x64-portable
           path: publish/**
           if-no-files-found: error
           retention-days: 14
