@@ -44,8 +44,7 @@
             <Expander
                 Grid.Row="1"
                 Margin="12,0,12,8"
-                HorizontalAlignment="Stretch"
-                Header="{x:Bind Strings.Get('Chat_Lan_Title'), Mode=OneWay}">
+                HorizontalAlignment="Stretch">
                 <StackPanel Spacing="6">
                     <TextBlock
                         x:Name="LanSelfText"
