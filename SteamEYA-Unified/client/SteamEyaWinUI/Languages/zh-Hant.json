@@ -295,6 +295,8 @@
     "Login_Remote_Desc": "登入統一帳號後，從伺服器領取一個帳號並一鍵登入本機 Steam。",
     "Login_Remote_Username_Placeholder": "輸入統一帳號使用者名稱",
     "Login_Remote_Password_Placeholder": "輸入密碼",
+    "Login_Remote_Invite_Label": "邀請碼（註冊用）",
+    "Login_Remote_Invite_Placeholder": "後台開啟邀請碼時必填，未開啟可留空",
     "Login_Remote_Btn_Login": "登入",
     "Login_Remote_Btn_Register": "註冊",
     "Login_Remote_Btn_Get": "取得帳號並一鍵上號",

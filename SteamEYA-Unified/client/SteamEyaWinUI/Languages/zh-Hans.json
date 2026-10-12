@@ -293,6 +293,8 @@
     "Login_Remote_Desc": "登录统一账号后，从服务器领取一个账号并一键登录到本机 Steam。",
     "Login_Remote_Username_Placeholder": "输入统一账号用户名",
     "Login_Remote_Password_Placeholder": "输入密码",
+    "Login_Remote_Invite_Label": "邀请码（注册用）",
+    "Login_Remote_Invite_Placeholder": "后台开启邀请码时必填，未开启可留空",
     "Login_Remote_Btn_Login": "登录",
     "Login_Remote_Btn_Register": "注册",
     "Login_Remote_Btn_Get": "获取账号并一键上号",

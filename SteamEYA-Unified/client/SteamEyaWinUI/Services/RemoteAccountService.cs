@@ -32,10 +32,12 @@ internal sealed class RemoteAccountService
         return new RemoteAuthResult(true, "登录成功");
     }
 
-    /// <summary>注册统一账号，成功后自动登录并写入会话。</summary>
-    public async Task<RemoteAuthResult> RegisterAsync(string username, string password, CancellationToken cancellationToken = default)
+    /// <summary>注册统一账号，成功后自动登录并写入会话。邀请码为空时由服务端按后台开关决定是否必需。</summary>
+    public async Task<RemoteAuthResult> RegisterAsync(
+        string username, string password, string inviteCode = "", CancellationToken cancellationToken = default)
     {
-        var (ok, result, error) = await _auth.RegisterAsync(username, password, username, cancellationToken);
+        var (ok, result, error) = await _auth.RegisterAsync(
+            username, password, username, inviteCode, cancellationToken);
         if (!ok || result?.AccessToken is null)
         {
             return new RemoteAuthResult(false, error ?? "注册失败");

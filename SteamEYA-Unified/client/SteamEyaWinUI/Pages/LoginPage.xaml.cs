@@ -893,7 +893,8 @@ public sealed partial class LoginPage : Page, INotifyPropertyChanged
         var cancellationToken = AppState.BeginBusyOperation();
         try
         {
-            var result = await AppState.RemoteAccountService.RegisterAsync(username, password, cancellationToken);
+            var result = await AppState.RemoteAccountService.RegisterAsync(
+                username, password, RemoteInviteBox.Text, cancellationToken);
             if (result.IsSuccess)
             {
                 RemotePasswordBox.Password = string.Empty;

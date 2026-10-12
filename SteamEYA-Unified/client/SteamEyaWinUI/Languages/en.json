@@ -295,6 +295,8 @@
     "Login_Remote_Desc": "Sign in with your unified account, then fetch an account from the server and log into Steam on this PC in one click.",
     "Login_Remote_Username_Placeholder": "Unified account username",
     "Login_Remote_Password_Placeholder": "Password",
+    "Login_Remote_Invite_Label": "Invite code (for sign-up)",
+    "Login_Remote_Invite_Placeholder": "Required when enabled by the admin; leave blank otherwise",
     "Login_Remote_Btn_Login": "Sign in",
     "Login_Remote_Btn_Register": "Register",
     "Login_Remote_Btn_Get": "Fetch account & log in",

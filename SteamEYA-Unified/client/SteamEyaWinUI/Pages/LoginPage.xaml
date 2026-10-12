@@ -62,6 +62,13 @@
                                 Header="{x:Bind Strings.Get('Creds_Field_Password'), Mode=OneWay}"
                                 PlaceholderText="{x:Bind Strings.Get('Login_Remote_Password_Placeholder'), Mode=OneWay}" />
 
+                            <!-- 邀请码：与网页版注册共用后台开关，未开启必填时可留空 -->
+                            <TextBox
+                                x:Name="RemoteInviteBox"
+                                Header="{x:Bind Strings.Get('Login_Remote_Invite_Label'), Mode=OneWay}"
+                                PlaceholderText="{x:Bind Strings.Get('Login_Remote_Invite_Placeholder'), Mode=OneWay}"
+                                IsSpellCheckEnabled="False" />
+
                             <Grid ColumnSpacing="10">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
