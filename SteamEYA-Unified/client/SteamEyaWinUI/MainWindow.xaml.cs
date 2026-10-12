@@ -137,6 +137,10 @@ public sealed partial class MainWindow : Window
     {
         try
         {
+            // 离线期间的消息存在「本机网关」的数据库里，联网启动时网关并未运行，
+            // 必须先把它拉起来，否则读 /api/sync/pending 必然失败、同步被静默跳过。
+            await GatewayLauncher.EnsureStartedAsync(SessionState.Nickname);
+
             var (ok, pushed, msg) = await new SyncService().TrySyncAsync();
             if (ok && pushed > 0)
             {
