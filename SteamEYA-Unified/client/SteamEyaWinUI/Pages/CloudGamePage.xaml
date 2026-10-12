@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="SteamEyaWinUI.Pages.CloudGamePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:models="using:SteamEyaWinUI.Models">
+
+    <Grid Padding="28,16,28,20" ColumnSpacing="16">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="360" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- 左：操作区 -->
+        <StackPanel Grid.Column="0" Spacing="10">
+            <TextBlock Text="云游戏上号" Style="{StaticResource TitleTextBlockStyle}" />
+            <ComboBox x:Name="GameCombo" Header="游戏" HorizontalAlignment="Stretch" SelectionChanged="OnGameChanged" />
+            <ComboBox x:Name="BrowserCombo" Header="浏览器" HorizontalAlignment="Stretch" SelectedIndex="0">
+                <ComboBoxItem Content="Edge（推荐）" Tag="edge" />
+                <ComboBoxItem Content="Chrome" Tag="chrome" />
+                <ComboBoxItem Content="360极速浏览器" Tag="360" />
+            </ComboBox>
+
+            <Button
+                x:Name="LoginButton"
+                Content="一键上号"
+                HorizontalAlignment="Stretch"
+                Style="{StaticResource AccentButtonStyle}"
+                Click="OnOneClickLogin" />
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button x:Name="OpenBrowserButton" Content="更新 Cookie（打开浏览器）" Click="OnOpenBrowser" />
+                <Button x:Name="CaptureButton" Content="抓取并上传" Click="OnCaptureUpload" />
+            </StackPanel>
+            <Button x:Name="CheckButton" Content="检测 Cookie 有效性" HorizontalAlignment="Stretch" Click="OnCheck" />
+
+            <InfoBar x:Name="PageInfoBar" IsOpen="False" IsClosable="True" />
+
+            <TextBlock
+                Text="提示：云端模式下会自动取用你账号已上传的 Cookie 一键上号；若提示失效，请先「更新 Cookie」。"
+                TextWrapping="Wrap"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+
+        <!-- 右：状态面板 -->
+        <Grid Grid.Column="1" RowSpacing="8">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10">
+                <TextBlock Text="账号状态" Style="{StaticResource SubtitleTextBlockStyle}" />
+                <Button Content="刷新" Click="OnRefreshStatus" />
+            </StackPanel>
+            <ListView x:Name="StatusList" Grid.Row="1" SelectionMode="None">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="models:CloudGameItem">
+                        <Border
+                            Padding="12,10"
+                            Margin="0,0,0,6"
+                            CornerRadius="8"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderThickness="1"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="{x:Bind GameName}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                <TextBlock Text="{x:Bind InfoText}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <TextBlock Text="{x:Bind StatusText}" />
+                                    <TextBlock Text="{x:Bind DurationText}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Grid>
+    </Grid>
+</Page>

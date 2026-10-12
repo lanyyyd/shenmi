@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-mode="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>云游戏账号管理 · 管理后台</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+body{overflow:auto}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:26px 18px 60px}
+.top{display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.top h1{font-size:21px;font-weight:800;letter-spacing:-.3px}
+.top .spacer{flex:1}
+.btn{padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;transition:.2s;
+  background:var(--panel);border:1px solid var(--line);color:var(--text)}
+html[data-theme="light"] .btn:not(.pri){background:#fff}
+.btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn.pri{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;border:none}
+.btn.pri:hover{filter:brightness(1.08);color:#fff}
+.btn.danger{color:#EF4444}
+.btn.danger:hover{border-color:#EF4444}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:20px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;
+  backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur)}
+html[data-theme="light"] .stat{background:#fff;box-shadow:var(--shadow)}
+.stat .k{font-size:12px;color:var(--muted);margin-bottom:6px}
+.stat .v{font-size:23px;font-weight:800;color:var(--primary)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur)}
+html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
+.card-h{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.card-h h2{font-size:15px;font-weight:700}
+.card-h .spacer{flex:1}
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl th{text-align:left;padding:11px 14px;font-size:11.5px;font-weight:700;color:var(--hint);
+  border-bottom:1px solid var(--line);white-space:nowrap;letter-spacing:.4px}
+.tbl td{padding:12px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:var(--panel-soft)}
+html[data-theme="light"] .tbl tr:hover td{background:#FAFBFC}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
+.chip{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:6px;font-weight:700;
+  background:var(--primary-l);color:var(--primary)}
+.chip.gray{background:var(--panel-soft);color:var(--hint);border:1px solid var(--line)}
+.chip.red{background:rgba(239,68,68,.12);color:#EF4444}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts button{font-size:12px;padding:5px 10px;border-radius:7px;background:var(--panel-soft);
+  border:1px solid var(--line);transition:.15s;color:var(--muted)}
+html[data-theme="light"] .acts button{background:#F7F8FA}
+.acts button:hover{border-color:var(--primary);color:var(--primary)}
+.acts button.dg:hover{border-color:#EF4444;color:#EF4444}
+.modal{position:fixed;inset:0;z-index:150;background:var(--mask);display:none;align-items:center;justify-content:center;padding:20px}
+.modal.on{display:flex}
+.modal-c{width:100%;max-width:460px;max-height:88vh;overflow:auto;background:var(--panel);border:1px solid var(--line);
+  border-radius:18px;padding:26px 24px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+html[data-theme="light"] .modal-c{background:#fff;box-shadow:var(--shadow-lg)}
+.modal-c h3{font-size:17px;font-weight:700;margin-bottom:16px}
+.modal-c .field{margin-bottom:13px}
+.modal-c .field label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px}
+.modal-c .field input,.modal-c .field select{width:100%;padding:11px 13px;border-radius:10px;
+  font-size:14.5px;background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c .field select{background:#FAFBFC}
+.modal-c .field select:focus{border-color:var(--primary);box-shadow:0 0 0 3.5px var(--primary-l)}
+.modal-f{display:flex;gap:10px;margin-top:18px}
+.modal-f .btn{flex:1;text-align:center}
+.deny{text-align:center;padding:80px 20px}.deny h2{font-size:19px;margin-bottom:10px}
+.deny p{color:var(--muted);font-size:13.5px;margin-bottom:20px}
+.empty{text-align:center;color:var(--hint);padding:40px 0;font-size:13.5px}
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(20px);z-index:300;
+  padding:11px 20px;border-radius:11px;font-size:13.5px;font-weight:600;color:#fff;
+  background:linear-gradient(135deg,var(--primary),var(--primary-2));opacity:0;pointer-events:none;transition:.25s}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+@media(max-width:760px){
+  .tbl thead{display:none}
+  .tbl tr{display:block;border-bottom:1px solid var(--line);padding:10px 4px}
+  .tbl td{display:flex;justify-content:space-between;gap:10px;border:none;padding:5px 12px}
+  .tbl td::before{content:attr(data-l);color:var(--hint);font-size:11.5px;font-weight:700;flex-shrink:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>☁️ 云游戏账号管理</h1>
+    <span id="whoami" class="mono"></span>
+    <div class="spacer"></div>
+    <button class="btn" onclick="location.href='/admin.html'">← 聊天管理</button>
+    <button class="btn" onclick="location.href='/admin-steam.html'">Steam 账号</button>
+    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
+    <button class="btn danger" onclick="logout()">退出</button>
+  </div>
+
+  <div id="deny" class="deny hidden">
+    <h2>需要管理员权限</h2>
+    <p>请用管理员账号登录后再访问本页</p>
+    <button class="btn pri" onclick="location.href='/'">去登录</button>
+  </div>
+
+  <div id="main" class="hidden">
+    <div class="stats">
+      <div class="stat"><div class="k">Cookie 记录</div><div class="v" id="sTotal">0</div></div>
+      <div class="stat"><div class="k">有效记录</div><div class="v" id="sValid">0</div></div>
+      <div class="stat"><div class="k">上传用户</div><div class="v" id="sUsers">0</div></div>
+      <div class="stat"><div class="k">上号次数</div><div class="v" id="sLogs">0</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">
+        <h2>云端 Cookie / 账号列表</h2>
+        <div class="spacer"></div>
+        <select id="gameFilter" onchange="renderTable()"
+          style="padding:8px 12px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);font-size:13px;color:var(--text)">
+          <option value="">全部游戏</option>
+          <option value="genshin">原神</option>
+          <option value="starrail">星穹铁道</option>
+          <option value="yihuan">异环</option>
+          <option value="bilibili">哔哩哔哩</option>
+        </select>
+        <input id="filter" placeholder="搜索用户 / 昵称 / UID…" oninput="renderTable()"
+          style="padding:8px 12px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);font-size:13px;color:var(--text)">
+        <button class="btn" onclick="loadAll()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr>
+            <th>用户</th><th>游戏</th><th>账号昵称</th><th>UID</th><th>Cookie 状态</th><th>剩余免费时长</th><th>更新时间</th><th>检测时间</th><th>操作</th>
+          </tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>上号日志</h2>
+        <div class="spacer"></div>
+        <button class="btn" onclick="loadLogs()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr><th>时间</th><th>用户</th><th>游戏</th><th>IP</th></tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 编辑：分配给用户 -->
+<div class="modal" id="mAssign">
+  <div class="modal-c">
+    <h3>编辑云端账号</h3>
+    <input type="hidden" id="asId">
+    <div class="field"><label>游戏 / 账号</label><input id="asInfo" readonly></div>
+    <div class="field"><label>分配给用户（选择已有用户）</label>
+      <select id="asUser"><option value="">请选择用户</option></select>
+      <div class="mono" style="margin-top:6px;line-height:1.7">
+        说明：云端账号按「用户 + 游戏」唯一。分配给某用户后，该账号即归属该用户（原用户不再拥有）。若目标用户已有同一游戏的云端账号，需先删除或调整后再分配。
+      </div>
+    </div>
+    <div class="form-msg" id="asMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mAssign')">取消</button>
+      <button class="btn pri" onclick="saveAssign()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script>
+let ACCOUNTS = [], USERS = [];
+const $ = (id) => document.getElementById(id);
+let tTimer; function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(tTimer); tTimer=setTimeout(()=>t.classList.remove('on'),2200); }
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const GAME = { genshin:'原神', starrail:'星穹铁道', yihuan:'异环', bilibili:'哔哩哔哩' };
+function secToTime(ts){ if(!ts) return '—'; const d=new Date(ts*1000); const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function validChip(v){ return v===1 ? '<span class="chip">有效</span>' : v===0 ? '<span class="chip red">失效</span>' : '<span class="chip gray">未检测</span>'; }
+
+/* 主题（与聊天管理页共用 localStorage key） */
+const ICONS={auto:'🌗 自动',light:'☀️ 浅色',dark:'🌙 深色'};
+function resolveTheme(mode){ if(mode==='light')return 'light'; if(mode==='dark')return 'dark';
+  const h=new Date().getHours(); return (h>=6&&h<18)?'light':'dark'; }
+function applyTheme(mode){ document.documentElement.dataset.mode=mode; document.documentElement.dataset.theme=resolveTheme(mode);
+  try{localStorage.setItem('chat_theme_mode',mode)}catch(e){} const b=$('themeBtn'); if(b) b.textContent=ICONS[mode]; }
+function cycleTheme(){ const o=['auto','light','dark']; const cur=document.documentElement.dataset.mode||'auto';
+  applyTheme(o[(o.indexOf(cur)+1)%o.length]); }
+(function(){ let s='auto'; try{s=localStorage.getItem('chat_theme_mode')||'auto'}catch(e){} applyTheme(s); })();
+
+/* 数据 */
+async function loadStats(){
+  const r = await fetch('/api/cloud/admin/stats'); if(!r.ok) return;
+  const d = await r.json();
+  $('sTotal').textContent = d.total; $('sValid').textContent = d.valid;
+  $('sUsers').textContent = d.users; $('sLogs').textContent = d.logs;
+}
+async function loadAccounts(){
+  const r = await fetch('/api/cloud/admin/accounts');
+  const d = await r.json();
+  ACCOUNTS = (d && d.accounts) || [];
+  renderTable();
+}
+function renderTable(){
+  const kw = ($('filter').value||'').trim().toLowerCase();
+  const game = $('gameFilter').value;
+  const list = ACCOUNTS.filter(a => (!game || a.game===game)
+    && (!kw || (a.username||'').toLowerCase().includes(kw) || (a.user_name||'').toLowerCase().includes(kw)
+        || (a.nickname||'').toLowerCase().includes(kw) || (a.game_uid||'').toLowerCase().includes(kw)));
+  if(!list.length){ $('tbody').innerHTML = '<tr><td colspan="9" class="empty">暂无云端 Cookie 记录</td></tr>'; return; }
+  $('tbody').innerHTML = list.map(a=>`<tr>
+    <td data-l="用户">${esc(a.user_name||a.username||'—')} <span class="mono">@${esc(a.username||'')}</span></td>
+    <td data-l="游戏"><span class="chip gray">${esc(a.game_name||GAME[a.game]||a.game)}</span></td>
+    <td data-l="账号昵称"><span class="mono">${esc(a.nickname||'—')}</span></td>
+    <td data-l="UID"><span class="mono">${esc(a.game_uid||'—')}</span></td>
+    <td data-l="Cookie 状态">${validChip(a.valid)}</td>
+    <td data-l="剩余免费时长">${a.free_duration==null?'—':esc(a.free_duration)+' 分钟'}</td>
+    <td data-l="更新时间"><span class="mono">${secToTime(a.updated_at)}</span></td>
+    <td data-l="检测时间"><span class="mono">${secToTime(a.checked_at)}</span></td>
+    <td data-l="操作"><div class="acts">
+      <button onclick="openEdit(${a.id})">编辑</button>
+      <button onclick="checkOne(${a.id})">检测有效性</button>
+      <button class="dg" onclick="delOne(${a.id},'${esc(a.user_name||a.username||'')}','${esc(a.game_name||a.game)}')">删除</button>
+    </div></td>
+  </tr>`).join('');
+}
+async function loadLogs(){
+  const r = await fetch('/api/cloud/admin/logs'); if(!r.ok) return;
+  const d = await r.json();
+  const list = (d && d.logs) || [];
+  if(!list.length){ $('logBody').innerHTML = '<tr><td colspan="4" class="empty">暂无日志</td></tr>'; return; }
+  $('logBody').innerHTML = list.map(l=>`<tr>
+    <td data-l="时间"><span class="mono">${secToTime(l.login_at)}</span></td>
+    <td data-l="用户">${esc(l.user_name||l.username||'—')}</td>
+    <td data-l="游戏">${esc(GAME[l.game]||l.game||'—')}</td>
+    <td data-l="IP"><span class="mono">${esc(l.client_ip||'—')}</span></td>
+  </tr>`).join('');
+}
+function loadAll(){ loadUsers(); loadStats(); loadAccounts(); loadLogs(); }
+
+/* 用户下拉（编辑时选择把该云端账号分配给谁） */
+async function loadUsers(){
+  const r = await fetch('/api/cloud/admin/users'); if(!r.ok) return;
+  const d = await r.json();
+  USERS = (d && d.users) || [];
+}
+function fillUserOptions(currentId){
+  const sel = $('asUser');
+  sel.innerHTML = '<option value="">请选择用户</option>' + USERS.map(u=>{
+    const label = (u.nickname && u.nickname !== u.username) ? `${u.username}（${u.nickname}）` : u.username;
+    return `<option value="${u.id}"${u.id===currentId?' selected':''}>${esc(label)}${u.is_active?'':'（已封禁）'}</option>`;
+  }).join('');
+}
+async function openEdit(id){
+  const a = ACCOUNTS.find(x=>x.id===id); if(!a) return;
+  if(!USERS.length) await loadUsers();
+  $('asId').value = a.id;
+  $('asInfo').value = `${a.game_name||GAME[a.game]||a.game} · ${a.user_name||a.username||''}${a.nickname?'（'+a.nickname+'）':''}`;
+  fillUserOptions(a.user_id);
+  $('asMsg').textContent = '';
+  $('mAssign').classList.add('on');
+}
+async function saveAssign(){
+  const uid = Number($('asUser').value||0);
+  if(!uid){ $('asMsg').textContent='请选择要分配的用户'; $('asMsg').className='form-msg err'; return; }
+  const r = await fetch('/api/cloud/admin/accounts/'+$('asId').value, {
+    method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user_id:uid})});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ $('asMsg').textContent=(d.detail||d.error||'分配失败'); $('asMsg').className='form-msg err'; return; }
+  toast('已分配给 '+(d.username||'该用户')); closeModal('mAssign'); loadAll();
+}
+function closeModal(id){ $(id).classList.remove('on'); }
+
+async function checkOne(id){
+  toast('检测中…');
+  const r = await fetch('/api/cloud/admin/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ toast(d.detail||'检测失败'); return; }
+  toast(d.msg || '检测完成');
+  loadAll();
+}
+async function delOne(id, user, game){
+  if(!confirm(`确定删除「${user}」的「${game}」云端 Cookie ？`)) return;
+  const r = await fetch('/api/cloud/admin/accounts/'+id,{method:'DELETE'});
+  if(!r.ok){ toast('删除失败'); return; }
+  toast('已删除'); loadAll();
+}
+async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
+
+/* 启动 */
+(async function(){
+  const r = await fetch('/api/me'); const d = await r.json();
+  if(!d.ok || !d.user || !d.user.isAdmin){ $('deny').classList.remove('hidden'); return; }
+  $('whoami').textContent = '@' + d.user.username;
+  $('main').classList.remove('hidden');
+  loadAll();
+})();
+</script>
+</body>
+</html>

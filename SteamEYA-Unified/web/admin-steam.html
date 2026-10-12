@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-mode="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Steam 账号管理 · 管理后台</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+body{overflow:auto}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:26px 18px 60px}
+.top{display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.top h1{font-size:21px;font-weight:800;letter-spacing:-.3px}
+.top .spacer{flex:1}
+.btn{padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;transition:.2s;
+  background:var(--panel);border:1px solid var(--line);color:var(--text)}
+html[data-theme="light"] .btn:not(.pri){background:#fff}
+.btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn.pri{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;border:none}
+.btn.pri:hover{filter:brightness(1.08);color:#fff}
+.btn.danger{color:#EF4444}
+.btn.danger:hover{border-color:#EF4444}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:20px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;
+  backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur)}
+html[data-theme="light"] .stat{background:#fff;box-shadow:var(--shadow)}
+.stat .k{font-size:12px;color:var(--muted);margin-bottom:6px}
+.stat .v{font-size:23px;font-weight:800;color:var(--primary)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur)}
+html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
+.card-h{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.card-h h2{font-size:15px;font-weight:700}
+.card-h .spacer{flex:1}
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl th{text-align:left;padding:11px 14px;font-size:11.5px;font-weight:700;color:var(--hint);
+  border-bottom:1px solid var(--line);white-space:nowrap;letter-spacing:.4px}
+.tbl td{padding:12px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:var(--panel-soft)}
+html[data-theme="light"] .tbl tr:hover td{background:#FAFBFC}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
+.tok{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle}
+.chip{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:6px;font-weight:700;
+  background:var(--primary-l);color:var(--primary)}
+.chip.gray{background:var(--panel-soft);color:var(--hint);border:1px solid var(--line)}
+.chip.red{background:rgba(239,68,68,.12);color:#EF4444}
+.chip.blue{background:rgba(59,130,246,.14);color:#3B82F6}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts button{font-size:12px;padding:5px 10px;border-radius:7px;background:var(--panel-soft);
+  border:1px solid var(--line);transition:.15s;color:var(--muted)}
+html[data-theme="light"] .acts button{background:#F7F8FA}
+.acts button:hover{border-color:var(--primary);color:var(--primary)}
+.acts button.dg:hover{border-color:#EF4444;color:#EF4444}
+.modal{position:fixed;inset:0;z-index:150;background:var(--mask);display:none;align-items:center;justify-content:center;padding:20px}
+.modal.on{display:flex}
+.modal-c{width:100%;max-width:460px;max-height:88vh;overflow:auto;background:var(--panel);border:1px solid var(--line);
+  border-radius:18px;padding:26px 24px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+html[data-theme="light"] .modal-c{background:#fff;box-shadow:var(--shadow-lg)}
+.modal-c h3{font-size:17px;font-weight:700;margin-bottom:16px}
+.modal-c .field{margin-bottom:13px}
+.modal-c .field label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px}
+.modal-c .field input,.modal-c .field select,.modal-c .field textarea{width:100%;padding:11px 13px;border-radius:10px;
+  font-size:14.5px;background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c .field textarea{background:#FAFBFC}
+.modal-c .field input:focus,.modal-c .field textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3.5px var(--primary-l)}
+.modal-f{display:flex;gap:10px;margin-top:18px}
+.modal-f .btn{flex:1;text-align:center}
+.deny{text-align:center;padding:80px 20px}.deny h2{font-size:19px;margin-bottom:10px}
+.deny p{color:var(--muted);font-size:13.5px;margin-bottom:20px}
+.empty{text-align:center;color:var(--hint);padding:40px 0;font-size:13.5px}
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(20px);z-index:300;
+  padding:11px 20px;border-radius:11px;font-size:13.5px;font-weight:600;color:#fff;
+  background:linear-gradient(135deg,var(--primary),var(--primary-2));opacity:0;pointer-events:none;transition:.25s}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+@media(max-width:760px){
+  .tbl thead{display:none}
+  .tbl tr{display:block;border-bottom:1px solid var(--line);padding:10px 4px}
+  .tbl td{display:flex;justify-content:space-between;gap:10px;border:none;padding:5px 12px}
+  .tbl td::before{content:attr(data-l);color:var(--hint);font-size:11.5px;font-weight:700;flex-shrink:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>🎮 Steam 账号管理</h1>
+    <span id="whoami" class="mono"></span>
+    <div class="spacer"></div>
+    <button class="btn" onclick="location.href='/admin.html'">← 聊天管理</button>
+    <button class="btn" onclick="location.href='/admin-cloud.html'">云游戏账号</button>
+    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
+    <button class="btn danger" onclick="logout()">退出</button>
+  </div>
+
+  <div id="deny" class="deny hidden">
+    <h2>需要管理员权限</h2>
+    <p>请用管理员账号登录后再访问本页</p>
+    <button class="btn pri" onclick="location.href='/'">去登录</button>
+  </div>
+
+  <div id="main" class="hidden">
+    <div class="stats">
+      <div class="stat"><div class="k">账号总数</div><div class="v" id="sTotal">0</div></div>
+      <div class="stat"><div class="k">可用账号</div><div class="v" id="sAvail">0</div></div>
+      <div class="stat"><div class="k">使用中</div><div class="v" id="sUse">0</div></div>
+      <div class="stat"><div class="k">注册用户</div><div class="v" id="sUsers">0</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">
+        <h2>账号列表</h2>
+        <div class="spacer"></div>
+        <input id="filter" placeholder="搜索账号 / SteamID / 分配用户…" oninput="renderTable()"
+          style="padding:8px 12px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);font-size:13px;color:var(--text)">
+        <button class="btn pri" onclick="openAdd()">＋ 添加账号</button>
+        <button class="btn" onclick="openImport()">批量导入</button>
+        <button class="btn" onclick="loadAll()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr>
+            <th>账号名</th><th>SteamID</th><th>状态</th><th>分配用户</th><th>昵称</th><th>EYA 令牌</th><th>更新时间</th><th>操作</th>
+          </tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>操作日志</h2>
+        <div class="spacer"></div>
+        <button class="btn" onclick="loadLogs()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr><th>时间</th><th>用户</th><th>操作</th><th>详情</th><th>IP</th></tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 编辑账号 -->
+<div class="modal" id="mEdit">
+  <div class="modal-c">
+    <h3>编辑账号</h3>
+    <input type="hidden" id="eId">
+    <div class="field"><label>账号名</label><input id="eName" placeholder="Steam 账户名"></div>
+    <div class="field"><label>EYA 令牌</label><textarea id="eToken" rows="3" placeholder="eyAi… 开头的 JWT"></textarea></div>
+    <div class="field"><label>SteamID64</label><input id="eSid" placeholder="选填"></div>
+    <div class="field"><label>分配用户（选择已有用户）</label>
+      <select id="eAssigned"><option value="">（不分配，任何用户可取）</option></select>
+    </div>
+    <div class="field"><label>状态</label>
+      <select id="eStatus">
+        <option value="available">可用（available）</option>
+        <option value="in_use">使用中（in_use）</option>
+        <option value="expired">已过期（expired）</option>
+      </select>
+      <div class="mono" style="margin-top:6px;line-height:1.7">
+        取号规则：只有「可用」的账号会被用户取到；「使用中」不会再被其他用户领取（已分配给某用户时，仅该用户可取到自己那个）。
+      </div>
+    </div>
+    <div class="form-msg" id="eMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mEdit')">取消</button>
+      <button class="btn pri" onclick="saveEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 添加账号 -->
+<div class="modal" id="mAdd">
+  <div class="modal-c">
+    <h3>添加账号</h3>
+    <div class="field"><label>账号名</label><input id="aName" placeholder="Steam 账户名"></div>
+    <div class="field"><label>EYA 令牌</label><textarea id="aToken" rows="3" placeholder="eyAi… 开头的 JWT"></textarea></div>
+    <div class="field"><label>SteamID64</label><input id="aSid" placeholder="选填"></div>
+    <div class="field"><label>分配用户（可留空）</label>
+      <select id="aAssigned"><option value="">（不分配，任何用户可取）</option></select>
+      <div class="mono" style="margin-top:6px;line-height:1.7">
+        指定用户后该账号按「使用中」入库，只有该用户能取到；留空则为「可用」，任何用户可领取。
+      </div>
+    </div>
+    <div class="form-msg" id="aMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mAdd')">取消</button>
+      <button class="btn pri" onclick="doAdd()">添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- 批量导入 -->
+<div class="modal" id="mImport">
+  <div class="modal-c">
+    <h3>批量导入账号</h3>
+    <div class="field">
+      <label>每行一个账号，格式：账号名,EYA令牌,SteamID,分配用户（后三项可留空）</label>
+      <textarea id="iText" rows="8" placeholder="account1,eyAi...,76561198000000000,user1&#10;account2,eyAi..."></textarea>
+    </div>
+    <div class="field">
+      <label>或粘贴 JSON 数组：[{"account_name":"a","eya_token":"…","steam_id":"…","assigned_user":"…"}]</label>
+      <textarea id="iJson" rows="4" placeholder='留空则以上面每行一个的格式导入'></textarea>
+    </div>
+    <div class="form-msg" id="iMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mImport')">取消</button>
+      <button class="btn pri" onclick="doImport()">导入</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script>
+let ACCOUNTS = [], USERS = {};
+const $ = (id) => document.getElementById(id);
+let tTimer; function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(tTimer); tTimer=setTimeout(()=>t.classList.remove('on'),2200); }
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtTime(ts){ if(!ts) return '—'; const d=new Date(ts); const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+/* created_at 可能是 ISO 字符串或毫秒时间戳 */
+function fmtAny(v){ if(!v) return '—'; const d=new Date(v); if(isNaN(d)) return esc(v);
+  const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+const STATUS = { available:['可用','chip'], in_use:['使用中','chip blue'], expired:['已过期','chip red'] };
+
+/* 主题（与聊天管理页共用 localStorage key） */
+const ICONS={auto:'🌗 自动',light:'☀️ 浅色',dark:'🌙 深色'};
+function resolveTheme(mode){ if(mode==='light')return 'light'; if(mode==='dark')return 'dark';
+  const h=new Date().getHours(); return (h>=6&&h<18)?'light':'dark'; }
+function applyTheme(mode){ document.documentElement.dataset.mode=mode; document.documentElement.dataset.theme=resolveTheme(mode);
+  try{localStorage.setItem('chat_theme_mode',mode)}catch(e){} const b=$('themeBtn'); if(b) b.textContent=ICONS[mode]; }
+function cycleTheme(){ const o=['auto','light','dark']; const cur=document.documentElement.dataset.mode||'auto';
+  applyTheme(o[(o.indexOf(cur)+1)%o.length]); }
+(function(){ let s='auto'; try{s=localStorage.getItem('chat_theme_mode')||'auto'}catch(e){} applyTheme(s); })();
+
+/* 数据 */
+async function loadStats(){
+  const r = await fetch('/api/steam/admin/stats'); if(!r.ok) return;
+  const d = await r.json();
+  $('sTotal').textContent = d.total_accounts;
+  $('sAvail').textContent = d.available_accounts;
+  $('sUse').textContent = d.in_use_accounts;
+  $('sUsers').textContent = d.total_users;
+}
+async function loadUsers(){
+  const r = await fetch('/api/steam/admin/users'); if(!r.ok) return;
+  const list = await r.json();
+  USERS = {}; (list||[]).forEach(u=>USERS[u.username]=u.id);
+}
+async function loadAccounts(){
+  const r = await fetch('/api/steam/admin/accounts'); const list = await r.json();
+  ACCOUNTS = Array.isArray(list) ? list : [];
+  renderTable();
+}
+function renderTable(){
+  const kw = ($('filter').value||'').trim().toLowerCase();
+  const list = ACCOUNTS.filter(a => !kw
+    || (a.account_name||'').toLowerCase().includes(kw)
+    || (a.steam_id||'').toLowerCase().includes(kw)
+    || (a.assigned_to||'').toLowerCase().includes(kw));
+  if(!list.length){ $('tbody').innerHTML = '<tr><td colspan="8" class="empty">还没有账号，点右上角「批量导入」</td></tr>'; return; }
+  $('tbody').innerHTML = list.map(a=>{
+    const st = STATUS[a.status] || ['未知','chip gray'];
+    return `<tr>
+      <td data-l="账号名"><b>${esc(a.account_name)}</b></td>
+      <td data-l="SteamID"><span class="mono">${esc(a.steam_id||'—')}</span></td>
+      <td data-l="状态"><span class="${st[1]}">${st[0]}</span></td>
+      <td data-l="分配用户">${esc(a.assigned_to||'—')}</td>
+      <td data-l="昵称"><span class="mono">${esc(a.persona_name||'—')}</span></td>
+      <td data-l="EYA 令牌"><span class="mono tok" title="${esc(a.eya_token||'')}">${esc((a.eya_token||'').slice(0,24))}${(a.eya_token||'').length>24?'…':''}</span></td>
+      <td data-l="更新时间"><span class="mono">${fmtAny(a.updated_at||a.created_at)}</span></td>
+      <td data-l="操作"><div class="acts">
+        <button onclick="copyToken(${a.id})">复制令牌</button>
+        <button onclick="openEdit(${a.id})">编辑</button>
+        <button class="dg" onclick="delAccount(${a.id},'${esc(a.account_name)}')">删除</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+async function loadLogs(){
+  const r = await fetch('/api/steam/admin/logs'); if(!r.ok) return;
+  const list = await r.json();
+  if(!list.length){ $('logBody').innerHTML = '<tr><td colspan="5" class="empty">暂无日志</td></tr>'; return; }
+  $('logBody').innerHTML = list.map(l=>`<tr>
+    <td data-l="时间"><span class="mono">${fmtAny(l.created_at)}</span></td>
+    <td data-l="用户">${esc(l.username||'—')}</td>
+    <td data-l="操作">${esc(l.action||'')}</td>
+    <td data-l="详情">${esc(l.detail||'')}</td>
+    <td data-l="IP"><span class="mono">${esc(l.ip_address||'—')}</span></td>
+  </tr>`).join('');
+}
+function loadAll(){ loadUsers(); loadStats(); loadAccounts(); loadLogs(); }
+
+/* 编辑 / 添加 共用的用户下拉：数据来自统一账号库的全部用户（按需拉取） */
+function fillUserSelect(selId, current){
+  const sel = $(selId);
+  const names = Object.keys(USERS).sort((a,b)=>a.localeCompare(b,'zh'));
+  let html = '<option value="">（不分配，任何用户可取）</option>'
+    + names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  if(current && !USERS[current]) html += `<option value="${esc(current)}">${esc(current)}（用户已删除）</option>`;
+  sel.innerHTML = html;
+  sel.value = current || '';
+}
+async function openEdit(id){
+  const a = ACCOUNTS.find(x=>x.id===id); if(!a) return;
+  if(!Object.keys(USERS).length) await loadUsers();
+  fillUserSelect('eAssigned', a.assigned_to||'');
+  $('eId').value = a.id; $('eName').value = a.account_name||''; $('eToken').value = a.eya_token||'';
+  $('eSid').value = a.steam_id||''; $('eStatus').value = a.status||'available';
+  $('eMsg').textContent=''; $('mEdit').classList.add('on');
+}
+/* 添加单条账号 */
+async function openAdd(){
+  if(!Object.keys(USERS).length) await loadUsers();
+  fillUserSelect('aAssigned','');
+  $('aName').value=''; $('aToken').value=''; $('aSid').value='';
+  $('aMsg').textContent=''; $('aMsg').className='form-msg'; $('mAdd').classList.add('on');
+}
+async function doAdd(){
+  const body = {
+    account_name: $('aName').value.trim(), eya_token: $('aToken').value.trim(),
+    steam_id: $('aSid').value.trim(), assigned_user: $('aAssigned').value,
+  };
+  const r = await fetch('/api/steam/admin/accounts',
+    {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ $('aMsg').textContent = d.detail||'添加失败'; $('aMsg').className='form-msg err'; return; }
+  toast('已添加账号'); closeModal('mAdd'); loadAll();
+}
+async function saveEdit(){
+  const body = {
+    account_name: $('eName').value.trim(), eya_token: $('eToken').value.trim(),
+    steam_id: $('eSid').value.trim(), assigned_to: $('eAssigned').value.trim(), status: $('eStatus').value,
+  };
+  const r = await fetch('/api/steam/admin/accounts/'+$('eId').value,
+    {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ $('eMsg').textContent = d.detail||'保存失败'; $('eMsg').className='form-msg err'; return; }
+  toast('已保存'); closeModal('mEdit'); loadAll();
+}
+async function delAccount(id, name){
+  if(!confirm('确定删除账号 '+name+' ？')) return;
+  const r = await fetch('/api/steam/admin/accounts/'+id,{method:'DELETE'});
+  if(!r.ok){ toast('删除失败'); return; }
+  toast('已删除'); loadAll();
+}
+function copyToken(id){
+  const a = ACCOUNTS.find(x=>x.id===id); if(!a) return;
+  const done = ()=>toast('已复制令牌');
+  try{ navigator.clipboard.writeText(a.eya_token||'').then(done, done); }catch(e){ done(); }
+}
+/* 导入 */
+function openImport(){ $('iText').value=''; $('iJson').value=''; $('iMsg').textContent=''; $('mImport').classList.add('on'); }
+async function doImport(){
+  let accounts = [];
+  const json = $('iJson').value.trim();
+  if(json){
+    try{ accounts = JSON.parse(json); }catch(e){ $('iMsg').textContent='JSON 解析失败：'+e.message; $('iMsg').className='form-msg err'; return; }
+  } else {
+    for(const line of $('iText').value.split('\n')){
+      const t = line.trim(); if(!t) continue;
+      const p = t.split(',');
+      accounts.push({ account_name:(p[0]||'').trim(), eya_token:(p[1]||'').trim(), steam_id:(p[2]||'').trim(), assigned_user:(p[3]||'').trim() });
+    }
+  }
+  if(!accounts.length){ $('iMsg').textContent='没有可导入的数据'; $('iMsg').className='form-msg err'; return; }
+  const r = await fetch('/api/steam/admin/accounts/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accounts})});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ $('iMsg').textContent=d.detail||'导入失败'; $('iMsg').className='form-msg err'; return; }
+  $('iMsg').textContent = d.message || ('已导入 '+d.imported+' 条'); $('iMsg').className='form-msg ok';
+  toast('导入完成'); setTimeout(()=>{ closeModal('mImport'); loadAll(); }, 500);
+}
+function closeModal(id){ $(id).classList.remove('on'); }
+async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
+
+/* 启动 */
+(async function(){
+  const r = await fetch('/api/me'); const d = await r.json();
+  if(!d.ok || !d.user || !d.user.isAdmin){ $('deny').classList.remove('hidden'); return; }
+  $('whoami').textContent = '@' + d.user.username;
+  $('main').classList.remove('hidden');
+  await loadUsers();
+  loadAll();
+})();
+</script>
+</body>
+</html>

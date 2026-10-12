@@ -1,0 +1,24 @@
+# ---- .NET / WinUI ----
+bin/
+obj/
+publish/
+*.user
+*.suo
+.vs/
+.idea/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ---- 运行时数据 / 敏感配置 ----
+.env
+*.db
+*.log
+uploads/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db

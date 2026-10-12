@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-mode="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>神秘の飞鸽传信</title>
+<link rel="stylesheet" href="/css/style.css?v=20">
+</head>
+<body>
+
+<!-- ================= 登录 / 注册 ================= -->
+<div id="login">
+  <div class="login-card">
+    <div class="login-logo"><svg viewBox="0 0 24 24"><path d="M12 3C7 3 3 6.6 3 11c0 2.5 1.3 4.7 3.4 6.2L5.5 21l4-1.7c.8.2 1.6.3 2.5.3 5 0 9-3.6 9-8s-4-8-9-8z"/></svg></div>
+    <div class="login-title">神秘の飞鸽传信</div>
+    <div class="login-sub">注册后即可加入群聊 · 支持图片与文件</div>
+    <div class="tabs">
+      <button id="tabLogin" class="on" onclick="switchTab('login')">登录</button>
+      <button id="tabReg" onclick="switchTab('reg')">注册</button>
+    </div>
+    <div class="field login-only"><label>用户名</label><input id="loginUser" placeholder="输入用户名" autocomplete="username"></div>
+    <div class="field login-only"><label>密码</label><input id="loginPass" type="password" placeholder="输入密码" autocomplete="current-password"></div>
+    <div class="field reg-only"><label>用户名</label><input id="regUser" placeholder="2-20 位，中文/字母/数字" autocomplete="off"></div>
+    <div class="field reg-only"><label>昵称（选填）</label><input id="regNick" maxlength="20" placeholder="不填则与账号相同" autocomplete="off"></div>
+    <div class="field reg-only"><label>密码</label><input id="regPass" type="password" placeholder="至少 6 位" autocomplete="new-password"></div>
+    <div class="field reg-only" id="regInviteWrap"><label>邀请码</label><input id="regInvite" placeholder="请输入管理员提供的邀请码" autocomplete="off">
+      <div id="inviteTip" style="display:none;font-size:12px;color:#EF4444;margin-top:6px"></div>
+    </div>
+    <div class="field reg-only"><label>邮箱（选填）</label><input id="regMail" placeholder="you@example.com" autocomplete="off"></div>
+    <button class="btn-main" id="authBtn" onclick="doAuth()">进入聊天室</button>
+    <div class="form-msg" id="formMsg"></div>
+  </div>
+</div>
+
+<!-- ================= 主界面 ================= -->
+<div id="app">
+  <div class="mask" id="mask" onclick="closeSidebar()"></div>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="sb-head">
+      <div class="sb-title"><span class="dot"></span>飞鸽传信</div>
+      <div class="online-count">当前在线 <b id="onlineNum">0</b> 人 · <span id="deviceNum">0</span> 台设备</div>
+    </div>
+    <div class="sb-search">
+      <svg viewBox="0 0 24 24"><path d="M15.5 14h-.8l-.3-.3a6.5 6.5 0 1 0-.7.7l.3.3v.8l5 5 1.5-1.5-5-5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z"/></svg>
+      <input id="searchInput" placeholder="搜索用户…" oninput="renderUsers()">
+    </div>
+    <div class="sb-list" id="userList"></div>
+    <div class="sb-foot">
+      <button class="theme-btn" id="themeBtn" onclick="cycleTheme()">
+        <svg id="themeIcon" viewBox="0 0 24 24"></svg>
+        <div class="tm-txt"><div class="tm-main" id="themeName">自动</div><div class="tm-sub" id="themeDesc">按时间切换</div></div>
+      </button>
+      <button class="logout-btn" onclick="logout()" title="退出登录">
+        <svg viewBox="0 0 24 24"><path d="M17 7l-1.4 1.4L18.2 11H8v2h10.2l-2.6 2.6L17 17l5-5-5-5zM4 5h8V3H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8v-2H4V5z"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <main class="chat">
+    <header class="chat-head">
+      <button class="back-btn" onclick="openSidebar()"><svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg></button>
+      <div class="ch-avatar" id="chAvatar">群</div>
+      <div class="ch-info">
+        <div class="ch-name" id="chName">群聊大厅</div>
+        <div class="ch-status" id="chStatus"><span class="live">连接中…</span></div>
+      </div>
+<div style="display:flex;gap:5px">
+  <button class="icon-btn" onclick="openSearch()" title="搜索聊天记录">
+    <svg viewBox="0 0 24 24"><path d="M15.5 14h-.8l-.3-.3a6.5 6.5 0 1 0-.7.7l.3.3v.8l5 5 1.5-1.5-5-5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z"/></svg>
+  </button>
+  <button class="icon-btn" onclick="openProfile()" title="个人中心">
+    <svg viewBox="0 0 24 24"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 2c-3.1 0-9.5 1.6-9.5 4.7V21h19v-2.3c0-3.1-6.4-4.7-9.5-4.7z"/></svg>
+  </button>
+        <button class="icon-btn" id="adminEntry" onclick="location.href='/admin.html'" title="管理后台" style="display:none">
+          <svg viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.4 9.3-8 10-4.6-.7-8-5-8-10V6l8-4z"/></svg>
+        </button>
+        <button class="icon-btn" onclick="openSidebar()" title="成员"><svg viewBox="0 0 24 24"><path d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm-8 0a3 3 0 1 0-3-3 3 3 0 0 0 3 3zm8 2c-2.7 0-8 1.3-8 4v3h16v-3c0-2.7-5.3-4-8-4zM8 13c-.4 0-.9 0-1.4.1A6.2 6.2 0 0 1 8 15v3H2v-2.5C2 13.6 5.6 13 8 13z"/></svg></button>
+      </div>
+    </header>
+
+    <div class="msgs" id="msgs"><div class="empty-tip">加载中…</div></div>
+
+    <div class="composer">
+      <div class="composer-tools">
+        <button class="tool" onclick="openStickers()" title="表情包">
+          <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0 0 20c1.1 0 2-.9 2-2 0-.5-.2-.9-.5-1.3-.3-.3-.5-.7-.5-1.2 0-1.1.9-2 2-2h2.4A4.6 4.6 0 0 0 22 10.9C21.5 5.9 17.2 2 12 2zM6.5 13A1.5 1.5 0 1 1 8 11.5 1.5 1.5 0 0 1 6.5 13zm3-4A1.5 1.5 0 1 1 11 7.5 1.5 1.5 0 0 1 9.5 9zm5 0A1.5 1.5 0 1 1 16 7.5 1.5 1.5 0 0 1 14.5 9zm3 4A1.5 1.5 0 1 1 19 11.5 1.5 1.5 0 0 1 17.5 13z"/></svg>
+        </button>
+        <button class="tool" onclick="document.getElementById('fileInput').click()" title="发送图片 / 视频">
+          <svg viewBox="0 0 24 24"><path d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5 4.5 6H5l3.5-4.5z"/></svg>
+        </button>
+        <button class="tool" onclick="document.getElementById('anyInput').click()" title="发送文件">
+          <svg viewBox="0 0 24 24"><path d="M16.5 6v11.5a4 4 0 0 1-8 0V6a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V7H10v9.5a2.5 2.5 0 0 0 5 0V6a4 4 0 0 0-8 0v11.5a5.5 5.5 0 0 0 11 0V6h-1.5z"/></svg>
+        </button>
+        <span id="upTip" style="font-size:11.5px;color:var(--hint);margin-left:6px"></span>
+      </div>
+      <div class="mention-pop" id="mentionPop"></div>
+      <div class="at-menu" id="atMenu"></div>
+      <div class="input-row">
+        <textarea id="input" rows="1" placeholder="输入消息…（输入 @ 可提醒他人 · Ctrl+V 粘贴图片）" onkeydown="onKey(event)"></textarea>
+        <button class="send-btn" onclick="send()"><svg viewBox="0 0 24 24"><path d="M2.5 21L23 12 2.5 3v7l15 2-15 2z"/></svg></button>
+      </div>
+      <div class="paste-hint">💡 支持 Ctrl+V 直接粘贴图片 / 文件</div>
+    </div>
+  </main>
+</div>
+
+<input type="file" id="fileInput" accept="image/*,video/*" class="hidden">
+<input type="file" id="anyInput" class="hidden">
+<div id="toast"></div>
+
+<!-- 通知权限申请卡片 -->
+<div class="notify-ask" id="notifyAsk">
+  <div class="na-title" id="naTitle">🔔 打开通知权限</div>
+  <div class="na-sub" id="naSub"></div>
+  <img class="na-img" id="naImg" alt="点击浏览器地址右方的铃铛图标，再允许此网站发送通知" title="点击放大查看"
+       data-src="/uploads/images/4cfe3200d08f35327e29b4702c518333.png"
+       onclick="enlargeNotifyImg(this)">
+  <div class="na-btns">
+    <button class="na-ok" id="naOk">允许通知</button>
+    <button class="na-no" id="naNo">以后再说</button>
+  </div>
+</div>
+<div id="lightbox" onclick="this.classList.remove('on')"><img id="lightboxImg" alt=""></div>
+
+<!-- ================= 个人中心 ================= -->
+<div id="profileModal" class="modal" onclick="if(event.target===this)closeProfile()">
+  <div class="profile-card">
+    <div class="profile-head"><span>个人中心</span><button onclick="closeProfile()" title="关闭">&times;</button></div>
+    <div class="profile-body">
+      <div class="pf-item"><label>账号（不可修改）</label><div class="pf-val" id="pfUsername"></div></div>
+      <div class="pf-item"><label>头像（点击选择图片，或直接 Ctrl+V 粘贴）</label>
+        <div class="pf-avatar" id="pfAvatar" onclick="document.getElementById('avatarInput').click()" title="点击上传 / Ctrl+V 粘贴"></div>
+      </div>
+      <div class="pf-item"><label>昵称（显示在聊天中）</label><input id="pfNick" maxlength="20" placeholder="输入新昵称，留空则与账号相同"></div>
+      <button class="pf-btn" onclick="saveNickname()">保存昵称</button>
+      <div class="pf-divider">消息通知</div>
+      <div class="pf-row">
+        <div class="pf-row-left">
+          <div class="pf-row-t">🔔 系统通知横幅</div>
+          <div class="pf-row-s" id="notifyState">尚未授权，打开右侧开关即可申请权限</div>
+        </div>
+        <button class="sw" id="pfNotifySw" onclick="toggleNotifyPref()" title="开启 / 关闭系统通知" aria-label="系统通知开关"></button>
+      </div>
+      <div class="pf-item" style="margin-top:13px"><label>通知内容</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="f-btn" id="nfDetail" onclick="setNotifyMode('detail')">发送人 + 消息内容</button>
+          <button class="f-btn" id="nfSummary" onclick="setNotifyMode('summary')">你有X条新消息</button>
+        </div>
+      </div>
+      <div class="pf-divider">修改密码</div>
+      <div class="pf-item"><label>原密码</label><input id="pfOld" type="password" autocomplete="current-password"></div>
+      <div class="pf-item"><label>新密码（至少 6 位）</label><input id="pfNew" type="password" autocomplete="new-password"></div>
+      <button class="pf-btn" onclick="savePassword()">修改密码</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 搜索聊天记录 ================= -->
+<div id="searchModal" class="modal" onclick="if(event.target===this)closeSearch()">
+  <div class="search-card">
+    <div class="profile-head"><span>搜索聊天记录</span><button onclick="closeSearch()" title="关闭">&times;</button></div>
+    <div class="search-body">
+      <div class="search-input-wrap">
+        <span id="fileTag" class="file-tag">文件</span>
+        <input id="searchKw" maxlength="50" placeholder="搜索文本消息关键词…" autocomplete="off">
+      </div>
+      <div class="search-filters">
+        <button class="f-btn" id="fSender" onclick="toggleSender()">群成员</button>
+        <button class="f-btn" id="fDate" onclick="toggleDate()">日期</button>
+        <button class="f-btn" id="fMedia" onclick="setType('image')">图片与视频</button>
+        <button class="f-btn" id="fFile" onclick="setType('file')">文件</button>
+      </div>
+      <div id="senderPicker" class="picker hidden"></div>
+      <div id="datePicker" class="picker hidden">
+        <input type="date" id="dateFrom"><span>至</span><input type="date" id="dateTo">
+      </div>
+      <div id="searchResults" class="search-results"><div class="search-empty">输入关键词或点筛选按钮开始搜索</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 表情包 ================= -->
+<div id="stickerModal" class="modal" onclick="if(event.target===this)closeStickers()">
+  <div class="search-card">
+    <div class="profile-head"><span>表情包</span><button onclick="closeStickers()" title="关闭">&times;</button></div>
+    <div class="sticker-body">
+      <div class="sticker-bar">
+        <button class="f-btn on" id="stkHot" onclick="setStickerSort('hot')">发送最多</button>
+        <button class="f-btn" id="stkNew" onclick="setStickerSort('time')">最新</button>
+        <div style="flex:1"></div>
+        <button class="f-btn" onclick="document.getElementById('stkInput').click()">＋ 上传</button>
+      </div>
+      <div id="stickerGrid" class="sticker-grid"></div>
+    </div>
+  </div>
+</div>
+<input type="file" id="stkInput" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" class="hidden">
+<input type="file" id="avatarInput" accept="image/*" class="hidden">
+
+<script src="/js/app.js?v=22"></script>
+</body>
+</html>

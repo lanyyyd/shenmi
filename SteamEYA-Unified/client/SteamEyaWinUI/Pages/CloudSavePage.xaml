@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="SteamEyaWinUI.Pages.CloudSavePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:models="using:SteamEyaWinUI.Models"
+    AllowDrop="True"
+    DragOver="OnRootDragOver"
+    Drop="OnRootDrop">
+
+    <Grid Padding="28,16,28,20" RowSpacing="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 标题 + 游戏选择 + 拖拽提示 -->
+        <Grid Grid.Row="0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+                Grid.Column="0"
+                Text="云存档"
+                Style="{StaticResource TitleTextBlockStyle}"
+                VerticalAlignment="Center" />
+            <ComboBox
+                x:Name="GameCombo"
+                Grid.Column="1"
+                Width="176"
+                VerticalAlignment="Center"
+                SelectionChanged="OnGameChanged">
+                <ComboBoxItem Content="植物大战僵尸" Tag="pvz" />
+                <ComboBoxItem Content="我的世界" Tag="minecraft" />
+            </ComboBox>
+            <TextBlock
+                Grid.Column="2"
+                Margin="12,0,0,0"
+                VerticalAlignment="Center"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="可直接把存档 .zip 拖入本页上传（仅支持单个压缩包）" />
+        </Grid>
+
+        <!-- 工具栏 -->
+        <StackPanel
+            Grid.Row="1"
+            Orientation="Horizontal"
+            Spacing="10">
+            <Button x:Name="AutoBackupBtn" Click="OnAutoBackup">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="14" Glyph="&#xE74E;" />
+                    <TextBlock Text="自动备份" />
+                </StackPanel>
+            </Button>
+            <Button x:Name="DownloadBtn" Click="OnDownloadSelected" IsEnabled="False">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="14" Glyph="&#xE896;" />
+                    <TextBlock Text="下载备份" />
+                </StackPanel>
+            </Button>
+            <Button x:Name="ShareBtn" Click="OnShareSelected" IsEnabled="False">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="14" Glyph="&#xE72D;" />
+                    <TextBlock Text="共享存档" />
+                </StackPanel>
+            </Button>
+        </StackPanel>
+
+        <InfoBar
+            x:Name="PageInfoBar"
+            Grid.Row="2"
+            IsClosable="True"
+            IsOpen="False" />
+
+        <!-- 我的存档 -->
+        <TextBlock
+            Grid.Row="3"
+            Margin="0,6,0,2"
+            Text="我的存档"
+            Style="{StaticResource SubtitleTextBlockStyle}" />
+
+        <Grid Grid.Row="4">
+            <ListView
+                x:Name="MyList"
+                SelectionMode="Extended"
+                SelectionChanged="OnMySelectionChanged">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="models:CloudSaveItem">
+                        <Border
+                            Padding="12,10"
+                            Margin="0,0,0,6"
+                            CornerRadius="8"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderThickness="1"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            RightTapped="OnMyItemRightTapped">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <TextBlock Text="{x:Bind Name}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <TextBlock
+                                        Text="{x:Bind Remark}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <TextBlock
+                                    Grid.Column="1"
+                                    Text="{x:Bind SizeText}"
+                                    VerticalAlignment="Center"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <Border
+                                    Grid.Column="2"
+                                    Padding="8,2"
+                                    CornerRadius="10"
+                                    VerticalAlignment="Center"
+                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                    Visibility="{x:Bind SharedBadgeVisibility}">
+                                    <TextBlock Text="已共享" Foreground="White" FontSize="12" />
+                                </Border>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+            <TextBlock
+                x:Name="MyEmptyText"
+                Text="你还没有上传过存档喵~"
+                Margin="4,12,0,0"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Visibility="Collapsed" />
+        </Grid>
+
+        <!-- 共享存档 -->
+        <TextBlock
+            Grid.Row="5"
+            Margin="0,6,0,2"
+            Text="共享存档（其他用户分享）"
+            Style="{StaticResource SubtitleTextBlockStyle}" />
+
+        <Grid Grid.Row="6">
+            <ListView x:Name="SharedList" SelectionMode="None">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="models:CloudSaveItem">
+                        <Border
+                            Padding="12,10"
+                            Margin="0,0,0,6"
+                            CornerRadius="8"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderThickness="1"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            RightTapped="OnSharedItemRightTapped">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}">
+                                        <Run Text="{x:Bind Name}" />
+                                        <Run Text=" · " />
+                                        <Run Text="{x:Bind OwnerName}" />
+                                    </TextBlock>
+                                    <TextBlock
+                                        Text="{x:Bind Remark}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <TextBlock
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Text="{x:Bind SizeText}"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+            <TextBlock
+                x:Name="SharedEmptyText"
+                Text="暂时还没有共享存档"
+                Margin="4,12,0,0"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Visibility="Collapsed" />
+        </Grid>
+    </Grid>
+</Page>

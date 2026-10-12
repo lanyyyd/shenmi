@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-mode="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>管理后台 · 神秘の飞鸽传信</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+body{overflow:auto}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:26px 18px 60px}
+.top{display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.top h1{font-size:21px;font-weight:800;letter-spacing:-.3px}
+.top .spacer{flex:1}
+.btn{padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;transition:.2s;
+  background:var(--panel);border:1px solid var(--line);color:var(--text)}
+html[data-theme="light"] .btn:not(.pri){background:#fff}
+.btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn.pri{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;border:none}
+.btn.pri:hover{filter:brightness(1.08);color:#fff}
+.btn.danger{color:#EF4444}
+.btn.danger:hover{border-color:#EF4444}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:20px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;
+  backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur)}
+html[data-theme="light"] .stat{background:#fff;box-shadow:var(--shadow)}
+.stat .k{font-size:12px;color:var(--muted);margin-bottom:6px}
+.stat .v{font-size:23px;font-weight:800;color:var(--primary)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur)}
+html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
+.card-h{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.card-h h2{font-size:15px;font-weight:700}
+.card-h .spacer{flex:1}
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl th{text-align:left;padding:11px 14px;font-size:11.5px;font-weight:700;color:var(--hint);
+  border-bottom:1px solid var(--line);white-space:nowrap;letter-spacing:.4px}
+.tbl td{padding:12px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:var(--panel-soft)}
+html[data-theme="light"] .tbl tr:hover td{background:#FAFBFC}
+.uname{font-weight:600;display:flex;align-items:center;gap:8px}
+.dot-on{width:8px;height:8px;border-radius:50%;background:var(--status);flex-shrink:0;
+  box-shadow:0 0 0 3px var(--primary-l)}
+.dot-off{width:8px;height:8px;border-radius:50%;background:#D1D5DB;flex-shrink:0}
+html[data-theme="dark"] .dot-off{background:#475569}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
+.chip{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:6px;font-weight:700;
+  background:var(--primary-l);color:var(--primary);margin-left:6px}
+.chip.gray{background:var(--panel-soft);color:var(--hint);border:1px solid var(--line)}
+.chip.red{background:rgba(239,68,68,.12);color:#EF4444}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts button{font-size:12px;padding:5px 10px;border-radius:7px;background:var(--panel-soft);
+  border:1px solid var(--line);transition:.15s;color:var(--muted)}
+html[data-theme="light"] .acts button{background:#F7F8FA}
+.acts button:hover{border-color:var(--primary);color:var(--primary)}
+.acts button.dg:hover{border-color:#EF4444;color:#EF4444}
+/* 弹窗 */
+.modal{position:fixed;inset:0;z-index:150;background:var(--mask);display:none;align-items:center;justify-content:center;padding:20px}
+.modal.on{display:flex}
+.modal-c{width:100%;max-width:420px;background:var(--panel);border:1px solid var(--line);border-radius:18px;
+  padding:26px 24px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+html[data-theme="light"] .modal-c{background:#fff;box-shadow:var(--shadow-lg)}
+.modal-c h3{font-size:17px;font-weight:700;margin-bottom:16px}
+.modal-c .field{margin-bottom:13px}
+.modal-c .field label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px}
+.modal-c .field input{width:100%;padding:11px 13px;border-radius:10px;font-size:14.5px;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+html[data-theme="light"] .modal-c .field input{background:#FAFBFC}
+.modal-c .field input:focus{border-color:var(--primary);box-shadow:0 0 0 3.5px var(--primary-l)}
+.modal-f{display:flex;gap:10px;margin-top:18px}
+.modal-f .btn{flex:1;text-align:center}
+.deny{text-align:center;padding:80px 20px}.deny h2{font-size:19px;margin-bottom:10px}
+.deny p{color:var(--muted);font-size:13.5px;margin-bottom:20px}
+.empty{text-align:center;color:var(--hint);padding:40px 0;font-size:13.5px}
+/* PushPlus 配置表单 */
+.prow{margin-bottom:15px}
+.prow>label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:7px}
+.prow input[type=text],.prow input[type=number],.prow input:not([type]){padding:10px 13px;border-radius:10px;
+  border:1.5px solid var(--line);background:var(--input-bg);color:var(--text);font-size:13.5px;width:100%}
+.prow input:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-l)}
+#pUsers label{background:var(--panel-soft)}
+html[data-theme="light"] #pUsers label{background:#F7F8FA}
+
+@media(max-width:760px){
+  .tbl thead{display:none}
+  .tbl tr{display:block;border-bottom:1px solid var(--line);padding:10px 4px}
+  .tbl td{display:flex;justify-content:space-between;gap:10px;border:none;padding:5px 12px}
+  .tbl td::before{content:attr(data-l);color:var(--hint);font-size:11.5px;font-weight:700;flex-shrink:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>🛡️ 管理后台</h1>
+    <span id="whoami" class="mono"></span>
+    <div class="spacer"></div>
+    <button class="btn" onclick="location.href='/admin-steam.html'">🎮 Steam 账号</button>
+    <button class="btn" onclick="location.href='/admin-cloud.html'">☁️ 云游戏账号</button>
+    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
+    <button class="btn" onclick="location.href='/'">← 返回聊天室</button>
+    <button class="btn danger" onclick="logout()">退出</button>
+  </div>
+
+  <div id="deny" class="deny hidden">
+    <h2>需要管理员权限</h2>
+    <p>请用管理员账号登录后再访问本页</p>
+    <button class="btn pri" onclick="location.href='/'">去登录</button>
+  </div>
+
+  <div id="main" class="hidden">
+    <div class="stats">
+      <div class="stat"><div class="k">注册用户</div><div class="v" id="sUsers">0</div></div>
+      <div class="stat"><div class="k">当前在线</div><div class="v" id="sOnline">0</div></div>
+      <div class="stat"><div class="k">消息总数</div><div class="v" id="sMsgs">0</div></div>
+      <div class="stat"><div class="k">在线设备</div><div class="v" id="sDev">0</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">
+        <h2>用户列表</h2>
+        <div class="spacer"></div>
+        <input id="filter" placeholder="搜索用户名/IP…" oninput="renderTable()"
+          style="padding:8px 12px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);font-size:13px;color:var(--text)">
+        <button class="btn pri" onclick="openCreate()">＋ 新建用户</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr>
+            <th>用户名</th><th>昵称</th><th>状态</th><th>注册时间</th><th>注册 IP</th><th>登录 IP</th><th>最后活跃</th><th>操作</th>
+          </tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 私聊记录 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>私聊记录</h2>
+        <div class="spacer"></div>
+        <span class="mono" id="convCount"></span>
+        <button class="btn" onclick="loadConvs()">刷新</button>
+      </div>
+      <div id="convList" style="display:flex;flex-wrap:wrap;gap:8px;padding:14px 18px;border-bottom:1px solid var(--line)"></div>
+      <div id="convMsgs" style="padding:8px 18px;max-height:540px;overflow-y:auto"></div>
+    </div>
+
+    <!-- PushPlus 推送提醒 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>消息推送提醒（PushPlus）</h2>
+        <div class="spacer"></div>
+        <label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">
+          <input type="checkbox" id="pEnabled" style="width:auto"> 启用推送
+        </label>
+      </div>
+      <div style="padding:16px 18px">
+        <div class="prow">
+          <label>PushPlus Token</label>
+          <input id="pToken" placeholder="在 pushplus.plus 个人中心 → 一对一推送 获取">
+        </div>
+        <div class="prow">
+          <label>群组编码 topic（可选，不填仅推给自己）</label>
+          <input id="pTopic" placeholder="留空即可">
+        </div>
+        <div class="prow">
+          <label>节流秒数 —— 上次推送后该秒数内的新消息不再提醒（0 为每条都推）</label>
+          <input id="pThrottle" type="number" min="0" max="86400" value="60" style="max-width:150px">
+        </div>
+        <div class="prow">
+          <label>监听范围</label>
+          <label style="display:inline-flex;align-items:center;gap:7px;font-size:13.5px;cursor:pointer">
+            <input type="checkbox" id="pGroup" style="width:auto"> 群聊消息
+          </label>
+        </div>
+        <div class="prow">
+          <label>私聊监听用户（可多选）—— 勾选后，只要有人给 TA 发私聊，就会推送提醒</label>
+          <div id="pUsers" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+        </div>
+        <div class="prow">
+          <label>排除用户（可多选）—— 勾选后，TA 发的消息不推送（建议勾上自己，避免自己发言也提醒）</label>
+          <div id="pExclude" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
+          <button class="btn pri" onclick="savePush()">保存配置</button>
+          <button class="btn" onclick="testPush()">发送测试推送</button>
+          <button class="btn" onclick="loadPush()">重新加载</button>
+        </div>
+        <div class="form-msg" id="pMsg" style="text-align:left"></div>
+        <div class="mono" style="margin-top:12px;line-height:1.8">
+          逻辑：命中监听条件的消息会立即推送；上次推送后节流秒数内的新消息会被忽略、不再重复提醒；被「排除用户」勾选的账号自己发的消息一律不推送；节流秒数设为 0 表示不节流、每条都推。
+        </div>
+      </div>
+    </div>
+
+    <!-- 公开面板预设内容 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>公开面板预设内容（t.teatt.top 左侧面板）</h2>
+        <div class="spacer"></div>
+        <button class="btn pri" onclick="addPresetRow()">＋ 添加一条</button>
+        <button class="btn" onclick="savePreset()">保存</button>
+        <button class="btn" onclick="loadPreset()">重新加载</button>
+      </div>
+      <div style="padding:16px 18px">
+        <div id="presetList" style="display:flex;flex-direction:column;gap:10px"></div>
+        <div class="form-msg" id="presetMsg" style="text-align:left"></div>
+        <div class="mono" style="margin-top:12px;line-height:1.8">
+          说明：该面板不再展示实时群聊，这里设置的条目按顺序显示（页面最多显示 12 条）；内容为空的条目不保存。未设置任何条目时，面板显示「点击注册后查看详细消息吧」。
+        </div>
+      </div>
+    </div>
+  <!-- 注册邀请码 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>注册邀请码</h2>
+        <div class="spacer"></div>
+        <label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">
+          <input type="checkbox" id="ivRequired" style="width:auto"> 注册必须填写邀请码
+        </label>
+        <button class="btn pri" onclick="saveInviteRequired()">保存开关</button>
+        <button class="btn" onclick="loadInvites()">重新加载</button>
+      </div>
+      <div style="padding:16px 18px">
+        <div class="prow" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <label style="min-width:auto;margin:0">新建邀请码</label>
+          <input id="ivCode" placeholder="留空自动生成" style="max-width:180px">
+          <input id="ivMax" type="number" min="0" max="100000" value="1" style="max-width:110px" title="最大使用次数">
+          <span style="font-size:12.5px;color:var(--muted)">次（0 = 不限）</span>
+          <input id="ivNote" placeholder="备注（选填）" style="max-width:180px">
+          <button class="btn" onclick="randomInviteCode()">随机</button>
+          <button class="btn pri" onclick="createInvite()">添加</button>
+        </div>
+        <div class="form-msg err" id="ivWarn" style="text-align:left;display:none"></div>
+        <div id="ivList"></div>
+        <div class="form-msg" id="ivMsg" style="text-align:left"></div>
+        <div class="mono" style="margin-top:12px;line-height:1.8">
+          说明：开启「注册必须填写邀请码」后，新用户注册时必须填写一个「未停用且未用尽」的邀请码；已登录用户不受影响。邀请码不区分大小写；最大使用次数填 0 表示不限次数。用完或停用后，该码立即失效（已用它注册的账号不受影响）。
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 新建用户 -->
+<div class="modal" id="mCreate">
+  <div class="modal-c">
+    <h3>新建用户</h3>
+    <div class="field"><label>用户名</label><input id="cUser" placeholder="2-20 位"></div>
+    <div class="field"><label>密码</label><input id="cPass" placeholder="至少 6 位"></div>
+    <div class="field"><label>邮箱（选填）</label><input id="cMail" placeholder="you@example.com"></div>
+    <div class="field" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="cAdmin" style="width:auto"><label style="margin:0">设为管理员</label>
+    </div>
+    <div class="form-msg" id="cMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mCreate')">取消</button>
+      <button class="btn pri" onclick="createUser()">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- 重置密码 -->
+<div class="modal" id="mReset">
+  <div class="modal-c">
+    <h3>重置密码</h3>
+    <div class="field"><label>用户</label><input id="rUser" readonly></div>
+    <div class="field"><label>新密码</label><input id="rPass" placeholder="至少 6 位"></div>
+    <div class="form-msg" id="rMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mReset')">取消</button>
+      <button class="btn pri" onclick="resetPwd()">确认重置</button>
+    </div>
+  </div>
+</div>
+
+<!-- 修改昵称 -->
+<div class="modal" id="mNick">
+  <div class="modal-c">
+    <h3>修改昵称</h3>
+    <div class="field"><label>用户</label><input id="nUser" readonly></div>
+    <div class="field"><label>昵称</label><input id="nNick" placeholder="输入新昵称，最多 20 字" maxlength="20"></div>
+    <div class="form-msg" id="nMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mNick')">取消</button>
+      <button class="btn pri" onclick="saveNick()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 修改用户名 -->
+<div class="modal" id="mUname">
+  <div class="modal-c">
+    <h3>修改用户名</h3>
+    <div class="field"><label>当前用户名</label><input id="uuUser" readonly></div>
+    <div class="field"><label>新用户名</label><input id="uuName" placeholder="2-20 位（中文/字母/数字/下划线）" maxlength="20"></div>
+    <div class="form-msg" id="uuMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mUname')">取消</button>
+      <button class="btn pri" onclick="saveUname()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script>
+let ME = null, USERS = [], resetTarget = null, nickTarget = null, unameTarget = null;
+const $ = (id) => document.getElementById(id);
+let tTimer; function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(tTimer); tTimer=setTimeout(()=>t.classList.remove('on'),2200); }
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtTime(ts){ if(!ts) return '—'; const d=new Date(ts); const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+/* 精确到秒（私聊记录用） */
+function fmtTimeSec(ts){ if(!ts) return '—'; const d=new Date(ts); const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+function relTime(ts){ if(!ts) return '—'; const s=Math.floor((Date.now()-ts)/1000);
+  if(s<60) return '刚刚'; if(s<3600) return Math.floor(s/60)+' 分钟前';
+  if(s<86400) return Math.floor(s/3600)+' 小时前'; return Math.floor(s/86400)+' 天前'; }
+
+/* 主题 */
+const ICONS={auto:'🌗 自动',light:'☀️ 浅色',dark:'🌙 深色'};
+function resolveTheme(mode){ if(mode==='light')return 'light'; if(mode==='dark')return 'dark';
+  const h=new Date().getHours(); return (h>=6&&h<18)?'light':'dark'; }
+function applyTheme(mode){ document.documentElement.dataset.mode=mode; document.documentElement.dataset.theme=resolveTheme(mode);
+  try{localStorage.setItem('chat_theme_mode',mode)}catch(e){}
+  const b=$('themeBtn'); if(b) b.textContent=ICONS[mode]; }
+function cycleTheme(){ const o=['auto','light','dark']; const cur=document.documentElement.dataset.mode||'auto';
+  applyTheme(o[(o.indexOf(cur)+1)%o.length]); }
+(function(){ let s='auto'; try{s=localStorage.getItem('chat_theme_mode')||'auto'}catch(e){} applyTheme(s); })();
+
+/* 数据 */
+async function loadUsers(){
+  const r = await fetch('/api/admin/users'); const d = await r.json();
+  if(!d.ok){ toast(d.error||'加载失败'); return; }
+  USERS = d.users;
+  $('sUsers').textContent = d.total;
+  $('sMsgs').textContent = d.msgTotal;
+  $('sOnline').textContent = USERS.filter(u=>u.online).length;
+  $('sDev').textContent = USERS.reduce((n,u)=>n+u.deviceCount,0);
+  renderTable();
+}
+function renderTable(){
+  const kw = ($('filter').value||'').trim().toLowerCase();
+  const list = USERS.filter(u => !kw || u.username.toLowerCase().includes(kw)
+    || (u.nickname||'').toLowerCase().includes(kw)
+    || (u.regIp||'').toLowerCase().includes(kw) || u.loginIps.some(i=>i.toLowerCase().includes(kw)));
+  if(!list.length){ $('tbody').innerHTML = `<tr><td colspan="8" class="empty">没有匹配的用户</td></tr>`; return; }
+  $('tbody').innerHTML = list.map(u=>`
+    <tr>
+      <td data-l="用户名"><div class="uname"><span class="${u.online?'dot-on':'dot-off'}"></span>${esc(u.username)}
+        ${u.isAdmin?'<span class="chip">管理员</span>':''}${u.banned?'<span class="chip red">已封禁</span>':''}</div></td>
+      <td data-l="昵称"><span class="mono">${esc(u.nickname||'—')}</span></td>
+      <td data-l="状态">${u.online?`<span style="color:var(--primary);font-weight:600">在线 · ${u.deviceCount} 设备</span>`:'<span style="color:var(--hint)">离线</span>'}</td>
+      <td data-l="注册时间"><span class="mono">${fmtTime(u.createdAt)}</span></td>
+      <td data-l="注册 IP"><span class="mono">${esc(u.regIp||'—')}</span></td>
+      <td data-l="登录 IP"><span class="mono">${esc(u.loginIps.join(', ')||'—')}</span></td>
+      <td data-l="最后活跃">${esc(relTime(u.lastSeen))}</td>
+      <td data-l="操作"><div class="acts">
+        <button onclick="openNick(${u.id})">改昵称</button>
+        <button onclick="openReset(${u.id},'${esc(u.username)}')">改密码</button>
+        <button onclick="openUname(${u.id})">改用户名</button>
+        ${u.isAdmin?'':`<button class="${u.banned?'':'dg'}" onclick="toggleBan(${u.id},${u.banned?0:1})">${u.banned?'解封':'封禁'}</button>`}
+        ${u.isAdmin?'':`<button class="dg" onclick="delUser(${u.id},'${esc(u.username)}')">删除账号</button>`}
+      </div></td>
+    </tr>`).join('');
+}
+async function toggleBan(id, banned){
+  if(banned && !confirm('确定封禁该用户？其所有登录会话将被清除。')) return;
+  const r = await fetch('/api/admin/ban',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id,banned:!!banned})});
+  const d = await r.json(); if(!d.ok) return toast(d.error||'操作失败');
+  toast(banned?'已封禁':'已解封'); loadUsers();
+}
+function openCreate(){ $('cUser').value=''; $('cPass').value=''; $('cMail').value=''; $('cAdmin').checked=false; $('cMsg').textContent=''; $('mCreate').classList.add('on'); }
+async function createUser(){
+  const body = { username:$('cUser').value.trim(), password:$('cPass').value, email:$('cMail').value.trim(), isAdmin:$('cAdmin').checked };
+  const r = await fetch('/api/admin/create-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d = await r.json();
+  if(!d.ok){ $('cMsg').textContent=d.error||'创建失败'; $('cMsg').className='form-msg err'; return; }
+  $('cMsg').textContent='创建成功'; $('cMsg').className='form-msg ok';
+  toast('已创建用户'); setTimeout(()=>{ closeModal('mCreate'); loadUsers(); }, 500);
+}
+function openReset(id, name){ resetTarget=id; $('rUser').value=name; $('rPass').value=''; $('rMsg').textContent=''; $('mReset').classList.add('on'); }
+async function resetPwd(){
+  const r = await fetch('/api/admin/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({userId:resetTarget,password:$('rPass').value})});
+  const d = await r.json();
+  if(!d.ok){ $('rMsg').textContent=d.error||'失败'; $('rMsg').className='form-msg err'; return; }
+  toast('密码已重置，该用户需重新登录'); closeModal('mReset'); loadUsers();
+}
+function openNick(id){
+  const u = USERS.find(x=>x.id===id); if(!u) return;
+  nickTarget = id;
+  $('nUser').value = u.username;
+  $('nNick').value = u.nickname || '';
+  $('nMsg').textContent = '';
+  $('mNick').classList.add('on');
+}
+async function saveNick(){
+  const v = $('nNick').value.trim();
+  if(!v){ $('nMsg').textContent='昵称不能为空'; $('nMsg').className='form-msg err'; return; }
+  const r = await fetch('/api/admin/set-nickname',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({userId:nickTarget,nickname:v})});
+  const d = await r.json();
+  if(!d.ok){ $('nMsg').textContent=d.error||'失败'; $('nMsg').className='form-msg err'; return; }
+  toast('昵称已更新'); closeModal('mNick'); loadUsers();
+}
+function closeModal(id){ $(id).classList.remove('on'); }
+/* 改用户名（用户名是 Steam 分配与推送规则的键，改名时后端会同步） */
+function openUname(id){
+  const u = USERS.find(x=>x.id===id); if(!u) return;
+  unameTarget = id;
+  $('uuUser').value = u.username;
+  $('uuName').value = u.username;
+  $('uuMsg').textContent = '';
+  $('mUname').classList.add('on');
+}
+async function saveUname(){
+  const v = $('uuName').value.trim();
+  if(!v){ $('uuMsg').textContent='用户名不能为空'; $('uuMsg').className='form-msg err'; return; }
+  const r = await fetch('/api/admin/set-username',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({userId:unameTarget,username:v})});
+  const d = await r.json();
+  if(!r.ok || !d.ok){ $('uuMsg').textContent=(d.detail||d.error||'保存失败'); $('uuMsg').className='form-msg err'; return; }
+  toast('用户名已修改'); closeModal('mUname'); loadUsers(); loadPush(); loadInvites();
+}
+/* 删除账号（全系统账号管理） */
+async function delUser(id, name){
+  if(!confirm('确定删除账号「'+name+'」？\n\n· 其登录会话会被清除\n· 其占用的 Steam 账号将释放回「可用」池\n· 聊天历史保留（显示为「已注销用户」）')) return;
+  const r = await fetch('/api/admin/delete-user',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({userId:id})});
+  const d = await r.json();
+  if(!r.ok || !d.ok){ toast(d.detail||d.error||'删除失败'); return; }
+  toast('已删除账号'+(d.releasedAccounts?`，释放 ${d.releasedAccounts} 个 Steam 账号`:''));
+  loadUsers(); loadPush(); loadInvites();
+}
+async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
+
+/* ---------- PushPlus 推送配置 ---------- */
+let PUSH_USERS = [];
+async function loadPush(){
+  const r = await fetch('/api/admin/push-config'); const d = await r.json();
+  if(!d.ok){ return; }
+  PUSH_USERS = d.users || [];
+  const c = d.config || {};
+  $('pEnabled').checked = !!c.enabled;
+  $('pToken').value = c.token || '';
+  $('pTopic').value = c.topic || '';
+  $('pThrottle').value = (c.throttleSeconds ?? 60);
+  $('pGroup').checked = !!c.watchGroup;
+  const sel = new Set(c.watchUsers || []);
+  $('pUsers').innerHTML = PUSH_USERS.length
+    ? PUSH_USERS.map(u=>`<label style="display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border:1px solid var(--line);border-radius:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" value="${esc(u)}" style="width:auto" ${sel.has(u)?'checked':''}> ${esc(u)}</label>`).join('')
+    : '<span class="empty" style="padding:0">暂无用户</span>';
+  const excl = new Set(c.excludeUsers || []);
+  $('pExclude').innerHTML = PUSH_USERS.length
+    ? PUSH_USERS.map(u=>`<label style="display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border:1px solid var(--line);border-radius:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" value="${esc(u)}" style="width:auto" ${excl.has(u)?'checked':''}> ${esc(u)}</label>`).join('')
+    : '<span class="empty" style="padding:0">暂无用户</span>';
+}
+async function savePush(){
+  const watchUsers = [...$('pUsers').querySelectorAll('input:checked')].map(i=>i.value);
+  const excludeUsers = [...$('pExclude').querySelectorAll('input:checked')].map(i=>i.value);
+  const body = {
+    enabled: $('pEnabled').checked,
+    token: $('pToken').value.trim(),
+    topic: $('pTopic').value.trim(),
+    throttleSeconds: Number($('pThrottle').value)||0,
+    watchGroup: $('pGroup').checked,
+    watchUsers,
+    excludeUsers,
+    template: 'markdown',
+  };
+  const r = await fetch('/api/admin/push-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d = await r.json();
+  const m = $('pMsg');
+  if(d.ok){ m.textContent='✅ 已保存'+(watchUsers.length?`，私聊监听 ${watchUsers.length} 人`:'')+(excludeUsers.length?`，排除 ${excludeUsers.length} 人`:'')+(body.watchGroup?'，含群聊':''); m.className='form-msg ok'; toast('推送配置已保存'); }
+  else { m.textContent='❌ '+(d.error||'保存失败'); m.className='form-msg err'; }
+}
+async function testPush(){
+  const m = $('pMsg'); m.textContent='发送中…'; m.className='form-msg';
+  const r = await fetch('/api/admin/push-test',{method:'POST'});
+  const d = await r.json();
+  if(d.ok){ m.textContent='✅ '+d.msg; m.className='form-msg ok'; }
+  else { m.textContent='❌ '+(d.error||'失败'); m.className='form-msg err'; }
+}
+
+/* ---------- 公开面板预设内容 ---------- */
+let PRESET = [];
+const PRESET_INPUT = 'padding:9px 12px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);font-size:13px;color:var(--text)';
+async function loadPreset(){
+  const r = await fetch('/api/admin/panel-preset'); const d = await r.json();
+  if(!d.ok) return;
+  PRESET = d.items || [];
+  $('presetMsg').textContent = '';
+  renderPreset();
+}
+function renderPreset(){
+  const box = $('presetList');
+  if(!PRESET.length){ box.innerHTML = '<span class="empty" style="padding:2px 0">还没有预设内容，点右上角「＋ 添加一条」</span>'; return; }
+  box.innerHTML = PRESET.map((it,i)=>`
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input value="${esc(it.name||'')}" placeholder="显示名（可留空）" oninput="PRESET[${i}].name=this.value" style="width:150px;${PRESET_INPUT}">
+      <input value="${esc(it.content||'')}" placeholder="显示的文本内容" oninput="PRESET[${i}].content=this.value" style="flex:1;min-width:200px;${PRESET_INPUT}">
+      <button class="btn danger" onclick="delPresetRow(${i})">删除</button>
+    </div>`).join('');
+}
+function addPresetRow(){ PRESET.push({ name:'', content:'' }); renderPreset(); }
+function delPresetRow(i){ PRESET.splice(i,1); renderPreset(); }
+async function savePreset(){
+  const items = PRESET
+    .map(x=>({ name:String(x.name||'').trim().slice(0,40), content:String(x.content||'').trim().slice(0,300) }))
+    .filter(x=>x.content);
+  const r = await fetch('/api/admin/panel-preset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+  const d = await r.json();
+  const m = $('presetMsg');
+  if(d.ok){ PRESET = d.items || []; renderPreset(); m.textContent='✅ 已保存 '+PRESET.length+' 条'; m.className='form-msg ok'; toast('预设内容已保存'); }
+  else { m.textContent='❌ '+(d.error||'保存失败'); m.className='form-msg err'; }
+}
+
+/* ---------- 私聊记录 ---------- */
+let CONVS = [];
+async function loadConvs(){
+  const r = await fetch('/api/admin/conversations'); const d = await r.json();
+  if(!d.ok){ toast(d.error||'加载失败'); return; }
+  CONVS = d.conversations || [];
+  $('convCount').textContent = CONVS.length + ' 个会话';
+  if(!CONVS.length){ $('convList').innerHTML = '<span class="empty" style="padding:6px 0">暂无私聊记录</span>'; $('convMsgs').innerHTML=''; return; }
+  $('convList').innerHTML = CONVS.map(c=>`
+    <button class="btn" style="font-size:12.5px" onclick="openConv('${c.room}')">
+      ${esc(c.users[0])} ↔ ${esc(c.users[1])} <span class="chip gray">${c.count} 条</span>
+    </button>`).join('');
+}
+async function openConv(room){
+  $('convMsgs').innerHTML = '<div class="empty">加载中…</div>';
+  const r = await fetch('/api/admin/room-messages?room=' + encodeURIComponent(room));
+  const d = await r.json();
+  if(!d.ok){ $('convMsgs').innerHTML = '<div class="empty">' + esc(d.error||'加载失败') + '</div>'; return; }
+  if(!d.messages.length){ $('convMsgs').innerHTML = '<div class="empty">没有消息</div>'; return; }
+  $('convMsgs').innerHTML = d.messages.map(m=>`
+    <div style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-soft)">
+      <div style="width:142px;flex-shrink:0" class="mono">${fmtTimeSec(m.createdAt)}</div>
+      <div style="width:86px;flex-shrink:0;font-weight:600;font-size:12.5px">${esc(m.fromName)}</div>
+      <div style="flex:1;font-size:13.5px;word-break:break-word">${
+        m.type==='image' ? `<a href="${esc(m.filePath)}" target="_blank">[图片]</a>` :
+        m.type==='video' ? `<a href="${esc(m.filePath)}" target="_blank">[视频] ${esc(m.fileName||'')}</a>` :
+        m.type==='sticker' ? (m.filePath ? `<a href="${esc(m.filePath)}" target="_blank">[表情]</a>` : '[表情]') :
+        m.type==='file' ? `<a href="${esc(m.filePath)}" target="_blank">[文件] ${esc(m.fileName||'')}</a>` :
+        esc(m.content)
+      }</div>
+    </div>`).join('');
+}
+
+/* ---------- 注册邀请码 ---------- */
+function ivMsg(t, err){
+  const el = $('ivMsg'); if(!el) return;
+  el.textContent = t || ''; el.className = 'form-msg ' + (err ? 'err' : 'ok');
+  setTimeout(()=>{ if(el.textContent === t) el.textContent = ''; }, 3000);
+}
+async function apiInvite(url, body){
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})});
+  return r.json();
+}
+function renderInvites(d){
+  const warn = $('ivWarn');
+  if(d.required && !d.available){
+    warn.style.display = ''; warn.textContent = '⚠️ 已开启「注册必须填写邀请码」，但当前没有可用的邀请码 → 现在新用户无法注册。请先添加邀请码，或临时关闭该开关。';
+  } else warn.style.display = 'none';
+  const list = d.codes || [];
+  if(!list.length){ $('ivList').innerHTML = '<div class="empty">还没有邀请码</div>'; return; }
+  $('ivList').innerHTML = list.map(c=>{
+    const unlimited = c.maxUses === 0;
+    const exhausted = !unlimited && c.usedCount >= c.maxUses;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-soft);flex-wrap:wrap${c.active?'':';opacity:.55'}">
+      <div class="mono" style="font-weight:700;min-width:130px">${esc(c.code)}</div>
+      <div style="min-width:130px;font-size:13px">已用 ${c.usedCount} / ${unlimited?'不限':c.maxUses}${exhausted?' <span style="color:#EF4444">（已用尽）</span>':''}${c.active?'':' <span style="color:var(--hint)">（已停用）</span>'}</div>
+      <div style="flex:1;font-size:12.5px;color:var(--muted);min-width:110px">${esc(c.note||'')}${c.createdBy?' · '+esc(c.createdBy):''}</div>
+      <input type="number" min="0" max="100000" value="${c.maxUses}" style="width:96px" title="最大使用次数（0=不限）" onchange="updateInvite(${c.id}, this.value, ${c.active})">
+      <button class="btn" onclick="updateInvite(${c.id}, ${c.maxUses}, ${c.active?0:1})">${c.active?'停用':'启用'}</button>
+      <button class="btn" onclick="copyInvite('${esc(c.code)}')">复制</button>
+      <button class="btn" style="color:#EF4444" onclick="deleteInvite(${c.id}, '${esc(c.code)}')">删除</button>
+    </div>`;
+  }).join('');
+}
+async function loadInvites(){
+  const r = await fetch('/api/admin/invite-codes'); const d = await r.json();
+  if(!d.ok) return ivMsg(d.error||'加载失败', true);
+  $('ivRequired').checked = !!d.required;
+  renderInvites(d);
+}
+async function saveInviteRequired(){
+  const d = await apiInvite('/api/admin/invite-config', {required: $('ivRequired').checked});
+  if(!d.ok) return ivMsg(d.error||'保存失败', true);
+  $('ivRequired').checked = !!d.required;
+  renderInvites(d);
+  ivMsg('已保存：注册' + (d.required ? '需要' : '不需要') + '邀请码');
+}
+async function createInvite(){
+  const d = await apiInvite('/api/admin/invite-codes', {
+    code: $('ivCode').value.trim(), maxUses: Number($('ivMax').value)||0, note: $('ivNote').value.trim(),
+  });
+  if(!d.ok) return ivMsg(d.error||'添加失败', true);
+  $('ivCode').value = ''; $('ivNote').value = '';
+  renderInvites(d);
+  ivMsg('已添加邀请码 ' + d.created);
+}
+function randomInviteCode(){
+  const AB = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s = '';
+  for(let i=0;i<8;i++) s += AB[Math.floor(Math.random()*AB.length)];
+  $('ivCode').value = s;
+}
+async function updateInvite(id, maxUses, active){
+  const d = await apiInvite('/api/admin/invite-codes/update', {id:+id, maxUses:+maxUses, active: !!active});
+  if(!d.ok) return ivMsg(d.error||'更新失败', true);
+  renderInvites(d);
+  ivMsg('已更新');
+}
+async function deleteInvite(id, code){
+  if(!confirm('确定删除邀请码 ' + code + ' ？删除后已用它注册的账号不受影响。')) return;
+  const d = await apiInvite('/api/admin/invite-codes/delete', {id:+id});
+  if(!d.ok) return ivMsg(d.error||'删除失败', true);
+  renderInvites(d);
+  ivMsg('已删除 ' + code);
+}
+function copyInvite(code){
+  const done = ()=>ivMsg('已复制 ' + code);
+  try { navigator.clipboard.writeText(code).then(done, done); } catch(e){ done(); }
+}
+
+/* 启动 */
+(async function(){
+  const r = await fetch('/api/me'); const d = await r.json();
+  if(!d.ok || !d.user || !d.user.isAdmin){ $('deny').classList.remove('hidden'); return; }
+  ME = d.user; $('whoami').textContent = '@' + ME.username;
+  $('main').classList.remove('hidden');
+  loadUsers();
+  loadConvs();
+  loadPush();
+  loadPreset();
+  loadInvites();
+  setInterval(loadUsers, 15000);
+})();
+</script>
+</body>
+</html>
