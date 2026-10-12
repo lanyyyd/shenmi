@@ -543,21 +543,21 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
 /// <summary>消息列表项视图模型（只读，供 x:Bind OneTime 使用）。</summary>
 public sealed class ChatMessageVm
 {
-    public long Id { get; init; }
-    public string Kind { get; init; } = "text";
-    public string Content { get; init; } = string.Empty;
-    public string FileUrl { get; init; } = string.Empty;
-    public string FileName { get; init; } = string.Empty;
-    public string FileSizeText { get; init; } = string.Empty;
-    public ImageSource? Image { get; init; }
-    public bool Recalled { get; init; }
-    public bool CanRecall { get; init; }
-    public string HeaderText { get; init; } = string.Empty;
-    public HorizontalAlignment RowAlign { get; init; }
-    public Brush BubbleBrush { get; init; } = null!;
-    public Brush ContentForeground { get; init; } = null!;
-    public string RecallLabel { get; init; } = string.Empty;
-    public string RecalledLabel { get; init; } = string.Empty;
+    public long Id { get; set; }
+    public string Kind { get; set; } = "text";
+    public string Content { get; set; } = string.Empty;
+    public string FileUrl { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string FileSizeText { get; set; } = string.Empty;
+    public ImageSource? Image { get; set; }
+    public bool Recalled { get; set; }
+    public bool CanRecall { get; set; }
+    public string HeaderText { get; set; } = string.Empty;
+    public HorizontalAlignment RowAlign { get; set; }
+    public Brush BubbleBrush { get; set; } = null!;
+    public Brush ContentForeground { get; set; } = null!;
+    public string RecallLabel { get; set; } = string.Empty;
+    public string RecalledLabel { get; set; } = string.Empty;
 
     public Visibility TextVisibility =>
         Recalled || Kind == "text" ? Visibility.Visible : Visibility.Collapsed;
