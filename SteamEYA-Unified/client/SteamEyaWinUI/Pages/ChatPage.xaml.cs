@@ -27,7 +27,9 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     private static readonly Brush PrimaryTextBrush = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"];
 
     private readonly ChatService _chat = new();
-    private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
+    // 同时 using 了 Microsoft.UI.Dispatching 与 Windows.System，两者都有 DispatcherQueue，必须写全名消歧义。
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue _dispatcher =
+        Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
     private readonly ObservableCollection<ChatMessageVm> _messages = [];
     private readonly ObservableCollection<ChatUserVm> _users = [];
     private readonly ObservableCollection<LanPeerVm> _peers = [];
@@ -622,7 +624,8 @@ public sealed class LanPeerVm
 {
     private readonly LanPeerDto _peer;
 
-    public LanPeerVm(LanPeerDto peer)
+    // LanPeerDto 是 internal，构造函数只能是 internal，否则 CS0051（参数类型可见性低于方法）。
+    internal LanPeerVm(LanPeerDto peer)
     {
         _peer = peer;
     }
