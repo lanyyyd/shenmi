@@ -380,7 +380,7 @@
 
         <!-- ================= 网页版界面（默认；加载失败回退原生） ================= -->
         <Grid x:Name="WebRoot" Grid.Row="1" Visibility="Collapsed">
-            <WebView2 x:Name="ChatWeb" />
+            <WebView2 x:Name="WebChat" />
             <ProgressRing
                 x:Name="WebLoading"
                 Width="48"

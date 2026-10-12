@@ -202,12 +202,14 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             WebLoading.IsActive = true;
 
             // 用户数据目录放到用户 AppData：安装目录（如 Program Files）通常不可写，默认目录会导致初始化失败。
+            // WinUI 3 没有 WPF/WinForms 的 CreationProperties，需先建 CoreWebView2Environment 再传给控件。
+            CoreWebView2Environment? env = null;
             try
             {
                 var dataFolder = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SteamEYA", "webview2");
                 Directory.CreateDirectory(dataFolder);
-                WebChat.CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = dataFolder };
+                env = await CoreWebView2Environment.CreateAsync(null, dataFolder);
             }
             catch (Exception ex)
             {
@@ -215,7 +217,9 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             }
 
             // Win10 上 WebView2 初始化偶发卡死，加超时兜底，超时即回退原生。
-            var ensure = WebChat.EnsureCoreWebView2Async().AsTask();
+            var ensure = (env is null
+                ? WebChat.EnsureCoreWebView2Async()
+                : WebChat.EnsureCoreWebView2Async(env)).AsTask();
             if (await Task.WhenAny(ensure, Task.Delay(TimeSpan.FromSeconds(10))) != ensure)
             {
                 AppLog.Warn("网页版聊天初始化超时，改用原生界面。");
