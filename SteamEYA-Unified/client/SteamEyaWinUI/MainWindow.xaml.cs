@@ -149,6 +149,7 @@ public sealed partial class MainWindow : Window
             else if (!ok && !string.IsNullOrEmpty(msg))
             {
                 // 直接显示出来，方便用户/我们定位是网关没起来、还是服务端返回了拒绝。
+                AppLog.Warn($"离线记录同步失败：{msg}");
                 ShowStatus($"离线记录同步失败：{msg}", InfoBarSeverity.Warning);
             }
         }

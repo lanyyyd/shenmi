@@ -30,6 +30,19 @@ def _enabled() -> bool:
     return get_discovery() is not None
 
 
+def _fix_name(name: str) -> str:
+    """修复 multipart 文件名的编码错乱。
+
+    转发方用 requests 上传文件时，非 ASCII（中文）文件名可能被当成 latin-1 字节写入
+    multipart 头，接收端再按 latin-1 解出来就是乱码。这里尝试按 UTF-8 还原；
+    若本来就是正常字符串（encode 不出 latin-1），原样返回。
+    """
+    try:
+        return name.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return name
+
+
 @router.get("/info")
 def info():
     d = get_discovery()
@@ -101,7 +114,7 @@ async def relay_file(origin: str = Form(...), clientMsgId: str = Form(...), inst
         return {"ok": False, "msg": "文件超过 50MB 限制", "code": 413}
     kind = type if type in ("image", "video", "sticker") else "file"
     sub = {"image": "images", "video": "videos", "sticker": "stickers"}.get(kind, "files")
-    raw_name = fileName or file.filename or ""
+    raw_name = _fix_name(fileName or file.filename or "")
     ext = pathlib.Path(raw_name).suffix.lower()[:12]
     name = f"{security.now_ms()}-{security.gen_token(6)}{ext}"
     dest = STICKER_DIR if sub == "stickers" else (UPLOAD_DIR / sub)

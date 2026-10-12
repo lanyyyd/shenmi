@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Net.Http;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -9,6 +10,7 @@ using Microsoft.Web.WebView2.Core;
 using SteamEyaWinUI.Localization;
 using SteamEyaWinUI.Models;
 using SteamEyaWinUI.Services;
+using Windows.Media.Core;
 using Windows.Storage;
 using Windows.Storage.Pickers;
 using Windows.System;
@@ -32,6 +34,9 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     /// <summary>头像底色的确定性调色板（按用户 id 取模，保证同一人颜色稳定）。</summary>
     private static readonly string[] AvatarColors =
         ["#5865F2", "#EB459E", "#57F287", "#FEE75C", "#ED4245", "#00B0F4", "#9B59B6", "#E67E22"];
+
+    /// <summary>下载聊天附件用（文件可能较大，超时放宽）。</summary>
+    private static readonly HttpClient DownloadClient = new() { Timeout = TimeSpan.FromSeconds(120) };
 
     // 复用全局常驻连接（ChatHub），离开本页也不断线，保证其它页面能收消息并提醒。
     private readonly ChatService _chat = ChatHub.Chat;
@@ -608,11 +613,71 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         }
     }
 
+    /// <summary>附件按钮：视频在应用内直接播放，其它文件走「另存为」下载。</summary>
     private async void Attachment_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement fe && fe.DataContext is ChatMessageVm vm && !string.IsNullOrEmpty(vm.FileUrl))
+        if (sender is not FrameworkElement fe || fe.DataContext is not ChatMessageVm vm
+            || string.IsNullOrEmpty(vm.FileUrl))
         {
-            await Launcher.LaunchUriAsync(new Uri(vm.FileUrl));
+            return;
+        }
+        if (vm.Kind == "video")
+        {
+            await PlayVideoAsync(vm);
+        }
+        else
+        {
+            await SaveFileAsync(vm);
+        }
+    }
+
+    /// <summary>弹出播放器直接播放视频（离线由本机网关提供，在线由服务器提供）。</summary>
+    private async Task PlayVideoAsync(ChatMessageVm vm)
+    {
+        var player = new MediaPlayerElement
+        {
+            Source = MediaSource.CreateFromUri(new Uri(vm.FileUrl)),
+            AutoPlay = true,
+            AreTransportControlsEnabled = true,
+            MaxWidth = 720,
+            MaxHeight = 405
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = string.IsNullOrWhiteSpace(vm.FileName) ? "视频" : vm.FileName,
+            Content = player,
+            CloseButtonText = Loc.T("Chat_Cancel")
+        };
+        dialog.Closed += (_, _) => player.Source = null;   // 关掉即释放解码器
+        await dialog.ShowAsync();
+    }
+
+    /// <summary>把消息中的文件下载到用户选择的位置。</summary>
+    private async Task SaveFileAsync(ChatMessageVm vm)
+    {
+        try
+        {
+            var name = string.IsNullOrWhiteSpace(vm.FileName) ? "download" : vm.FileName;
+            var safeName = string.Concat(name.Split(Path.GetInvalidFileNameChars()));
+            var picker = new FileSavePicker { SuggestedFileName = safeName };
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, MainWindow.Hwnd);
+
+            var ext = Path.GetExtension(safeName);
+            picker.FileTypeChoices.Add("文件", [string.IsNullOrEmpty(ext) ? ".bin" : ext]);
+
+            var target = await picker.PickSaveFileAsync();
+            if (target is null)
+            {
+                return;
+            }
+            var bytes = await DownloadClient.GetByteArrayAsync(vm.FileUrl);
+            await FileIO.WriteBytesAsync(target, bytes);
+            MainWindow.Instance?.ShowStatus($"已保存到：{target.Path}", InfoBarSeverity.Success);
+        }
+        catch (Exception ex)
+        {
+            MainWindow.Instance?.ShowStatus($"下载失败：{ex.Message}", InfoBarSeverity.Error);
         }
     }
 
