@@ -166,6 +166,12 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         WebRoot.Visibility = web ? Visibility.Visible : Visibility.Collapsed;
         NativeRoot.Visibility = web ? Visibility.Collapsed : Visibility.Visible;
         ModeButton.Content = Loc.T(web ? "Chat_Mode_ToNative" : "Chat_Mode_ToWeb");
+
+        if (!web)
+        {
+            // 原生列表此刻才变为可见。首次加载时它是 Collapsed，早先那次滚动必然落空，这里补一次。
+            ScrollToBottom();
+        }
     }
 
     private async void Mode_Click(object sender, RoutedEventArgs e)
@@ -851,8 +857,9 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 滚动到最新一条消息。刚插入条目时 ListView 的容器还没生成，同步调用 ScrollIntoView 会落空，
-    /// 所以先 UpdateLayout 强制完成一次布局，并把滚动放到下一个消息循环低优先级执行。
+    /// 滚动到最新一条消息。刚插入条目时 ListView 的容器还没生成，同步 ScrollIntoView 会落空，
+    /// 所以延后到下一轮、先 UpdateLayout 完成布局，再直接把内部 ScrollViewer 滚到底
+    /// （ChangeView 不依赖容器是否已生成，比 ScrollIntoView 稳）；后者作为兜底。
     /// </summary>
     private void ScrollToBottom()
     {
@@ -867,8 +874,31 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
                 return;
             }
             MessagesList.UpdateLayout();
+            if (FindScrollViewer(MessagesList) is { } viewer)
+            {
+                viewer.ChangeView(null, viewer.ScrollableHeight, null, disableAnimation: true);
+            }
             MessagesList.ScrollIntoView(_messages[^1], ScrollIntoViewAlignment.Default);
         });
+    }
+
+    /// <summary>在可视树里找 ListView 内部的 ScrollViewer。</summary>
+    private static ScrollViewer? FindScrollViewer(DependencyObject root)
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is ScrollViewer viewer)
+            {
+                return viewer;
+            }
+            if (FindScrollViewer(child) is { } found)
+            {
+                return found;
+            }
+        }
+        return null;
     }
 
     // ---------------- 局域网互传 ----------------
@@ -997,6 +1027,9 @@ public sealed class ChatMessageVm
 
     public Visibility ImageVisibility =>
         !Recalled && Image is not null ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>图片显示上限：表情包与网页端一致（130），普通图片消息保持 360。</summary>
+    public double ImageMaxSize => Kind == "sticker" ? 130 : 360;
 
     public Visibility FileVisibility =>
         !Recalled && (Kind is "file" or "video") ? Visibility.Visible : Visibility.Collapsed;

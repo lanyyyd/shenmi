@@ -179,6 +179,14 @@ public sealed partial class CloudSavePage : Page
         }
     }
 
+    private async void OnMenuUnshare(object sender, RoutedEventArgs e)
+    {
+        if (GetMenuItem(sender) is { } item)
+        {
+            await ShareAsync([item.Id], shared: false);
+        }
+    }
+
     private async void OnMenuSharedDownloadTo(object sender, RoutedEventArgs e)
     {
         if (GetMenuItem(sender) is { } item)
@@ -209,7 +217,10 @@ public sealed partial class CloudSavePage : Page
         flyout.Items.Add(BuildMenuItem("下载到指定文件夹", item, OnMenuDownloadTo));
         flyout.Items.Add(new MenuFlyoutSeparator());
         flyout.Items.Add(BuildMenuItem("还原此存档", item, OnMenuRestore));
-        flyout.Items.Add(BuildMenuItem("共享存档", item, OnMenuShare));
+        // 已共享的存档，菜单项改为「取消共享」。
+        flyout.Items.Add(item.Shared
+            ? BuildMenuItem("取消共享", item, OnMenuUnshare)
+            : BuildMenuItem("共享存档", item, OnMenuShare));
         flyout.ShowAt(element, new FlyoutShowOptions { Position = e.GetPosition(element) });
         e.Handled = true;
     }
@@ -251,11 +262,20 @@ public sealed partial class CloudSavePage : Page
         return null;
     }
 
-    /// <summary>下载并解压到目标目录（植物大战僵尸为固定目录；我的世界需选择目录）。</summary>
+    /// <summary>
+    /// 下载并解压到目标目录（植物大战僵尸为固定目录；我的世界需选择目录）。
+    /// 还原是「替换」而非「合并」：直接解压会把新旧存档混在一起（旧存档残留的文件不会被清掉），
+    /// 所以先弹窗确认，确认后清空目标目录再解压。
+    /// </summary>
     private async Task RestoreAsync(CloudSaveItem item)
     {
         var destDir = await ResolveRestoreDirAsync(item);
         if (destDir is null)
+        {
+            return;
+        }
+
+        if (!await ConfirmRestoreAsync())
         {
             return;
         }
@@ -270,6 +290,7 @@ public sealed partial class CloudSavePage : Page
                 return;
             }
             Directory.CreateDirectory(destDir);
+            ClearDirectoryContents(destDir);
             ZipFile.ExtractToDirectory(tempZip, destDir, overwriteFiles: true);
             ShowInfo($"已还原到：{destDir}", InfoBarSeverity.Success);
         }
@@ -296,6 +317,39 @@ public sealed partial class CloudSavePage : Page
             ShowInfo("已取消（我的世界需选择还原目标文件夹）", InfoBarSeverity.Informational);
         }
         return folder;
+    }
+
+    /// <summary>还原前的二次确认（默认停在「取消」上，避免误触覆盖）。</summary>
+    private async Task<bool> ConfirmRestoreAsync()
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "还原存档",
+            Content = "确定还原存档后将会覆盖现有存档，建议将现有存档备份后再进行还原存档喵~",
+            PrimaryButtonText = "继续还原",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    /// <summary>清空目录内的全部文件与子目录（保留目录本身），防止新旧存档叠加。</summary>
+    private static void ClearDirectoryContents(string dir)
+    {
+        var info = new DirectoryInfo(dir);
+        if (!info.Exists)
+        {
+            return;
+        }
+        foreach (var file in info.EnumerateFiles())
+        {
+            file.Delete();
+        }
+        foreach (var sub in info.EnumerateDirectories())
+        {
+            sub.Delete(recursive: true);
+        }
     }
 
     private async Task DownloadToFolderAsync(CloudSaveItem item)
@@ -330,24 +384,26 @@ public sealed partial class CloudSavePage : Page
         await ShareAsync(ids);
     }
 
-    private async Task ShareAsync(int[] ids)
+    /// <summary>共享 / 取消共享（shared: false 即取消）。</summary>
+    private async Task ShareAsync(int[] ids, bool shared = true)
     {
+        var action = shared ? "共享" : "取消共享";
         try
         {
-            var result = await _service.ShareAsync(ids, shared: true);
+            var result = await _service.ShareAsync(ids, shared);
             if (result.Ok)
             {
-                ShowInfo("已共享给所有用户", InfoBarSeverity.Success);
+                ShowInfo(shared ? "已共享给所有用户" : "已取消共享", InfoBarSeverity.Success);
                 await ReloadAsync();
             }
             else
             {
-                ShowInfo(result.Msg ?? "共享失败", InfoBarSeverity.Error);
+                ShowInfo(result.Msg ?? $"{action}失败", InfoBarSeverity.Error);
             }
         }
         catch (Exception ex)
         {
-            ShowInfo($"共享失败：{ex.Message}", InfoBarSeverity.Error);
+            ShowInfo($"{action}失败：{ex.Message}", InfoBarSeverity.Error);
         }
     }
 

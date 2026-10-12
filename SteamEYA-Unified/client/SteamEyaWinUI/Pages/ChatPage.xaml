@@ -247,8 +247,8 @@
                                                 Visibility="{x:Bind TextVisibility}" />
                                             <Image
                                                 Source="{x:Bind Image}"
-                                                MaxWidth="360"
-                                                MaxHeight="360"
+                                                MaxWidth="{x:Bind ImageMaxSize}"
+                                                MaxHeight="{x:Bind ImageMaxSize}"
                                                 Stretch="Uniform"
                                                 Visibility="{x:Bind ImageVisibility}" />
                                             <Button
