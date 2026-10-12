@@ -209,7 +209,8 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
                 var dataFolder = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SteamEYA", "webview2");
                 Directory.CreateDirectory(dataFolder);
-                env = await CoreWebView2Environment.CreateAsync(null, dataFolder);
+                env = await CoreWebView2Environment.CreateAsync(
+                    browserExecutableFolder: null, userDataFolder: dataFolder, options: null);
             }
             catch (Exception ex)
             {
