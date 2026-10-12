@@ -101,6 +101,21 @@ jobs:
           Copy-Item "SteamEYA-Unified\web\*" "$env:GITHUB_WORKSPACE\publish\web\" -Recurse -Force
           Get-ChildItem "$env:GITHUB_WORKSPACE\publish\web" | Select-Object -ExpandProperty Name
 
+      # ---- 云游戏引擎（Selenium 本地服务）----
+      # 客户端点开「云游戏上号」会拉起 <安装目录>\engine\steameya-engine.exe（见 EngineLauncher），
+      # 必须随安装包一起下发，否则页面提示「云游戏引擎未启动」。
+      # 入口用 --collect-all selenium：selenium 在代码里是延迟导入，且自带 selenium-manager 二进制，静态分析收集不全。
+      - name: 构建云游戏引擎（PyInstaller onefile）
+        shell: pwsh
+        working-directory: SteamEYA-Unified/engine
+        run: |
+          python -m pip install -r requirements.txt fastapi "uvicorn[standard]" pyinstaller
+          python -m PyInstaller --noconfirm --clean --onefile --name steameya-engine `
+            --collect-all selenium local_service.py
+          if (-not (Test-Path "dist\steameya-engine.exe")) { throw "云游戏引擎 exe 未生成" }
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\publish\engine" | Out-Null
+          Copy-Item "dist\steameya-engine.exe" "$env:GITHUB_WORKSPACE\publish\engine\" -Force
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup -y --no-progress
