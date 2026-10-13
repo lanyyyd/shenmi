@@ -5,9 +5,11 @@
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import pathlib
+import quopri
 import re
 import uuid
 from typing import Optional
@@ -31,6 +33,57 @@ _STICKER_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 
 def _now() -> int:
     return security.now_ms()
+
+
+# MIME encoded-word（RFC2047）：=?charset?B/Q?text?=
+_MIME_WORD_RE = re.compile(r"=\?([^?]+)\?([BbQq])\?([^?]*)\?=")
+
+
+def _decode_upload_name(name: str) -> str:
+    """还原被 MIME(RFC2047) 或 latin-1 误编码的上传文件名。
+
+    .NET HttpClient 的 MultipartFormDataContent 上传非 ASCII（中文）文件名时，会把它编码成
+    RFC2047 encoded-word（形如 =?utf-8?B?...?=）。服务端若原样使用，中文名会变成一长串乱码，
+    且 Path.suffix 取不到扩展名，导致图片/视频被误判为普通文件（无法预览、下载名也不对）。
+    """
+    if not name:
+        return name
+
+    def _word(m: "re.Match[str]") -> str:
+        charset, enc, text = m.group(1), m.group(2).upper(), m.group(3)
+        try:
+            if enc == "B":
+                raw = base64.b64decode(text + "=" * (-len(text) % 4))
+            else:
+                raw = quopri.decodestring(text.replace("_", " ").encode("ascii"))
+            return raw.decode(charset, "replace")
+        except Exception:
+            return m.group(0)
+
+    name = _MIME_WORD_RE.sub(_word, name)
+    try:
+        return name.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return name
+
+
+def _sniff_media(data: bytes) -> tuple[str, str]:
+    """按文件头判断媒体类型，返回 (kind, ext)；识别不出返回 ('', '')。"""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image", ".png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image", ".jpg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image", ".gif"
+    if data.startswith(b"BM"):
+        return "image", ".bmp"
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "image", ".webp"
+    if data[4:8] == b"ftyp":
+        return "video", ".mp4"
+    if data.startswith(b"\x1a\x45\xdf\xa3"):
+        return "video", ".webm"
+    return "", ""
 
 
 def _err(msg: str, code: int = 400):
@@ -388,14 +441,23 @@ async def upload_file(request: Request, file: UploadFile = File(...),
     data = await file.read()
     if len(data) > MAX_UPLOAD:
         return _err("文件超过 50MB 限制", 413)
-    ext = pathlib.Path(file.filename or "").suffix.lower()
+    raw_name = _decode_upload_name(file.filename or "")
+    ext = pathlib.Path(raw_name).suffix.lower()
     mt = (file.content_type or "").lower()
     is_img = mt.startswith("image/") or ext in _IMG_EXT
     is_vid = (not is_img) and (mt.startswith("video/") or ext in _VID_EXT)
+    if not is_img and not is_vid:
+        # 文件名没有可用扩展名（被 MIME 编码截断、或本就无扩展名）时按文件头兜底，
+        # 否则图片/视频会被误判成普通文件，既不能预览、下载名也不对。
+        kind, sniff_ext = _sniff_media(data)
+        if kind == "image":
+            is_img, ext = True, (ext or sniff_ext)
+        elif kind == "video":
+            is_vid, ext = True, (ext or sniff_ext)
     sub = "images" if is_img else ("videos" if is_vid else "files")
     name = f"{_now()}-{security.gen_token(6)}{ext[:12]}"
     (UPLOAD_DIR / sub / name).write_bytes(data)
-    return {"ok": True, "url": f"/uploads/{sub}/{name}", "name": file.filename or name,
+    return {"ok": True, "url": f"/uploads/{sub}/{name}", "name": raw_name or name,
             "size": len(data), "isImage": is_img, "isVideo": is_vid}
 
 
