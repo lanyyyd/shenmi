@@ -140,16 +140,30 @@ internal sealed class CloudActionResultDto
     public int? TotalDuration { get; set; }
 }
 
+/// <summary>
+/// 离线同步消息。服务端与本地网关均使用 snake_case 字段名（client_msg_id / to_username /
+/// from_username / created_at），而 JSON 上下文用 camelCase 策略不会转换下划线，
+/// 故必须显式映射，否则推送时缺少 install_id 之外的字段，同步会静默失败。
+/// </summary>
 internal sealed class SyncMessage
 {
+    [JsonPropertyName("client_msg_id")]
     public string ClientMsgId { get; set; } = string.Empty;
+
     public string Room { get; set; } = "group";
+
+    [JsonPropertyName("to_username")]
     public string ToUsername { get; set; } = string.Empty;
+
+    [JsonPropertyName("from_username")]
     public string FromUsername { get; set; } = string.Empty;
+
     public string Type { get; set; } = "text";
     public string Content { get; set; } = string.Empty;
     public JsonElement? Mentions { get; set; }
     public JsonElement? File { get; set; }
+
+    [JsonPropertyName("created_at")]
     public long CreatedAt { get; set; }
 }
 
@@ -162,7 +176,9 @@ internal sealed class SyncPendingDto
 
 internal sealed class SyncPushRequest
 {
+    [JsonPropertyName("install_id")]
     public string InstallId { get; set; } = string.Empty;
+
     public SyncMessage[] Messages { get; set; } = [];
 }
 
@@ -176,7 +192,10 @@ internal sealed class SyncPushResultDto
 
 internal sealed class SyncMarkRequest
 {
+    [JsonPropertyName("install_id")]
     public string InstallId { get; set; } = string.Empty;
+
+    [JsonPropertyName("client_msg_ids")]
     public string[] ClientMsgIds { get; set; } = [];
 }
 

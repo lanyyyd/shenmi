@@ -783,6 +783,44 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         }
     }
 
+    private async void ChatSyncButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (SessionState.Offline || string.IsNullOrWhiteSpace(SessionState.Token))
+        {
+            AppState.ShowStatus(Loc.T("Settings_ChatSync_OnlineOnly"), InfoBarSeverity.Warning);
+            return;
+        }
+
+        ChatSyncButton.IsEnabled = false;
+        AppState.ShowStatus(Loc.T("Settings_ChatSync_Pushing"), InfoBarSeverity.Informational);
+        try
+        {
+            // 先拉起本地网关，否则读不到 /api/sync/pending
+            await GatewayLauncher.EnsureStartedAsync(SessionState.Nickname);
+            var (ok, pushed, msg) = await new SyncService().TrySyncAsync();
+            if (ok && pushed > 0)
+            {
+                AppState.ShowStatus(Loc.Tf("Settings_ChatSync_Success_Format", pushed), InfoBarSeverity.Success);
+            }
+            else if (ok && pushed == 0)
+            {
+                AppState.ShowStatus(Loc.T("Settings_ChatSync_Nothing"), InfoBarSeverity.Informational);
+            }
+            else
+            {
+                AppState.ShowStatus(Loc.Tf("Settings_ChatSync_Fail_Format", msg ?? "unknown"), InfoBarSeverity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppState.ShowStatus(Loc.Tf("Settings_ChatSync_Fail_Format", ex.Message), InfoBarSeverity.Error);
+        }
+        finally
+        {
+            ChatSyncButton.IsEnabled = true;
+        }
+    }
+
     private void OpenDataFolderButton_Click(object sender, RoutedEventArgs e)
     {
         var folder = AppState.SettingsService.AppFolderPath;
