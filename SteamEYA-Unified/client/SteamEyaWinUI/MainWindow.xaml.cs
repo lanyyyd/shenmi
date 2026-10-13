@@ -214,12 +214,12 @@ public sealed partial class MainWindow : Window
         }
         panel.Children.Add(new TextBlock
         {
-            Text = Loc.Tf("Update_Dialog_Size_Format", FormatUpdateBytes(info.FileSize)),
+            Text = Loc.Tf("Update_Dialog_Size_Format", UpdateFlow.FormatBytes(info.FileSize)),
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
         });
         panel.Children.Add(new TextBlock
         {
-            Text = Loc.Tf("Update_Dialog_Time_Format", FormatUpdateTime(info.UpdatedAt)),
+            Text = Loc.Tf("Update_Dialog_Time_Format", UpdateFlow.FormatTime(info.UpdatedAt)),
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
         });
 
