@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-mode="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>更新管理 · 管理后台</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+body{overflow:auto}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:26px 18px 60px}
+.top{display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.top h1{font-size:21px;font-weight:800;letter-spacing:-.3px}
+.top .spacer{flex:1}
+.btn{padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;transition:.2s;
+  background:var(--panel);border:1px solid var(--line);color:var(--text)}
+html[data-theme="light"] .btn:not(.pri){background:#fff}
+.btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn.pri{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;border:none}
+.btn.pri:hover{filter:brightness(1.08);color:#fff}
+.btn.danger{color:#EF4444}
+.btn.danger:hover{border-color:#EF4444}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur)}
+html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
+.card-h{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.card-h h2{font-size:15px;font-weight:700}
+.card-h .spacer{flex:1}
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl th{text-align:left;padding:11px 14px;font-size:11.5px;font-weight:700;color:var(--hint);
+  border-bottom:1px solid var(--line);white-space:nowrap;letter-spacing:.4px}
+.tbl td{padding:12px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:var(--panel-soft)}
+html[data-theme="light"] .tbl tr:hover td{background:#FAFBFC}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
+.chip{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:6px;font-weight:700;
+  background:var(--primary-l);color:var(--primary)}
+.chip.gray{background:var(--panel-soft);color:var(--hint);border:1px solid var(--line)}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts button{font-size:12px;padding:5px 10px;border-radius:7px;background:var(--panel-soft);
+  border:1px solid var(--line);transition:.15s;color:var(--muted)}
+html[data-theme="light"] .acts button{background:#F7F8FA}
+.acts button:hover{border-color:var(--primary);color:var(--primary)}
+.acts button.dg:hover{border-color:#EF4444;color:#EF4444}
+.deny{text-align:center;padding:80px 20px}.deny h2{font-size:19px;margin-bottom:10px}
+.deny p{color:var(--muted);font-size:13.5px;margin-bottom:20px}
+.empty{text-align:center;color:var(--hint);padding:40px 0;font-size:13.5px}
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(20px);z-index:300;
+  padding:11px 20px;border-radius:11px;font-size:13.5px;font-weight:600;color:#fff;
+  background:linear-gradient(135deg,var(--primary),var(--primary-2));opacity:0;pointer-events:none;transition:.25s}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+/* 表单 */
+.form{padding:16px 18px}
+.fld{margin-bottom:14px}
+.fld>label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:7px}
+.fld input,.fld textarea{width:100%;padding:10px 13px;border-radius:10px;font-size:13.5px;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+.fld input:focus,.fld textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-l)}
+.fld input[type=file]{padding:8px 10px}
+.hint{font-size:12px;color:var(--hint);margin-top:6px;line-height:1.7}
+@media(max-width:760px){
+  .tbl thead{display:none}
+  .tbl tr{display:block;border-bottom:1px solid var(--line);padding:10px 4px}
+  .tbl td{display:flex;justify-content:space-between;gap:10px;border:none;padding:5px 12px}
+  .tbl td::before{content:attr(data-l);color:var(--hint);font-size:11.5px;font-weight:700;flex-shrink:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>📦 更新管理</h1>
+    <span id="whoami" class="mono"></span>
+    <div class="spacer"></div>
+    <button class="btn" onclick="location.href='/admin.html'">← 聊天管理</button>
+    <button class="btn" onclick="location.href='/admin-steam.html'">Steam 账号</button>
+    <button class="btn" onclick="location.href='/admin-cloud.html'">云游戏账号</button>
+    <button class="btn" onclick="location.href='/admin-points.html'">积分管理</button>
+    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
+    <button class="btn danger" onclick="logout()">退出</button>
+  </div>
+
+  <div id="deny" class="deny hidden">
+    <h2>需要管理员权限</h2>
+    <p>请用管理员账号登录后再访问本页</p>
+    <button class="btn pri" onclick="location.href='/'">去登录</button>
+  </div>
+
+  <div id="main" class="hidden">
+    <!-- 上传新版本 -->
+    <div class="card">
+      <div class="card-h"><h2>上传新版本</h2></div>
+      <div class="form">
+        <div class="fld"><label>安装包文件</label>
+          <input type="file" id="upFile" accept=".exe">
+          <div class="hint">仅支持 .exe 安装包；上传后该版本默认作为「历史版本」，可在下方设为当前下发版本。</div>
+        </div>
+        <div class="fld"><label>版本号</label>
+          <input id="upVersion" placeholder="例如 0.1.42" maxlength="60">
+        </div>
+        <div class="fld"><label>更新内容（可多行）</label>
+          <textarea id="upNotes" rows="5" placeholder="本次更新说明，一行一条即可"></textarea>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <button class="btn pri" id="upBtn" onclick="uploadRelease()">上传</button>
+        </div>
+        <div class="form-msg" id="upStatus" style="text-align:left"></div>
+      </div>
+    </div>
+
+    <!-- 版本列表 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>版本列表</h2>
+        <div class="spacer"></div>
+        <button class="btn" onclick="loadReleases()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr>
+            <th>版本号</th><th>文件大小</th><th>更新时间</th><th>下载次数</th><th>是否当前版本</th><th>操作</th>
+          </tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script>
+let RELEASES = [];
+const $ = (id) => document.getElementById(id);
+let tTimer; function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(tTimer); tTimer=setTimeout(()=>t.classList.remove('on'),2200); }
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+/* 文件大小格式化：B / KB / MB */
+function fmtSize(b){ b = Number(b)||0;
+  if(b < 1024) return b + ' B';
+  if(b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(2) + ' MB'; }
+/* 时间格式化：YYYY-MM-DD HH:mm（本地时间，入参为毫秒时间戳） */
+function fmtTime(ts){ if(!ts) return '—'; const d=new Date(ts); if(isNaN(d)) return '—'; const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+
+/* 主题（与聊天管理页共用 localStorage key） */
+const ICONS={auto:'🌗 自动',light:'☀️ 浅色',dark:'🌙 深色'};
+function resolveTheme(mode){ if(mode==='light')return 'light'; if(mode==='dark')return 'dark';
+  const h=new Date().getHours(); return (h>=6&&h<18)?'light':'dark'; }
+function applyTheme(mode){ document.documentElement.dataset.mode=mode; document.documentElement.dataset.theme=resolveTheme(mode);
+  try{localStorage.setItem('chat_theme_mode',mode)}catch(e){} const b=$('themeBtn'); if(b) b.textContent=ICONS[mode]; }
+function cycleTheme(){ const o=['auto','light','dark']; const cur=document.documentElement.dataset.mode||'auto';
+  applyTheme(o[(o.indexOf(cur)+1)%o.length]); }
+(function(){ let s='auto'; try{s=localStorage.getItem('chat_theme_mode')||'auto'}catch(e){} applyTheme(s); })();
+
+/* 数据 */
+async function loadReleases(){
+  const r = await fetch('/api/admin/releases'); const d = await r.json().catch(()=>({}));
+  if(!d.ok){ toast(d.error||'加载失败'); return; }
+  RELEASES = d.releases || [];
+  renderReleases();
+}
+function renderReleases(){
+  if(!RELEASES.length){ $('tbody').innerHTML = '<tr><td colspan="6" class="empty">还没有上传过安装包</td></tr>'; return; }
+  $('tbody').innerHTML = RELEASES.map(x=>`
+    <tr>
+      <td data-l="版本号"><b>${esc(x.version)}</b>
+        ${x.fileName?`<div class="mono" style="margin-top:4px">${esc(x.fileName)}</div>`:''}
+        ${x.notes?`<div class="mono" style="margin-top:2px;white-space:pre-wrap">${esc(x.notes)}</div>`:''}</td>
+      <td data-l="文件大小"><span class="mono">${fmtSize(x.fileSize)}</span></td>
+      <td data-l="更新时间"><span class="mono">${fmtTime(x.updatedAt)}</span></td>
+      <td data-l="下载次数">${esc(x.downloadCount ?? 0)}</td>
+      <td data-l="是否当前版本">${x.active ? '<span class="chip">当前版本</span>' : '<span class="chip gray">历史版本</span>'}</td>
+      <td data-l="操作"><div class="acts">
+        ${x.active ? '' : `<button onclick="activateRelease(${x.id})">设为当前版本</button>`}
+        <button class="dg" onclick="deleteRelease(${x.id},'${esc(x.version)}')">删除</button>
+      </div></td>
+    </tr>`).join('');
+}
+function upStatus(t, err){ const el=$('upStatus'); if(!el) return;
+  el.textContent = t || ''; el.className = 'form-msg ' + (err ? 'err' : 'ok'); }
+async function uploadRelease(){
+  const f = $('upFile').files[0];
+  if(!f) return upStatus('请选择安装包文件', true);
+  const version = $('upVersion').value.trim();
+  if(!version) return upStatus('请填写版本号', true);
+  const notes = $('upNotes').value.trim();
+  const btn = $('upBtn'); btn.disabled = true;
+  upStatus('上传中…');
+  const fd = new FormData();
+  fd.append('file', f);
+  fd.append('version', version);
+  fd.append('notes', notes);
+  try {
+    const r = await fetch('/api/admin/releases', { method:'POST', body: fd });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ upStatus('上传失败：' + (d.detail || d.error || '未知错误'), true); toast('上传失败'); return; }
+    upStatus('✅ 上传成功');
+    toast('已上传 ' + version);
+    $('upFile').value = ''; $('upVersion').value = ''; $('upNotes').value = '';
+    loadReleases();
+  } catch(e){
+    upStatus('上传失败：' + e.message, true); toast('上传失败');
+  } finally {
+    btn.disabled = false;
+  }
+}
+async function activateRelease(id){
+  const r = await fetch('/api/admin/releases/activate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id }) });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ toast(d.detail || d.error || '操作失败'); return; }
+  toast('已设为当前下发版本'); loadReleases();
+}
+async function deleteRelease(id, version){
+  if(!confirm('确定删除版本「' + version + '」？\n\n该版本的安装包文件也会一并删除，此操作不可恢复。')) return;
+  const r = await fetch('/api/admin/releases/' + id, { method:'DELETE' });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ toast(d.detail || d.error || '删除失败'); return; }
+  toast('已删除 ' + version); loadReleases();
+}
+async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
+
+/* 启动 */
+(async function(){
+  const r = await fetch('/api/me'); const d = await r.json();
+  if(!d.ok || !d.user || !d.user.isAdmin){ $('deny').classList.remove('hidden'); return; }
+  $('whoami').textContent = '@' + d.user.username;
+  $('main').classList.remove('hidden');
+  loadReleases();
+})();
+</script>
+</body>
+</html>

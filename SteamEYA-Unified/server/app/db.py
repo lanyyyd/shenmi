@@ -234,6 +234,74 @@ CREATE TABLE IF NOT EXISTS cloud_saves (
 CREATE INDEX IF NOT EXISTS idx_save_user ON cloud_saves(user_id, game);
 CREATE INDEX IF NOT EXISTS idx_save_shared ON cloud_saves(game, shared);
 
+-- ============ 客户端更新管理 ============
+-- 管理员在后台「更新管理」上传的安装包；active=1 的那条即当前下发版本。
+CREATE TABLE IF NOT EXISTS app_releases (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    version        TEXT NOT NULL,             -- 版本号，如 0.1.42
+    notes          TEXT DEFAULT '',           -- 更新内容（多行文本）
+    file_path      TEXT NOT NULL,             -- /uploads/releases/xxx.exe
+    file_name      TEXT DEFAULT '',
+    file_size      INTEGER DEFAULT 0,
+    sha256         TEXT DEFAULT '',
+    active         INTEGER DEFAULT 1,
+    download_count INTEGER DEFAULT 0,
+    created_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_release_active ON app_releases(active, id);
+
+-- ============ 积分系统 ============
+CREATE TABLE IF NOT EXISTS point_accounts (
+    user_id    INTEGER PRIMARY KEY,
+    balance    INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL
+);
+
+-- 积分明细（每次变动一条；balance_after 便于对账）
+CREATE TABLE IF NOT EXISTS point_logs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL,
+    delta         INTEGER NOT NULL,           -- 变动：+收入 / -支出
+    balance_after INTEGER NOT NULL,
+    type          TEXT NOT NULL,              -- signin / redeem / transfer_out / transfer_in / admin
+    ref           TEXT DEFAULT '',            -- 商品名 / 对方用户名 / 签到日期
+    remark        TEXT DEFAULT '',
+    created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plog_user ON point_logs(user_id, id);
+
+-- 积分商城商品（后台可增删改，支持图片）
+CREATE TABLE IF NOT EXISTS point_items (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    image_path  TEXT DEFAULT '',
+    price       INTEGER NOT NULL DEFAULT 0,
+    stock       INTEGER NOT NULL DEFAULT -1,  -- -1 表示不限量
+    active      INTEGER DEFAULT 1,
+    created_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS point_redemptions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    item_id    INTEGER NOT NULL,
+    item_name  TEXT DEFAULT '',
+    price      INTEGER NOT NULL,
+    status     TEXT DEFAULT 'redeemed',       -- redeemed / issued
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_redeem_user ON point_redemptions(user_id, id);
+
+-- 每日签到（user_id + 北京时间日期 唯一，保证「每天首次」只发一次）
+CREATE TABLE IF NOT EXISTS daily_signin (
+    user_id    INTEGER NOT NULL,
+    day        TEXT NOT NULL,                 -- 北京时间 YYYY-MM-DD
+    points     INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, day)
+);
+
 -- ============ 系统配置 ============
 CREATE TABLE IF NOT EXISTS settings (
     key        TEXT PRIMARY KEY,

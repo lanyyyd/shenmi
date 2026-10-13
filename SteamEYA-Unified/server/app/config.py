@@ -19,7 +19,10 @@ KEY_PATH = DATA_DIR / "master.key"
 UPLOAD_DIR = DATA_DIR / "uploads"
 AVATAR_DIR = UPLOAD_DIR / "avatars"
 STICKER_DIR = UPLOAD_DIR / "stickers"
-for _d in (UPLOAD_DIR, AVATAR_DIR, STICKER_DIR, UPLOAD_DIR / "images", UPLOAD_DIR / "videos", UPLOAD_DIR / "files"):
+UPDATE_DIR = UPLOAD_DIR / "releases"          # 客户端安装包（「更新管理」上传）
+POINT_ITEM_DIR = UPLOAD_DIR / "points"        # 积分商城商品图片
+for _d in (UPLOAD_DIR, AVATAR_DIR, STICKER_DIR, UPDATE_DIR, POINT_ITEM_DIR,
+           UPLOAD_DIR / "images", UPLOAD_DIR / "videos", UPLOAD_DIR / "files"):
     _d.mkdir(parents=True, exist_ok=True)
 
 # 聊天前端静态目录（web/，来自原聊天室 public/）

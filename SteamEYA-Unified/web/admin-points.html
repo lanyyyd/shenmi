@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-mode="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>积分管理 · 管理后台</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+body{overflow:auto}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:26px 18px 60px}
+.top{display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.top h1{font-size:21px;font-weight:800;letter-spacing:-.3px}
+.top .spacer{flex:1}
+.btn{padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;transition:.2s;
+  background:var(--panel);border:1px solid var(--line);color:var(--text)}
+html[data-theme="light"] .btn:not(.pri){background:#fff}
+.btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn.pri{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;border:none}
+.btn.pri:hover{filter:brightness(1.08);color:#fff}
+.btn.danger{color:#EF4444}
+.btn.danger:hover{border-color:#EF4444}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur)}
+html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
+.card-h{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.card-h h2{font-size:15px;font-weight:700}
+.card-h .spacer{flex:1}
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl th{text-align:left;padding:11px 14px;font-size:11.5px;font-weight:700;color:var(--hint);
+  border-bottom:1px solid var(--line);white-space:nowrap;letter-spacing:.4px}
+.tbl td{padding:12px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:var(--panel-soft)}
+html[data-theme="light"] .tbl tr:hover td{background:#FAFBFC}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
+.chip{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:6px;font-weight:700;
+  background:var(--primary-l);color:var(--primary)}
+.chip.gray{background:var(--panel-soft);color:var(--hint);border:1px solid var(--line)}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts button{font-size:12px;padding:5px 10px;border-radius:7px;background:var(--panel-soft);
+  border:1px solid var(--line);transition:.15s;color:var(--muted)}
+html[data-theme="light"] .acts button{background:#F7F8FA}
+.acts button:hover{border-color:var(--primary);color:var(--primary)}
+.acts button.dg:hover{border-color:#EF4444;color:#EF4444}
+.thumb{width:48px;height:48px;border-radius:8px;object-fit:cover;border:1px solid var(--line);
+  background:var(--panel-soft);display:block}
+.thumb-ph{width:48px;height:48px;border-radius:8px;border:1px dashed var(--line);display:flex;
+  align-items:center;justify-content:center;font-size:10.5px;color:var(--hint);background:var(--panel-soft)}
+.modal{position:fixed;inset:0;z-index:150;background:var(--mask);display:none;align-items:center;justify-content:center;padding:20px}
+.modal.on{display:flex}
+.modal-c{width:100%;max-width:460px;max-height:88vh;overflow:auto;background:var(--panel);border:1px solid var(--line);
+  border-radius:18px;padding:26px 24px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+html[data-theme="light"] .modal-c{background:#fff;box-shadow:var(--shadow-lg)}
+.modal-c h3{font-size:17px;font-weight:700;margin-bottom:16px}
+.modal-c .field{margin-bottom:13px}
+.modal-c .field label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px}
+.modal-c .field input,.modal-c .field textarea{width:100%;padding:11px 13px;border-radius:10px;
+  font-size:14.5px;background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c .field textarea{background:#FAFBFC}
+.modal-c .field input:focus,.modal-c .field textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3.5px var(--primary-l)}
+.modal-f{display:flex;gap:10px;margin-top:18px}
+.modal-f .btn{flex:1;text-align:center}
+.deny{text-align:center;padding:80px 20px}.deny h2{font-size:19px;margin-bottom:10px}
+.deny p{color:var(--muted);font-size:13.5px;margin-bottom:20px}
+.empty{text-align:center;color:var(--hint);padding:40px 0;font-size:13.5px}
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(20px);z-index:300;
+  padding:11px 20px;border-radius:11px;font-size:13.5px;font-weight:600;color:#fff;
+  background:linear-gradient(135deg,var(--primary),var(--primary-2));opacity:0;pointer-events:none;transition:.25s}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+/* 表单 */
+.form{padding:16px 18px}
+.fld{margin-bottom:14px}
+.fld>label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:7px}
+.fld input{width:100%;padding:10px 13px;border-radius:10px;font-size:13.5px;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+.fld input:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-l)}
+.inline{display:flex;gap:14px;flex-wrap:wrap}
+.inline .fld{flex:1;min-width:150px;margin:0}
+.hint{font-size:12px;color:var(--hint);margin-top:6px;line-height:1.7}
+@media(max-width:760px){
+  .tbl thead{display:none}
+  .tbl tr{display:block;border-bottom:1px solid var(--line);padding:10px 4px}
+  .tbl td{display:flex;justify-content:space-between;gap:10px;border:none;padding:5px 12px}
+  .tbl td::before{content:attr(data-l);color:var(--hint);font-size:11.5px;font-weight:700;flex-shrink:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>🎁 积分管理</h1>
+    <span id="whoami" class="mono"></span>
+    <div class="spacer"></div>
+    <button class="btn" onclick="location.href='/admin.html'">← 聊天管理</button>
+    <button class="btn" onclick="location.href='/admin-steam.html'">Steam 账号</button>
+    <button class="btn" onclick="location.href='/admin-cloud.html'">云游戏账号</button>
+    <button class="btn" onclick="location.href='/admin-update.html'">更新管理</button>
+    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
+    <button class="btn danger" onclick="logout()">退出</button>
+  </div>
+
+  <div id="deny" class="deny hidden">
+    <h2>需要管理员权限</h2>
+    <p>请用管理员账号登录后再访问本页</p>
+    <button class="btn pri" onclick="location.href='/'">去登录</button>
+  </div>
+
+  <div id="main" class="hidden">
+    <!-- 每日签到设置 -->
+    <div class="card">
+      <div class="card-h"><h2>每日签到设置</h2></div>
+      <div class="form">
+        <div class="inline">
+          <div class="fld"><label>最小积分</label>
+            <input type="number" id="sMin" min="0" step="1" placeholder="例如 1"></div>
+          <div class="fld"><label>最大积分</label>
+            <input type="number" id="sMax" min="0" step="1" placeholder="例如 10"></div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px">
+          <button class="btn pri" id="sBtn" onclick="saveSigninConfig()">保存</button>
+          <button class="btn" onclick="loadSigninConfig()">重新加载</button>
+        </div>
+        <div class="form-msg" id="sMsg" style="text-align:left"></div>
+        <div class="hint">说明：用户每日签到时，随机获得 [最小积分, 最大积分] 区间内的积分。</div>
+      </div>
+    </div>
+
+    <!-- 积分商品 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>积分商品</h2>
+        <div class="spacer"></div>
+        <button class="btn pri" onclick="openItem()">＋ 新增商品</button>
+        <button class="btn" onclick="loadItems()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr>
+            <th>图片</th><th>商品名</th><th>描述</th><th>积分价格</th><th>库存</th><th>状态</th><th>操作</th>
+          </tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 新增 / 编辑商品 -->
+<div class="modal" id="mItem">
+  <div class="modal-c">
+    <h3 id="itemTitle">新增商品</h3>
+    <input type="hidden" id="itemId">
+    <div class="field"><label>商品名</label><input id="itemName" placeholder="商品名称" maxlength="60"></div>
+    <div class="field"><label>商品描述</label><textarea id="itemDesc" rows="3" placeholder="商品描述（选填）"></textarea></div>
+    <div class="field"><label>积分价格</label><input type="number" id="itemPrice" min="0" step="1" placeholder="例如 100"></div>
+    <div class="field"><label>库存（-1 = 不限量）</label><input type="number" id="itemStock" step="1" placeholder="例如 10，填 -1 表示不限量"></div>
+    <div class="field"><label>商品图片（可选）</label>
+      <input type="file" id="itemFile" accept="image/*">
+      <div class="hint" id="itemImgHint"></div>
+    </div>
+    <div class="form-msg" id="itemMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mItem')">取消</button>
+      <button class="btn pri" id="itemSaveBtn" onclick="saveItem()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script>
+let ITEMS = [];
+const $ = (id) => document.getElementById(id);
+let tTimer; function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(tTimer); tTimer=setTimeout(()=>t.classList.remove('on'),2200); }
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtTime(ts){ if(!ts) return '—'; const d=new Date(ts); if(isNaN(d)) return '—'; const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+
+/* 主题（与聊天管理页共用 localStorage key） */
+const ICONS={auto:'🌗 自动',light:'☀️ 浅色',dark:'🌙 深色'};
+function resolveTheme(mode){ if(mode==='light')return 'light'; if(mode==='dark')return 'dark';
+  const h=new Date().getHours(); return (h>=6&&h<18)?'light':'dark'; }
+function applyTheme(mode){ document.documentElement.dataset.mode=mode; document.documentElement.dataset.theme=resolveTheme(mode);
+  try{localStorage.setItem('chat_theme_mode',mode)}catch(e){} const b=$('themeBtn'); if(b) b.textContent=ICONS[mode]; }
+function cycleTheme(){ const o=['auto','light','dark']; const cur=document.documentElement.dataset.mode||'auto';
+  applyTheme(o[(o.indexOf(cur)+1)%o.length]); }
+(function(){ let s='auto'; try{s=localStorage.getItem('chat_theme_mode')||'auto'}catch(e){} applyTheme(s); })();
+
+/* ---------- 每日签到设置 ---------- */
+async function loadSigninConfig(){
+  const r = await fetch('/api/admin/signin-config'); const d = await r.json().catch(()=>({}));
+  if(!d.ok){ toast(d.error||'加载失败'); return; }
+  $('sMin').value = (d.min ?? '');
+  $('sMax').value = (d.max ?? '');
+}
+async function saveSigninConfig(){
+  const min = Number($('sMin').value), max = Number($('sMax').value);
+  if(!Number.isInteger(min) || !Number.isInteger(max) || min < 0 || max < 0){ return sMsg('请填写非负整数积分', true); }
+  if(min > max){ return sMsg('最小积分不能大于最大积分', true); }
+  const btn = $('sBtn'); btn.disabled = true;
+  try {
+    const r = await fetch('/api/admin/signin-config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ min, max }) });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ sMsg('保存失败：' + (d.detail || d.error || '未知错误'), true); toast('保存失败'); return; }
+    sMsg('✅ 已保存：' + d.min + ' ~ ' + d.max);
+    toast('签到设置已保存');
+    loadSigninConfig();
+  } catch(e){ sMsg('保存失败：' + e.message, true); toast('保存失败'); }
+  finally { btn.disabled = false; }
+}
+function sMsg(t, err){ const el=$('sMsg'); el.textContent = t || ''; el.className = 'form-msg ' + (err ? 'err' : 'ok'); }
+
+/* ---------- 积分商品 ---------- */
+async function loadItems(){
+  const r = await fetch('/api/admin/point-items'); const d = await r.json().catch(()=>({}));
+  if(!d.ok){ toast(d.error||'加载失败'); return; }
+  ITEMS = d.items || [];
+  renderItems();
+}
+function renderItems(){
+  if(!ITEMS.length){ $('tbody').innerHTML = '<tr><td colspan="7" class="empty">还没有添加积分商品</td></tr>'; return; }
+  $('tbody').innerHTML = ITEMS.map(x=>`
+    <tr>
+      <td data-l="图片">${x.image ? `<img class="thumb" src="${esc(x.image)}" alt="">` : '<div class="thumb-ph">无图</div>'}</td>
+      <td data-l="商品名"><b>${esc(x.name)}</b></td>
+      <td data-l="描述"><span class="mono">${esc(x.description || '—')}</span></td>
+      <td data-l="积分价格"><b style="color:var(--primary)">${esc(x.price)}</b></td>
+      <td data-l="库存">${x.stock === -1 ? '<span class="chip gray">不限量</span>' : esc(x.stock)}</td>
+      <td data-l="状态">${x.active ? '<span class="chip">上架</span>' : '<span class="chip gray">已下架</span>'}</td>
+      <td data-l="操作"><div class="acts">
+        <button onclick="openItem(${x.id})">编辑</button>
+        ${x.active ? `<button class="dg" onclick="deleteItem(${x.id})">下架</button>` : ''}
+      </div></td>
+    </tr>`).join('');
+}
+function openItem(id){
+  const it = id ? ITEMS.find(x=>x.id===id) : null;
+  $('itemTitle').textContent = it ? '编辑商品' : '新增商品';
+  $('itemId').value = it ? it.id : '';
+  $('itemName').value = it ? (it.name||'') : '';
+  $('itemDesc').value = it ? (it.description||'') : '';
+  $('itemPrice').value = it ? it.price : '';
+  $('itemStock').value = it ? it.stock : '';
+  $('itemFile').value = '';
+  $('itemImgHint').textContent = it ? (it.image ? '当前已有图片，选择新文件将替换；不选则保留原图。' : '当前无图片。') : '';
+  $('itemMsg').textContent = ''; $('itemMsg').className = 'form-msg';
+  $('mItem').classList.add('on');
+}
+async function saveItem(){
+  const id = $('itemId').value;
+  const name = $('itemName').value.trim();
+  if(!name) return itemMsg('请填写商品名', true);
+  const price = Number($('itemPrice').value);
+  const stock = Number($('itemStock').value);
+  if(!Number.isInteger(price) || price < 0) return itemMsg('积分价格需为非负整数', true);
+  if(!Number.isInteger(stock) || stock < -1) return itemMsg('库存需为整数，-1 表示不限量', true);
+  const desc = $('itemDesc').value.trim();
+  const file = $('itemFile').files[0];
+
+  const fd = new FormData();
+  fd.append('name', name);
+  fd.append('description', desc);
+  fd.append('price', String(price));
+  fd.append('stock', String(stock));
+  if(file) fd.append('file', file);
+
+  const btn = $('itemSaveBtn'); btn.disabled = true;
+  try {
+    let url, method;
+    if(id){
+      fd.append('id', id);
+      const cur = ITEMS.find(x=>String(x.id)===String(id));
+      fd.append('active', cur && cur.active ? '1' : '0');
+      url = '/api/admin/point-items/update';
+    } else {
+      url = '/api/admin/point-items';
+    }
+    const r = await fetch(url, { method:'POST', body: fd });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ itemMsg('保存失败：' + (d.detail || d.error || '未知错误'), true); return; }
+    toast(id ? '已更新商品' : '已新增商品');
+    closeModal('mItem');
+    loadItems();
+  } catch(e){ itemMsg('保存失败：' + e.message, true); }
+  finally { btn.disabled = false; }
+}
+function itemMsg(t, err){ const el=$('itemMsg'); el.textContent = t || ''; el.className = 'form-msg ' + (err ? 'err' : 'ok'); }
+async function deleteItem(id){
+  const it = ITEMS.find(x=>x.id===id);
+  if(!confirm('确定下架商品「' + (it ? it.name : id) + '」？\n\n下架后该商品将不再展示给用户（不会删除数据）。')) return;
+  const r = await fetch('/api/admin/point-items/' + id, { method:'DELETE' });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ toast(d.detail || d.error || '下架失败'); return; }
+  toast('已下架'); loadItems();
+}
+function closeModal(id){ $(id).classList.remove('on'); }
+async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
+
+/* 启动 */
+(async function(){
+  const r = await fetch('/api/me'); const d = await r.json();
+  if(!d.ok || !d.user || !d.user.isAdmin){ $('deny').classList.remove('hidden'); return; }
+  $('whoami').textContent = '@' + d.user.username;
+  $('main').classList.remove('hidden');
+  loadSigninConfig();
+  loadItems();
+})();
+</script>
+</body>
+</html>

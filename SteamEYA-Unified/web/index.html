@@ -66,6 +66,9 @@
         <div class="ch-status" id="chStatus"><span class="live">连接中…</span></div>
       </div>
 <div style="display:flex;gap:5px">
+  <button class="icon-btn" id="walletBtn" onclick="openWallet()" title="积分商城" style="display:none">
+    <svg viewBox="0 0 24 24"><path d="M21 18v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v1h-9a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h9zm-9-2h10V8H12v8zm4-2.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>
+  </button>
   <button class="icon-btn" onclick="openSearch()" title="搜索聊天记录">
     <svg viewBox="0 0 24 24"><path d="M15.5 14h-.8l-.3-.3a6.5 6.5 0 1 0-.7.7l.3.3v.8l5 5 1.5-1.5-5-5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z"/></svg>
   </button>
@@ -198,6 +201,44 @@
 <input type="file" id="stkInput" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" class="hidden">
 <input type="file" id="avatarInput" accept="image/*" class="hidden">
 
-<script src="/js/app.js?v=22"></script>
+<!-- ================= 每日签到 ================= -->
+<div id="signinModal" class="modal" onclick="if(event.target===this)closeSignin()">
+  <div class="search-card" style="max-width:340px">
+    <div class="profile-head"><span>每日签到</span><button onclick="closeSignin()" title="关闭">&times;</button></div>
+    <div class="signin-body">
+      <div style="font-size:40px">🎁</div>
+      <div class="signin-tip">每日签到随机积分奖励已到账</div>
+      <div class="signin-points" id="signinPoints">+0</div>
+      <div class="signin-balance">当前积分：<b id="signinBalance">0</b></div>
+      <button class="wallet-btn" style="width:100%;margin-top:14px" onclick="closeSignin()">开心收下</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 积分商城 ================= -->
+<div id="walletModal" class="modal" onclick="if(event.target===this)closeWallet()">
+  <div class="search-card" style="max-width:560px">
+    <div class="profile-head"><span>积分商城</span><button onclick="closeWallet()" title="关闭">&times;</button></div>
+    <div class="search-body wallet-body">
+      <div class="wallet-balance">我的积分：<b id="walletBalance">0</b></div>
+
+      <div class="wallet-sec">积分明细</div>
+      <div id="walletLogs" class="wallet-logs"><div class="search-empty">加载中…</div></div>
+
+      <div class="wallet-sec">可兑换商品</div>
+      <div id="walletItems" class="wallet-items"><div class="search-empty">加载中…</div></div>
+
+      <div class="wallet-sec">转账给其他用户</div>
+      <div class="wallet-transfer">
+        <input id="walletTo" placeholder="对方用户名或昵称" maxlength="30" autocomplete="off">
+        <input id="walletAmount" type="number" min="1" placeholder="积分数量">
+        <input id="walletRemark" placeholder="备注（可选）" maxlength="50" autocomplete="off">
+        <button class="wallet-btn" onclick="submitTransfer()">转账</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js?v=23"></script>
 </body>
 </html>

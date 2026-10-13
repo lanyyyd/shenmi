@@ -22,7 +22,7 @@ from . import ws as ws_module
 from .config import UPLOAD_DIR, WEB_DIR
 from .db import init_db
 from .lan import LanDiscovery
-from .routers import admin, auth, chat, cloud, lan, save, steam, sync
+from .routers import admin, auth, chat, cloud, lan, points, save, steam, sync, update
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("gateway")
@@ -71,6 +71,8 @@ app.include_router(save.router)
 app.include_router(lan.router)
 app.include_router(chat.router)
 app.include_router(admin.router)
+app.include_router(update.router)
+app.include_router(points.router)
 app.include_router(ws_module.router)
 
 # 上传文件（聊天图片/文件/头像/表情）

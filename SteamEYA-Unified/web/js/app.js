@@ -774,6 +774,7 @@ function enterApp() {
   loadUsers();
   setInterval(loadUsers, 60000);      // 定期刷新用户列表（新注册/离线变化）
   openRoom('group');
+  initPoints();                        // 每日签到 + 显示钱包入口（离线模式自动跳过）
 }
 
 /* ---------------- WebSocket ---------------- */
@@ -1256,6 +1257,132 @@ $('msgs').addEventListener('scroll', () => {
 /* 侧栏 */
 function openSidebar() { $('sidebar').classList.add('open'); $('mask').classList.add('on'); }
 function closeSidebar() { $('sidebar').classList.remove('open'); $('mask').classList.remove('on'); }
+
+/* ---------------- 积分：每日签到 + 积分商城 + 转账 ---------------- */
+let POINTS = { enabled: false, balance: 0 };
+let WALLET_ITEMS = [];
+
+// 进入聊天室时：离线（局域网）模式下积分只在在线服务器生效 → 隐藏钱包、不签到。
+async function initPoints() {
+  try {
+    const info = await (await fetch('/api/lan/info')).json();
+    if (info && info.lan_mode) return;
+  } catch (e) { /* 老网关无此接口，继续尝试 */ }
+
+  try {
+    const r = await fetch('/api/points/signin', { method: 'POST' });
+    if (!r.ok) return;                       // 服务端未部署积分功能
+    const d = await r.json();
+    if (!d.ok) return;
+    POINTS.enabled = true;
+    POINTS.balance = d.balance;
+    const btn = $('walletBtn'); if (btn) btn.style.display = 'flex';
+    if (!d.already && d.points > 0) showSignin(d.points, d.balance);
+  } catch (e) { /* 服务端不可用则静默跳过 */ }
+}
+
+function showSignin(points, balance) {
+  $('signinPoints').textContent = '+' + points;
+  $('signinBalance').textContent = balance;
+  $('signinModal').classList.add('on');
+}
+function closeSignin() { $('signinModal').classList.remove('on'); }
+
+function openWallet() {
+  if (!POINTS.enabled) return;
+  $('walletModal').classList.add('on');
+  refreshWallet();
+}
+function closeWallet() { $('walletModal').classList.remove('on'); }
+
+async function refreshWallet() {
+  try {
+    const [itemsR, logsR] = await Promise.all([
+      fetch('/api/points/items'),
+      fetch('/api/points/logs?limit=30'),
+    ]);
+    const items = await itemsR.json();
+    const logs = await logsR.json();
+    if (items.ok) {
+      POINTS.balance = items.balance;
+      $('walletBalance').textContent = items.balance;
+      renderWalletItems(items.items || []);
+    }
+    if (logs.ok) renderWalletLogs(logs.logs || []);
+  } catch (e) { toast('❌ 加载积分失败'); }
+}
+
+function renderWalletItems(items) {
+  WALLET_ITEMS = items;
+  const box = $('walletItems');
+  if (!items.length) { box.innerHTML = '<div class="search-empty">还没有可兑换的商品</div>'; return; }
+  box.innerHTML = items.map(it => {
+    const img = avUrlOf(it.image) ? `<img src="${esc(avUrlOf(it.image))}" alt="">` : `<div class="ph">🎁</div>`;
+    const price = Number(it.price) || 0;
+    const stock = (it.stock === undefined || it.stock < 0) ? '' : (it.stock > 0 ? ` · 剩 ${it.stock} 件` : ' · 已兑完');
+    return `<div class="wallet-item">${img}
+      <div class="nm">${esc(it.name || '商品')}</div>
+      <div class="ds">${esc(it.description || '')}</div>
+      <div class="pr">${price} 积分${stock}</div>
+      <button class="wallet-btn" onclick="redeemItem(${Number(it.id) || 0})">兑换</button>
+    </div>`;
+  }).join('');
+}
+
+function renderWalletLogs(logs) {
+  const box = $('walletLogs');
+  if (!logs.length) { box.innerHTML = '<div class="search-empty">暂无积分明细</div>'; return; }
+  const typeName = { signin: '每日签到', redeem: '兑换商品', transfer_in: '收到转账', transfer_out: '转出积分', admin: '系统调整' };
+  box.innerHTML = logs.map(l => {
+    const plus = l.delta > 0;
+    const label = typeName[l.type] || '积分变动';
+    const main = esc(label + (l.ref ? '（' + l.ref + '）' : '') + (l.remark && l.remark !== label ? ' · ' + l.remark : ''));
+    const t = new Date(l.createdAt);
+    const time = `${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')} ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+    return `<div class="wallet-log">
+      <span class="wl-main">${main}</span>
+      <span class="wl-time">${esc(time)}</span>
+      <span class="wl-d ${plus ? 'd-plus' : 'd-minus'}">${plus ? '+' : ''}${l.delta}</span>
+    </div>`;
+  }).join('');
+}
+
+async function redeemItem(id) {
+  const it = WALLET_ITEMS.find(x => x.id === id);
+  const name = it ? it.name : '该商品';
+  const price = it ? it.price : 0;
+  if (!confirm(`确认用 ${price} 积分兑换「${name}」？`)) return;
+  try {
+    const r = await fetch('/api/points/redeem', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId: id }),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) return toast('❌ ' + (d.error || d.detail || '兑换失败'));
+    toast('✅ 兑换成功');
+    refreshWallet();
+  } catch (e) { toast('❌ 兑换失败'); }
+}
+
+async function submitTransfer() {
+  const to = $('walletTo').value.trim();
+  const amount = parseInt($('walletAmount').value, 10);
+  const remark = $('walletRemark').value.trim();
+  if (!to) return toast('请输入对方用户名或昵称');
+  if (!amount || amount <= 0) return toast('请输入正确的积分数量');
+  try {
+    const r = await fetch('/api/points/transfer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, amount, remark }),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) return toast('❌ ' + (d.error || d.detail || '转账失败'));
+    toast(`✅ 已转账 ${amount} 积分给 ${to}`);
+    $('walletAmount').value = '';
+    $('walletRemark').value = '';
+    refreshWallet();
+  } catch (e) { toast('❌ 转账失败'); }
+}
 
 /* ---------------- 启动 ---------------- */
 (async function boot() {
