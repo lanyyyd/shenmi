@@ -210,6 +210,27 @@ internal sealed class SyncFileRef
     public long Size { get; set; }
 }
 
+/// <summary>GET /api/update/latest 的返回（自有服务器更新源）。</summary>
+internal sealed class UpdateLatestDto
+{
+    public bool Ok { get; set; }
+
+    /// <summary>服务器是否已配置下发版本；false 时其余字段无意义。</summary>
+    public bool Available { get; set; }
+
+    public string Version { get; set; } = string.Empty;
+    public string Notes { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public long FileSize { get; set; }
+    public string Sha256 { get; set; } = string.Empty;
+
+    /// <summary>版本发布时间（毫秒时间戳）。</summary>
+    public long UpdatedAt { get; set; }
+
+    /// <summary>安装包下载地址（相对路径，如 /api/update/download/12）。</summary>
+    public string Url { get; set; } = string.Empty;
+}
+
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
 [JsonSerializable(typeof(UserDto))]
 [JsonSerializable(typeof(AuthResultDto))]
@@ -225,4 +246,5 @@ internal sealed class SyncFileRef
 [JsonSerializable(typeof(SyncPushResultDto))]
 [JsonSerializable(typeof(SyncMarkRequest))]
 [JsonSerializable(typeof(SyncFileRef))]
+[JsonSerializable(typeof(UpdateLatestDto))]
 internal sealed partial class CloudApiJsonContext : JsonSerializerContext;

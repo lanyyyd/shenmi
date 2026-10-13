@@ -9,10 +9,10 @@
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
+    <!-- 版本号：本地默认 0.1.0；CI 用 -p:Version=0.1.<run_number> 注入，
+         使程序集 InformationalVersion 与安装包版本一致，客户端才能正确比较新旧版本。 -->
     <Version>0.1.0</Version>
-    <FileVersion>0.1.0.0</FileVersion>
-    <AssemblyVersion>0.1.0.0</AssemblyVersion>
-    <InformationalVersion>v0.1.0-dev</InformationalVersion>
+    <InformationalVersion>v$(Version)</InformationalVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- 自定义 Program.Main：先拦截 CS2 云推送辅助进程模式（cs2-cloud-push 开关）再走 XAML 启动（见 Program.cs）。 -->

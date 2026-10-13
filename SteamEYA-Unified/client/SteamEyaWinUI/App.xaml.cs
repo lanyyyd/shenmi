@@ -28,7 +28,6 @@ public partial class App : Application
         // 在任何窗口/页面构造前确定界面语言，保证首帧即用所选语言渲染。
         Loc.Initialize(AppState.SettingsService);
         var startupSettings = AppState.SettingsService.Load();
-        AppState.UpdateService.SetProxySite(startupSettings.UpdateProxySite);
 
         // 先把 Aurora 主题色算好再建窗口：登录页出现的瞬间就是用户选定的主题色，
         // 不会先闪一帧默认粉紫色再跳。

@@ -31,6 +31,40 @@
                         Style="{StaticResource PageSubtitleTextStyle}" />
                 </StackPanel>
             </StackPanel>
+
+            <!-- 检查更新：从自有服务器取最新版本，可下载并安装 -->
+            <Border Style="{StaticResource CardBorderStyle}">
+                <StackPanel Spacing="10">
+                    <TextBlock
+                        Text="{x:Bind Strings.Get('About_Update_Section'), Mode=OneWay}"
+                        Style="{StaticResource SectionTitleTextStyle}" />
+                    <TextBlock
+                        x:Name="UpdateStatusText"
+                        TextWrapping="Wrap"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock
+                        x:Name="UpdateNotesText"
+                        TextWrapping="Wrap"
+                        Visibility="Collapsed" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button
+                            x:Name="CheckUpdateButton"
+                            Click="CheckUpdateButton_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE895;" FontSize="14" />
+                                <TextBlock Text="{x:Bind Strings.Get('About_Btn_CheckUpdate'), Mode=OneWay}" />
+                            </StackPanel>
+                        </Button>
+                        <Button
+                            x:Name="InstallUpdateButton"
+                            Visibility="Collapsed"
+                            Click="InstallUpdateButton_Click"
+                            Style="{StaticResource AccentButtonStyle}">
+                            <TextBlock Text="{x:Bind Strings.Get('About_Btn_DownloadUpdate'), Mode=OneWay}" />
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </Page>

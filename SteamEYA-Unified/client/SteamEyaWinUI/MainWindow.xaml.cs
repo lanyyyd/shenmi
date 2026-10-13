@@ -80,7 +80,7 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         SetWindowIcon();
-        TitleVersionText.Text = $"v{GitHubUpdateService.CurrentVersion}";
+        TitleVersionText.Text = $"v{UpdateService.CurrentVersion}";
 
         var startupSettings = AppState.SettingsService.Load();
         ApplyTheme(UiColorService.ResolveElementTheme(startupSettings.Theme, startupSettings.UiColor));
@@ -105,6 +105,8 @@ public sealed partial class MainWindow : Window
         // 首次启动即解析并持久化 Steam 安装路径（之后上号直接复用，不再每次探测）。
         // 等内容进入可视树（XamlRoot 就绪）后再跑，检测失败才需要弹框。
         RootNavigationView.Loaded += OnRootNavigationViewLoaded;
+        // 界面进入可视树（XamlRoot 就绪）后再检查更新并弹「检测到新版本」。
+        RootNavigationView.Loaded += (_, _) => _ = RunStartupUpdateCheckAsync();
 
         // 在线状态下：把离线期间产生的聊天记录幂等同步到服务器。
         if (!SessionState.Offline)
@@ -170,6 +172,70 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             AppLog.Error("启动时解析 Steam 安装路径失败。", ex);
+        }
+    }
+
+    // ---------------- 检查更新（自建更新源） ----------------
+
+    /// <summary>启动时自动检查更新；发现新版本弹「检测到新版本」。离线模式跳过。</summary>
+    private async Task RunStartupUpdateCheckAsync()
+    {
+        if (SessionState.Offline)
+        {
+            return;
+        }
+
+        try
+        {
+            await AppState.CheckForUpdatesAsync(isAutomatic: true);
+            if (AppState.LatestUpdate is { HasUpdate: true } info)
+            {
+                await ShowUpdateDialogAsync(info);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"启动检查更新失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>「检测到新版本」对话框：更新内容 / 版本号 / 文件大小 / 更新时间 + 立即更新 / 下次再说。</summary>
+    private async Task ShowUpdateDialogAsync(AppUpdateInfo info)
+    {
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = Loc.Tf("Update_Dialog_Version_Format", info.Version),
+            Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"]
+        });
+        if (!string.IsNullOrWhiteSpace(info.Notes))
+        {
+            panel.Children.Add(new TextBlock { Text = info.Notes, TextWrapping = TextWrapping.Wrap });
+        }
+        panel.Children.Add(new TextBlock
+        {
+            Text = Loc.Tf("Update_Dialog_Size_Format", FormatUpdateBytes(info.FileSize)),
+            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = Loc.Tf("Update_Dialog_Time_Format", FormatUpdateTime(info.UpdatedAt)),
+            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+        });
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = Loc.T("Update_Dialog_Title"),
+            Content = new ScrollViewer { Content = panel, MaxHeight = 360 },
+            PrimaryButtonText = Loc.T("Update_Dialog_Now"),
+            CloseButtonText = Loc.T("Update_Dialog_Later"),
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            await UpdateFlow.StartAsync(info, Close);
         }
     }
 

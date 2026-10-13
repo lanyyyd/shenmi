@@ -21,7 +21,7 @@ internal static class AppState
     public static SteamProfileService ProfileService { get; } = new();
     public static SteamCredentialsAuthService CredentialsAuthService { get; } = new();
     public static RemoteAccountService RemoteAccountService { get; } = new();
-    public static GitHubUpdateService UpdateService { get; } = new();
+    public static UpdateService UpdateService { get; } = new();
     public static UpdateInstallerService UpdateInstallerService { get; } = new();
     public static SettingsService SettingsService { get; } = new();
     public static Cs2CloudService Cs2CloudService { get; } = new();
@@ -139,7 +139,7 @@ internal static class AppState
 
     // ---------- 更新检查协调 ----------
 
-    public static GitHubUpdateInfo? LatestUpdate { get; private set; }
+    public static AppUpdateInfo? LatestUpdate { get; private set; }
 
     public static bool IsCheckingForUpdates { get; private set; }
 
@@ -171,18 +171,17 @@ internal static class AppState
             UpdateCheckError = null;
             UpdateCheckedAt = update.CheckedAt;
 
-            // 自动检查发现新版本只亮「关于」导航项红点（UpdateStateChanged → MainWindow.RefreshUpdateBadge），
-            // 不再弹常驻横幅占用每页底部；手动检查才用状态栏明确反馈结果。
-            if (update.IsUpdateAvailable)
+            // 自动检查发现新版本由 MainWindow 弹「检测到新版本」对话框；手动检查用状态栏反馈结果。
+            if (update.HasUpdate)
             {
                 if (!isAutomatic)
                 {
-                    ShowStatus(Loc.Tf("AppState_Update_Available_Format", update.LatestTag), InfoBarSeverity.Warning);
+                    ShowStatus(Loc.Tf("AppState_Update_Available_Format", update.Version), InfoBarSeverity.Warning);
                 }
             }
             else if (!isAutomatic)
             {
-                ShowStatus(Loc.Tf("AppState_Update_UpToDate_Format", update.LatestTag), InfoBarSeverity.Success);
+                ShowStatus(Loc.Tf("AppState_Update_UpToDate_Format", update.Version), InfoBarSeverity.Success);
             }
         }
         catch (Exception ex)

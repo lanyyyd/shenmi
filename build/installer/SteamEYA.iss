@@ -17,6 +17,11 @@
   #define OutputDir SourcePath
 #endif
 
+; 中文语言包目录（Inno 官方不内置中文，需自带 ChineseSimplified.isl；CI 通过 /DLanguagesDir 传入）
+#ifndef LanguagesDir
+  #define LanguagesDir "languages"
+#endif
+
 [Setup]
 ; 单个闭括号：{{ 转义成字面 {，末尾单 } 收尾，得到 {GUID}。AppId 一旦随首个安装包发布便不可再改。
 AppId={{9BB137D4-3413-4F62-8C75-471DCEBAF2E5}
@@ -37,6 +42,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 PrivilegesRequired=lowest
 WizardStyle=modern
+; 按系统界面语言自动选安装向导语言（中文系统→中文向导）
+LanguageDetectionMethod=uilanguage
 ChangesAssociations=no
 CloseApplications=yes
 RestartApplications=no
@@ -44,6 +51,8 @@ UninstallDisplayIcon={app}\SteamEyaWinUI.exe
 SetupIconFile={#PublishDir}\Assets\AppIcon.ico
 
 [Languages]
+; 中文放最前：作为默认语言（系统语言识别不到时回退中文）
+Name: "chinesesimplified"; MessagesFile: "{#LanguagesDir}\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
