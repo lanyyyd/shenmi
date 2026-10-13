@@ -232,6 +232,8 @@
     "Settings_Data_Desc": "Account history, profile pictures, cache, and logs are stored in the data folder.",
     "Settings_Btn_OpenDataFolder": "Open Data Folder",
     "Settings_Data_OpenFail": "Couldn't open the data folder.",
+    "Settings_Notify_Test": "Send Test Notification",
+    "Settings_Notify_Test_Desc": "Self-check: click the button to fire a system notification and confirm new-message alerts work.",
     "SteamPath_Dialog_Title": "Steam Not Found",
     "SteamPath_Dialog_Content": "Steam's install location couldn't be detected automatically. Please select Steam's install folder.",
     "SteamPath_Dialog_InvalidContent": "No steam.exe was found in that folder. Please reselect Steam's install folder.",

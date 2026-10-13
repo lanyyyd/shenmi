@@ -74,6 +74,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         _chat.MessageRecalled += OnMessageRecalled;
         _chat.UsersChanged += OnUsersChanged;
         _chat.ConnectionChanged += OnConnectionChanged;
+        ChatHub.RoomOpenRequested += OnRoomOpenRequested;
 
         Loc.LanguageChanged += OnLanguageChanged;
         Loaded += OnLoaded;
@@ -106,7 +107,10 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             ChatHub.SetMyId(_myId);
             _rawUsers = await _chat.GetUsersAsync();
             RebuildUsers();
-            await OpenRoomAsync("group");
+            // 点击系统通知进入时可能指定了房间；否则默认进群聊。
+            var initialRoom = ChatHub.PendingRoom ?? "group";
+            ChatHub.PendingRoom = null;
+            await OpenRoomAsync(initialRoom);
             ChatHub.EnsureStarted();
             await RefreshUnreadAsync();
         }
@@ -130,6 +134,29 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         _chat.MessageRecalled -= OnMessageRecalled;
         _chat.UsersChanged -= OnUsersChanged;
         _chat.ConnectionChanged -= OnConnectionChanged;
+        ChatHub.RoomOpenRequested -= OnRoomOpenRequested;
+    }
+
+    /// <summary>点击系统通知「打开该房间」：本页已打开时即时切房（未打开时由 OnLoaded 消费 PendingRoom）。</summary>
+    private void OnRoomOpenRequested(string room)
+    {
+        _dispatcher.TryEnqueue(async () =>
+        {
+            try
+            {
+                if (_rawUsers.Length == 0)
+                {
+                    _rawUsers = await _chat.GetUsersAsync();
+                    RebuildUsers();
+                }
+                ChatHub.PendingRoom = null;
+                await OpenRoomAsync(room);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Warn($"打开通知对应房间失败：{ex.Message}");
+            }
+        });
     }
 
     private void OnLanguageChanged()

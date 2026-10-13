@@ -25,6 +25,22 @@ internal static class ChatHub
     /// <summary>聊天室页当前查看的房间（由 ChatPage 维护）。</summary>
     public static string CurrentRoom { get; set; } = "group";
 
+    /// <summary>待打开的房间：点击系统通知后若聊天室页尚未打开，ChatPage 加载时据此进入对应房间。</summary>
+    public static string? PendingRoom { get; set; }
+
+    /// <summary>请求打开某房间（点击通知时触发）；聊天室页已打开则立即切房，否则等下次加载。</summary>
+    public static event Action<string>? RoomOpenRequested;
+
+    public static void RequestOpenRoom(string room)
+    {
+        if (string.IsNullOrWhiteSpace(room))
+        {
+            return;
+        }
+        PendingRoom = room;
+        RoomOpenRequested?.Invoke(room);
+    }
+
     /// <summary>由 MainWindow 创建时注入 UI 线程派发器（通知需要回到 UI 线程）。</summary>
     public static void AttachUi(Microsoft.UI.Dispatching.DispatcherQueue ui) => _ui = ui;
 
@@ -129,6 +145,6 @@ internal static class ChatHub
         }
 
         var title = Loc.Tf(dto.Room == "group" ? "Chat_Notify_Group" : "Chat_Notify_Private", dto.FromName);
-        ChatNotifyService.Notify(title, preview);
+        ChatNotifyService.Notify(title, preview, dto.Room);   // 带房间参数，点击通知可直接跳到该房间
     }
 }

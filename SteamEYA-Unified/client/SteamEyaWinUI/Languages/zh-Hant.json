@@ -232,6 +232,8 @@
     "Settings_Data_Desc": "帳號歷史、頭像、快取與紀錄日誌都儲存在資料夾。",
     "Settings_Btn_OpenDataFolder": "開啟資料夾",
     "Settings_Data_OpenFail": "無法開啟資料夾。",
+    "Settings_Notify_Test": "傳送測試通知",
+    "Settings_Notify_Test_Desc": "自檢：點右側按鈕立刻彈一條系統通知，確認新訊息提醒是否可用。",
     "SteamPath_Dialog_Title": "找不到 Steam",
     "SteamPath_Dialog_Content": "無法自動偵測到 Steam 安裝位置。請手動選擇 Steam 的安裝目錄。",
     "SteamPath_Dialog_InvalidContent": "該資料夾中找不到 steam.exe，請重新選擇 Steam 的安裝目錄。",

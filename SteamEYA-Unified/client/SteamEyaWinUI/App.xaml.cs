@@ -35,6 +35,10 @@ public partial class App : Application
 
         SessionState.Initialize();
 
+        // 启动即注册系统通知通道：不依赖「登录后 / 打开聊天页」这些更晚的时机，
+        // 避免把注册失败拖到用户已经错过提醒之后。注册失败只写日志，不影响启动。
+        ChatNotifyService.Initialize();
+
         // 先显示统一登录页；登录成功后再进入主界面（见 LoginWindow.GoToMain）。
         _window = new LoginWindow();
         _window.Activate();

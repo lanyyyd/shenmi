@@ -362,6 +362,28 @@
                             </StackPanel>
                         </Button>
                     </Grid>
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            Text="{x:Bind Strings.Get('Settings_Notify_Test_Desc'), Mode=OneWay}"
+                            TextWrapping="Wrap"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <Button
+                            x:Name="NotifyTestButton"
+                            Grid.Column="1"
+                            Click="NotifyTestButton_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE7E7;" FontSize="16" />
+                                <TextBlock Text="{x:Bind Strings.Get('Settings_Notify_Test'), Mode=OneWay}" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
                 </StackPanel>
             </Border>
         </StackPanel>

@@ -59,6 +59,10 @@ public sealed partial class MainWindow : Window
 
         // 通知需要回到 UI 线程，这里把窗口的派发器交给常驻聊天服务。
         ChatHub.AttachUi(DispatcherQueue);
+        // 系统通知：注入 UI 派发器、确保注册，并接管「点击通知 → 跳到对应聊天房间」。
+        ChatNotifyService.SetUiDispatcher(DispatcherQueue);
+        ChatNotifyService.Initialize();
+        ChatNotifyService.Invoked += OnNotificationInvoked;
 
         // 关窗口时：停背景视频释放解码器与文件句柄；断开常驻聊天；
         // 结束本机拉起的网关 / 云游戏引擎（含 PyInstaller onefile 派生的子进程与浏览器驱动），避免残留。
@@ -295,6 +299,47 @@ public sealed partial class MainWindow : Window
             ContentFrame.Navigate(pageType, null, new EntranceNavigationTransitionInfo());
             ContentFrame.BackStack.Clear();
         }
+    }
+
+    /// <summary>点击系统通知：把窗口带到前台并打开通知对应的聊天房间（argument 形如 room=group / room=pm:1:2）。</summary>
+    private void OnNotificationInvoked(string argument)
+    {
+        var room = ParseRoomArgument(argument);
+        if (string.IsNullOrEmpty(room))
+        {
+            return;
+        }
+        try
+        {
+            Activate();
+            ChatHub.RequestOpenRoom(room!);
+            RootNavigationView.SelectedItem = ChatNavItem;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"处理通知点击失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>从通知参数里取出 room 值；参数是 key=value&... 形式，值做过 URL 编码。</summary>
+    private static string? ParseRoomArgument(string argument)
+    {
+        if (string.IsNullOrWhiteSpace(argument))
+        {
+            return null;
+        }
+        foreach (var pair in argument.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var idx = pair.IndexOf('=');
+            var key = idx < 0 ? pair : pair[..idx];
+            if (key != "room")
+            {
+                continue;
+            }
+            var value = idx < 0 ? string.Empty : pair[(idx + 1)..];
+            return Uri.UnescapeDataString(value);
+        }
+        return null;
     }
 
     private void OnBusyChanged(bool isBusy)

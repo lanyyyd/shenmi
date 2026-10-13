@@ -232,6 +232,8 @@
     "Settings_Data_Desc": "账号历史、头像、缓存与日志都保存在数据目录。",
     "Settings_Btn_OpenDataFolder": "打开数据目录",
     "Settings_Data_OpenFail": "无法打开数据目录。",
+    "Settings_Notify_Test": "发送测试通知",
+    "Settings_Notify_Test_Desc": "自检：点右侧按钮立刻弹一条系统通知，确认新消息提醒是否可用。",
     "SteamPath_Dialog_Title": "未找到 Steam",
     "SteamPath_Dialog_Content": "无法自动检测到 Steam 安装位置。请手动选择 Steam 的安装目录。",
     "SteamPath_Dialog_InvalidContent": "该文件夹中没有找到 steam.exe，请重新选择 Steam 的安装目录。",

@@ -781,4 +781,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
             AppState.ShowStatus(Loc.T("Settings_Data_OpenFail"), InfoBarSeverity.Error);
         }
     }
+
+    // 自检系统通知是否可用：立刻弹一条测试通知；不可用时会提示查看日志。
+    private void NotifyTestButton_Click(object sender, RoutedEventArgs e) => ChatNotifyService.Test();
 }
