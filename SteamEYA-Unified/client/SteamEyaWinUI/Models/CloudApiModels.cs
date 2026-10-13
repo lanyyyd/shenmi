@@ -199,6 +199,17 @@ internal sealed class SyncMarkRequest
     public string[] ClientMsgIds { get; set; } = [];
 }
 
+/// <summary>
+/// 同步消息里的文件引用（url/name/size）。离线消息经本地网关上传，file.url 指向本机相对路径；
+/// 同步时要先把文件本体转存到远端并改写成远端地址，故需要一个可序列化（AOT 源生成）的载体来重建 file。
+/// </summary>
+internal sealed class SyncFileRef
+{
+    public string Url { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public long Size { get; set; }
+}
+
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
 [JsonSerializable(typeof(UserDto))]
 [JsonSerializable(typeof(AuthResultDto))]
@@ -213,4 +224,5 @@ internal sealed class SyncMarkRequest
 [JsonSerializable(typeof(SyncPushRequest))]
 [JsonSerializable(typeof(SyncPushResultDto))]
 [JsonSerializable(typeof(SyncMarkRequest))]
+[JsonSerializable(typeof(SyncFileRef))]
 internal sealed partial class CloudApiJsonContext : JsonSerializerContext;
