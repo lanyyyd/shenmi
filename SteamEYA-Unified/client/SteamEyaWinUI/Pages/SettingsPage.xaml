@@ -330,6 +330,35 @@
                 </Grid>
             </Border>
 
+            <!-- 聊天室运行模式：自动 / 完整版（内嵌网页版）/ 原生版 -->
+            <Border Style="{StaticResource CardBorderStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                        <TextBlock
+                            Text="{x:Bind Strings.Get('Settings_ChatMode_Section'), Mode=OneWay}"
+                            Style="{StaticResource SectionTitleTextStyle}" />
+                        <TextBlock
+                            Text="{x:Bind Strings.Get('Settings_ChatMode_Desc'), Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ComboBox
+                        x:Name="ChatModeComboBox"
+                        Grid.Column="1"
+                        MinWidth="180"
+                        VerticalAlignment="Center"
+                        SelectionChanged="ChatModeComboBox_SelectionChanged">
+                        <ComboBoxItem Tag="Auto" Content="{x:Bind Strings.Get('Settings_ChatMode_Auto'), Mode=OneWay}" />
+                        <ComboBoxItem Tag="Web" Content="{x:Bind Strings.Get('Settings_ChatMode_Web'), Mode=OneWay}" />
+                        <ComboBoxItem Tag="Native" Content="{x:Bind Strings.Get('Settings_ChatMode_Native'), Mode=OneWay}" />
+                    </ComboBox>
+                </Grid>
+            </Border>
+
             <!-- 数据 -->
             <Border Style="{StaticResource CardBorderStyle}">
                 <StackPanel Spacing="10">

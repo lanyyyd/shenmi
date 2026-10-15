@@ -22,6 +22,7 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
@@ -53,10 +54,23 @@
                 </StackPanel>
             </Button>
 
+            <!-- 兜底：内嵌界面打不开时，用默认浏览器打开网页版聊天室（用户自行登录） -->
+            <Button
+                x:Name="BrowserButton"
+                Grid.Column="3"
+                Click="Browser_Click"
+                VerticalAlignment="Center"
+                ToolTipService.ToolTip="{x:Bind Strings.Get('Chat_Browser_Open_Tip'), Mode=OneWay}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="14" Glyph="&#xE774;" />
+                    <TextBlock Text="{x:Bind Strings.Get('Chat_Browser_Open'), Mode=OneWay}" />
+                </StackPanel>
+            </Button>
+
             <!-- 网页版 / 原生版 切换 -->
             <Button
                 x:Name="ModeButton"
-                Grid.Column="3"
+                Grid.Column="4"
                 Click="Mode_Click"
                 VerticalAlignment="Center" />
         </Grid>

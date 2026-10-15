@@ -38,6 +38,9 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     /// <summary>下载聊天附件用（文件可能较大，超时放宽）。</summary>
     private static readonly HttpClient DownloadClient = new() { Timeout = TimeSpan.FromSeconds(120) };
 
+    /// <summary>内嵌聊天室不可用时的兜底：用默认浏览器打开网页版聊天室（用户自行登录）。</summary>
+    private const string ExternalChatUrl = "https://chat.teatt.top";
+
     // 复用全局常驻连接（ChatHub），离开本页也不断线，保证其它页面能收消息并提醒。
     private readonly ChatService _chat = ChatHub.Chat;
     // 同时 using 了 Microsoft.UI.Dispatching 与 Windows.System，两者都有 DispatcherQueue，必须写全名消歧义。
@@ -184,23 +187,55 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     }
 
     // ---------------- 网页版 / 原生版 ----------------
-    /// <summary>优先尝试网页版（在线且持有 JWT 时）；不可用则回退原生。</summary>
+    /// <summary>读取设置的运行模式（Auto / Web / Native）；未知取值一律当 Auto。</summary>
+    private static string ChatModeSetting() => AppState.SettingsService.Load().ChatMode switch
+    {
+        "Web" => "Web",
+        "Native" => "Native",
+        _ => "Auto"
+    };
+
+    /// <summary>
+    /// 按设置的运行模式选择界面：Auto（优先完整版，加载失败回退原生）/ Web（完整版）/ Native（原生版）。
+    /// 离线（局域网）无统一账号，网页版登录态无从取得，一律用原生。
+    /// 内嵌网页版在部分 Win10 上会初始化卡死，此时可在设置里强制「原生版」避开 WebView2。
+    /// </summary>
     private async Task InitializeModeAsync()
     {
         if (SessionState.Offline || string.IsNullOrWhiteSpace(SessionState.Token))
         {
-            // 离线（局域网）无统一账号，网页版登录态无从取得，直接用原生。
             SwitchMode(false);
             ModeButton.IsEnabled = false;
             return;
         }
 
-        var ok = await TryStartWebAsync();
-        SwitchMode(ok);
-        if (!ok)
+        if (ChatModeSetting() == "Native")
         {
-            MainWindow.Instance?.ShowStatus(Loc.T("Chat_WebFailed"), InfoBarSeverity.Warning);
+            SwitchMode(false);
+            return;
         }
+
+        if (await TryStartWebAsync())
+        {
+            SwitchMode(true);
+            return;
+        }
+
+        // 完整版加载失败：回退原生，并提示可用右上角「在浏览器打开」。
+        SwitchMode(false);
+        MainWindow.Instance?.ShowStatus(Loc.T("Chat_WebFailed"), InfoBarSeverity.Warning);
+    }
+
+    /// <summary>把用户在聊天页的切换结果写回设置，下次打开沿用。</summary>
+    private static void PersistChatMode(string mode)
+    {
+        var settings = AppState.SettingsService.Load();
+        if (settings.ChatMode == mode)
+        {
+            return;
+        }
+        settings.ChatMode = mode;
+        AppState.SettingsService.Save(settings);
     }
 
     private void SwitchMode(bool web)
@@ -222,6 +257,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         if (_webMode)
         {
             SwitchMode(false);
+            PersistChatMode("Native");
             return;
         }
 
@@ -231,10 +267,25 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         if (ok)
         {
             SwitchMode(true);
+            PersistChatMode("Web");
         }
         else
         {
             MainWindow.Instance?.ShowStatus(Loc.T("Chat_WebFailed"), InfoBarSeverity.Warning);
+        }
+    }
+
+    /// <summary>内嵌界面（网页版/原生版）都打不开时的兜底：用默认浏览器打开网页版聊天室。</summary>
+    private async void Browser_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await Windows.System.Launcher.LaunchUriAsync(new Uri(ExternalChatUrl));
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"打开默认浏览器失败：{ex.Message}");
+            MainWindow.Instance?.ShowStatus(Loc.T("AppState_Url_OpenFailed"), InfoBarSeverity.Warning);
         }
     }
 

@@ -1,6 +1,6 @@
 """云存档模块：游戏存档（zip）的上传 / 下载 / 备注 / 共享。
 
-支持游戏：植物大战僵尸(pvz) / 我的世界(minecraft)。
+支持游戏：植物大战僵尸(pvz) / 植物大战僵尸杂交版新版(pvzhybrid) / 我的世界(minecraft)。
 - 只接受单个 .zip 文件（服务端强校验扩展名，客户端另有拖拽限制）；
 - 存档按创建时间命名（Asia/Shanghai，如 2026年10月11日14:32），可自定义；
 - 共享后所有用户可在该游戏的「共享存档」中看到上传者与时间，备注跟随上传者自己的备注。
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/save", tags=["save"])
 SAVE_DIR = DATA_DIR / "saves"
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
-GAMES = {"pvz": "植物大战僵尸", "minecraft": "我的世界"}
+GAMES = {"pvz": "植物大战僵尸", "pvzhybrid": "植物大战僵尸杂交版新版", "minecraft": "我的世界"}
 _TZ = timezone(timedelta(hours=8))
 
 

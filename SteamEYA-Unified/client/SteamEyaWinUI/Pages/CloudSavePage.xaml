@@ -38,6 +38,7 @@
                 VerticalAlignment="Center"
                 SelectionChanged="OnGameChanged">
                 <ComboBoxItem Content="植物大战僵尸" Tag="pvz" />
+                <ComboBoxItem Content="植物大战僵尸杂交版新版" Tag="pvzhybrid" />
                 <ComboBoxItem Content="我的世界" Tag="minecraft" />
             </ComboBox>
             <TextBlock

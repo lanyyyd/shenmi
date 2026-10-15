@@ -259,6 +259,12 @@ internal sealed class AppSettings
     /// <summary>是否每秒自动旋转界面主题色。</summary>
     public bool UiColorAnimated { get; set; }
 
+    /// <summary>
+    /// 聊天室运行模式：Auto（自动：优先完整版，加载失败回退原生）/ Web（完整版，内嵌网页版）/ Native（原生版）。
+    /// 系统内嵌网页版（WebView2）不可用时，可在设置里强制改用原生版，避免初始化卡死。
+    /// </summary>
+    public string ChatMode { get; set; } = "Auto";
+
     /// <summary>自定义背景默认不透明度。</summary>
     public const double DefaultCustomBackgroundOpacity = 0.4;
 

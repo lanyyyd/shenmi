@@ -11,11 +11,16 @@ using SteamEyaWinUI.Services;
 
 namespace SteamEyaWinUI.Pages;
 
-/// <summary>云存档页：备份/还原植物大战僵尸与我的世界存档，并支持共享。</summary>
+/// <summary>云存档页：备份/还原植物大战僵尸（含杂交版新版）与我的世界存档，并支持共享。</summary>
 public sealed partial class CloudSavePage : Page
 {
     // 植物大战僵尸存档目录（自动备份与还原的目标）。
     private const string PvzSaveDir = @"C:\ProgramData\PopCap Games\PlantsVsZombies\pvzHE\yourdata";
+
+    // 植物大战僵尸杂交版新版（Godot 内核）：存档在用户 AppData 下的 Godot 用户数据目录。
+    private static readonly string PvzHybridSaveDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "Godot", "app_userdata", "植物大战僵尸杂交版", "Csharp");
 
     private readonly CloudSaveService _service = new();
     private readonly ObservableCollection<CloudSaveItem> _mySaves = [];
@@ -34,7 +39,20 @@ public sealed partial class CloudSavePage : Page
         Loaded += async (_, _) => await ReloadAsync();
     }
 
-    private static string GameName(string game) => game == "minecraft" ? "我的世界" : "植物大战僵尸";
+    private static string GameName(string game) => game switch
+    {
+        "minecraft" => "我的世界",
+        "pvzhybrid" => "植物大战僵尸杂交版新版",
+        _ => "植物大战僵尸"
+    };
+
+    /// <summary>该游戏的固定本地存档目录（可自动备份 / 自动还原）；我的世界没有固定目录，返回 null。</summary>
+    private static string? FixedSaveDir(string game) => game switch
+    {
+        "pvz" => PvzSaveDir,
+        "pvzhybrid" => PvzHybridSaveDir,
+        _ => null
+    };
 
     // ---------------- 数据加载 ----------------
     private async Task ReloadAsync()
@@ -82,10 +100,10 @@ public sealed partial class CloudSavePage : Page
         _ = ReloadAsync();
     }
 
-    /// <summary>“自动备份”仅支持植物大战僵尸；我的世界置灰并给出提示。</summary>
+    /// <summary>“自动备份”仅支持有固定存档目录的游戏（植物大战僵尸 / 杂交版新版）；我的世界置灰并给出提示。</summary>
     private void UpdateAutoBackupState()
     {
-        if (_game == "pvz")
+        if (FixedSaveDir(_game) is not null)
         {
             AutoBackupBtn.IsEnabled = true;
             ToolTipService.SetToolTip(AutoBackupBtn, null);
@@ -109,21 +127,22 @@ public sealed partial class CloudSavePage : Page
     // ---------------- 自动备份 ----------------
     private async void OnAutoBackup(object sender, RoutedEventArgs e)
     {
-        if (_game != "pvz")
+        var saveDir = FixedSaveDir(_game);
+        if (saveDir is null)
         {
             ShowInfo("该功能暂不可用 试着拖入存档压缩包上传吧", InfoBarSeverity.Warning);
             return;
         }
-        if (!Directory.Exists(PvzSaveDir))
+        if (!Directory.Exists(saveDir))
         {
-            ShowInfo($"未找到存档目录：{PvzSaveDir}", InfoBarSeverity.Warning);
+            ShowInfo($"未找到存档目录：{saveDir}", InfoBarSeverity.Warning);
             return;
         }
 
         var tempZip = Path.Combine(Path.GetTempPath(), $"eya_pvz_{Guid.NewGuid():N}.zip");
         try
         {
-            ZipFile.CreateFromDirectory(PvzSaveDir, tempZip, CompressionLevel.Optimal, includeBaseDirectory: false);
+            ZipFile.CreateFromDirectory(saveDir, tempZip, CompressionLevel.Optimal, includeBaseDirectory: false);
             var result = await _service.UploadAsync(_game, tempZip, null, null, "auto");
             if (result.Ok)
             {
@@ -306,9 +325,9 @@ public sealed partial class CloudSavePage : Page
 
     private async Task<string?> ResolveRestoreDirAsync(CloudSaveItem item)
     {
-        if (item.Game == "pvz")
+        if (FixedSaveDir(item.Game) is { } fixedDir)
         {
-            return PvzSaveDir;
+            return fixedDir;
         }
         // 我的世界没有固定目录：让用户选择还原目标文件夹。
         var folder = await PickFolderAsync();

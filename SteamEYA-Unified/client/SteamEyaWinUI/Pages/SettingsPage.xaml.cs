@@ -70,6 +70,16 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
                 _syncing = false;
             }
 
+            // 聊天室运行模式下拉同理：选中项内容是本地化的，重置 SelectedItem 强制刷新显示。
+            var chatMode = ChatModeComboBox.SelectedItem;
+            if (chatMode is not null)
+            {
+                _syncing = true;
+                ChatModeComboBox.SelectedItem = null;
+                ChatModeComboBox.SelectedItem = chatMode;
+                _syncing = false;
+            }
+
             // 未设置时 SteamPathText 显示的是本地化占位文案，需随语言刷新（已设置时是中性路径，刷新无副作用）。
             UpdateSteamPathText();
 
@@ -106,6 +116,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
             var settings = AppState.SettingsService.Load();
             LanguageComboBox.SelectedItem = FindByTag(LanguageComboBox, Loc.CurrentCode);
             ThemeComboBox.SelectedItem = FindByTag(ThemeComboBox, settings.Theme) ?? ThemeComboBox.Items[0];
+            ChatModeComboBox.SelectedItem = FindByTag(ChatModeComboBox, NormalizeChatMode(settings.ChatMode));
 
             SetThemeColorPickerColor(AppState.UiColorService.BaseColor);
             UpdateThemeColorControls(settings);
@@ -144,6 +155,26 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         }
 
         Loc.SetLanguage(code);
+    }
+
+    /// <summary>兼容旧数据：未知取值一律当作「自动」。</summary>
+    private static string NormalizeChatMode(string? mode) => mode switch
+    {
+        "Web" => "Web",
+        "Native" => "Native",
+        _ => "Auto"
+    };
+
+    private void ChatModeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncing || (ChatModeComboBox.SelectedItem as ComboBoxItem)?.Tag is not string mode)
+        {
+            return;
+        }
+
+        var settings = AppState.SettingsService.Load();
+        settings.ChatMode = mode;
+        AppState.SettingsService.Save(settings);
     }
 
     private void ThemeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
