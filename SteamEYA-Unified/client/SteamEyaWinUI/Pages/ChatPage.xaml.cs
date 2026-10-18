@@ -123,7 +123,6 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         }
 
         await InitializeModeAsync();
-        _ = EnsureLanAsync();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -177,7 +176,6 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     {
         HeaderText.Text = Loc.T("Nav_Chat");
         GroupText.Text = Loc.T("Chat_Group");
-        LanButtonText.Text = Loc.T("Chat_Lan_Title");
         ModeButton.Content = Loc.T(_webMode ? "Chat_Mode_ToNative" : "Chat_Mode_ToWeb");
         if (_room == "group")
         {
@@ -1023,100 +1021,6 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             }
         }
         return null;
-    }
-
-    // ---------------- 局域网互传 ----------------
-    /// <summary>确保本机网关起来（在线模式下默认没起），使局域网发现/互传可用。</summary>
-    private async Task EnsureLanAsync()
-    {
-        try
-        {
-            var info = await _chat.GetLanInfoAsync();
-            if (!info.Enabled)
-            {
-                await GatewayLauncher.EnsureStartedAsync(SessionState.Nickname);
-            }
-        }
-        catch (Exception ex)
-        {
-            AppLog.Warn($"启动本机网关失败：{ex.Message}");
-        }
-    }
-
-    private async void Lan_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            await EnsureLanAsync();
-            var info = await _chat.GetLanInfoAsync();
-            var peers = await _chat.GetLanPeersAsync();
-
-            var panel = new StackPanel { Spacing = 10, MinWidth = 320 };
-            panel.Children.Add(new TextBlock
-            {
-                Text = info.Enabled ? Loc.Tf("Chat_Lan_Self", info.Name, info.Port ?? 0) : Loc.T("Chat_Lan_Off"),
-                TextWrapping = TextWrapping.Wrap,
-                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"]
-            });
-
-            var peerList = peers.Peers ?? [];
-            if (peerList.Length == 0)
-            {
-                panel.Children.Add(new TextBlock { Text = Loc.T("Chat_Lan_None") });
-            }
-            else
-            {
-                panel.Children.Add(new TextBlock
-                {
-                    Text = Loc.T("Chat_Lan_Title"),
-                    Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"]
-                });
-                foreach (var p in peerList)
-                {
-                    panel.Children.Add(new TextBlock { Text = $"{p.Name}  ·  {p.Ip}:{p.Port}" });
-                }
-            }
-
-            var dialog = new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                Title = Loc.T("Chat_Lan_Title"),
-                Content = panel,
-                PrimaryButtonText = Loc.T("Chat_Lan_Add"),
-                CloseButtonText = Loc.T("Chat_Cancel")
-            };
-
-            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
-            {
-                await AddPeerDialogAsync();
-            }
-        }
-        catch (Exception ex)
-        {
-            AppLog.Error("打开局域网面板失败。", ex);
-        }
-    }
-
-    private async Task AddPeerDialogAsync()
-    {
-        var ipBox = new TextBox { Header = Loc.T("Chat_Lan_Ip"), PlaceholderText = "192.168.1.10" };
-        var portBox = new TextBox { Header = Loc.T("Chat_Lan_Port"), Text = "8898" };
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = Loc.T("Chat_Lan_Add"),
-            Content = new StackPanel { Spacing = 8, Children = { ipBox, portBox } },
-            PrimaryButtonText = Loc.T("Chat_Lan_Add"),
-            CloseButtonText = Loc.T("Chat_Cancel")
-        };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-        if (int.TryParse(portBox.Text, out var port) && !string.IsNullOrWhiteSpace(ipBox.Text))
-        {
-            await _chat.AddLanPeerAsync(ipBox.Text.Trim(), port, string.Empty);
-        }
     }
 }
 

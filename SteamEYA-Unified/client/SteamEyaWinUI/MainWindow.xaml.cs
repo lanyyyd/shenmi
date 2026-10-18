@@ -289,6 +289,7 @@ public sealed partial class MainWindow : Window
             "history" => typeof(HistoryPage),
             "cachedAccounts" => typeof(CachedAccountsPage),
             "cloudSave" => typeof(CloudSavePage),
+            "lanTransfer" => typeof(LanTransferPage),
             "settings" => typeof(SettingsPage),
             "about" => typeof(AboutPage),
             _ => typeof(LoginPage)
@@ -475,6 +476,7 @@ public sealed partial class MainWindow : Window
         HistoryNavItem.Content = Loc.T("Nav_History");
         CachedAccountsNavItem.Content = Loc.T("Nav_CachedAccounts");
         CloudSaveNavItem.Content = Loc.T("Nav_CloudSave");
+        LanTransferNavItem.Content = Loc.T("Nav_LanTransfer");
         SettingsNavItem.Content = Loc.T("Nav_Settings");
         AboutNavItem.Content = Loc.T("Nav_About");
     }

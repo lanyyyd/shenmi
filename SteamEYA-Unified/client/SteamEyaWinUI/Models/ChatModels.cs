@@ -141,6 +141,66 @@ internal sealed class LanAddPeerRequest
     public string Name { get; set; } = string.Empty;
 }
 
+// ---------------- 局域网点对点直传（/api/lan/tr/*） ----------------
+
+/// <summary>POST /api/lan/tr/begin 的请求体：建立一次传输。</summary>
+internal sealed class LanTransferBeginRequest
+{
+    public string TransferId { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public long Size { get; set; }
+    public string FromName { get; set; } = string.Empty;
+    public string FromIp { get; set; } = string.Empty;
+}
+
+internal sealed class LanTransferBeginResponse
+{
+    public bool Ok { get; set; }
+    public string? Id { get; set; }
+    public string? Msg { get; set; }
+}
+
+internal sealed class LanTransferFinishResponse
+{
+    public bool Ok { get; set; }
+    public string? Name { get; set; }
+    public string? Path { get; set; }
+    public string? Dir { get; set; }
+    public string? Msg { get; set; }
+}
+
+/// <summary>接收端进行中的传输（GET /api/lan/tr/inbox）。</summary>
+internal sealed class LanTransferActiveDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public long Size { get; set; }
+    public long Written { get; set; }
+    public string From { get; set; } = string.Empty;
+    public string FromIp { get; set; } = string.Empty;
+}
+
+/// <summary>接收端已完成的文件。</summary>
+internal sealed class LanTransferReceivedDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public long Size { get; set; }
+    public string From { get; set; } = string.Empty;
+    public string FromIp { get; set; } = string.Empty;
+    public string Path { get; set; } = string.Empty;
+    public long FinishedAt { get; set; }
+}
+
+internal sealed class LanTransferInboxResponse
+{
+    public bool Ok { get; set; }
+    public bool Enabled { get; set; }
+    public string Dir { get; set; } = string.Empty;
+    public LanTransferActiveDto[]? Active { get; set; }
+    public LanTransferReceivedDto[]? Received { get; set; }
+}
+
 /// <summary>WebSocket 发送：聊天消息。</summary>
 internal sealed class ChatSendDto
 {
@@ -228,4 +288,10 @@ internal sealed class ChatReadRequest
 [JsonSerializable(typeof(LanPeersResponse))]
 [JsonSerializable(typeof(LanAddPeerResponse))]
 [JsonSerializable(typeof(LanAddPeerRequest))]
+[JsonSerializable(typeof(LanTransferBeginRequest))]
+[JsonSerializable(typeof(LanTransferBeginResponse))]
+[JsonSerializable(typeof(LanTransferFinishResponse))]
+[JsonSerializable(typeof(LanTransferActiveDto))]
+[JsonSerializable(typeof(LanTransferReceivedDto))]
+[JsonSerializable(typeof(LanTransferInboxResponse))]
 internal sealed partial class ChatJsonContext : JsonSerializerContext;

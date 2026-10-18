@@ -43,17 +43,6 @@
                     VerticalAlignment="Center" />
             </StackPanel>
 
-            <Button
-                x:Name="LanButton"
-                Grid.Column="2"
-                Click="Lan_Click"
-                VerticalAlignment="Center">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <FontIcon FontSize="14" Glyph="&#xE839;" />
-                    <TextBlock x:Name="LanButtonText" />
-                </StackPanel>
-            </Button>
-
             <!-- 兜底：内嵌界面打不开时，用默认浏览器打开网页版聊天室（用户自行登录） -->
             <Button
                 x:Name="BrowserButton"

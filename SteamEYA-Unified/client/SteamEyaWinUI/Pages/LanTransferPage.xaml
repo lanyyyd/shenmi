@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="SteamEyaWinUI.Pages.LanTransferPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:SteamEyaWinUI.Pages"
+    AllowDrop="True"
+    Loaded="OnLoaded"
+    Unloaded="OnUnloaded"
+    DragOver="OnRootDragOver"
+    Drop="OnRootDrop">
+
+    <Grid Padding="28,16,28,20" RowSpacing="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 标题 + 本机信息 + 刷新 + 打开接收目录 -->
+        <Grid Grid.Row="0" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+                x:Name="PageTitle"
+                Grid.Column="0"
+                Style="{StaticResource TitleTextBlockStyle}"
+                VerticalAlignment="Center" />
+            <TextBlock
+                x:Name="SelfText"
+                Grid.Column="1"
+                Margin="12,0,0,0"
+                VerticalAlignment="Center"
+                TextTrimming="CharacterEllipsis"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Button x:Name="RefreshBtn" Grid.Column="2" Click="Refresh_Click">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="14" Glyph="&#xE72C;" />
+                    <TextBlock x:Name="RefreshText" />
+                </StackPanel>
+            </Button>
+            <Button x:Name="OpenFolderBtn" Grid.Column="3" Click="OpenFolder_Click">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="14" Glyph="&#xE8B7;" />
+                    <TextBlock x:Name="OpenFolderText" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <InfoBar
+            x:Name="PageInfoBar"
+            Grid.Row="1"
+            IsClosable="True"
+            IsOpen="False" />
+
+        <!-- 同局域网用户 -->
+        <Grid Grid.Row="2" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+                x:Name="PeersTitle"
+                Grid.Column="0"
+                Style="{StaticResource SubtitleTextBlockStyle}"
+                VerticalAlignment="Center" />
+            <Button x:Name="AddDeviceBtn" Grid.Column="1" Click="AddDevice_Click">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="14" Glyph="&#xE710;" />
+                    <TextBlock x:Name="AddDeviceText" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <Grid Grid.Row="3">
+            <ListView x:Name="PeersList" SelectionMode="Single" SelectionChanged="OnPeerSelectionChanged">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:LanPeerVm">
+                        <Border
+                            Padding="12,10"
+                            Margin="0,0,0,6"
+                            CornerRadius="8"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderThickness="1"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="{x:Bind Name}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                <TextBlock
+                                    Text="{x:Bind Endpoint}"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+            <TextBlock
+                x:Name="PeersEmptyText"
+                Margin="4,12,0,0"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Visibility="Collapsed" />
+        </Grid>
+
+        <!-- 发送工具栏 -->
+        <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="10">
+            <Button x:Name="SelectFilesBtn" Click="SelectFiles_Click">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="14" Glyph="&#xE8E5;" />
+                    <TextBlock x:Name="SelectFilesText" />
+                </StackPanel>
+            </Button>
+            <Button x:Name="CancelBtn" Click="Cancel_Click">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="14" Glyph="&#xE711;" />
+                    <TextBlock x:Name="CancelText" />
+                </StackPanel>
+            </Button>
+            <TextBlock
+                x:Name="SelectionText"
+                VerticalAlignment="Center"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+
+        <!-- 发送中的传输任务 -->
+        <TextBlock
+            x:Name="OutgoingTitle"
+            Grid.Row="5"
+            Style="{StaticResource SubtitleTextBlockStyle}" />
+
+        <Grid Grid.Row="6">
+            <ListView x:Name="OutgoingList" SelectionMode="None">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:LanTransferItem">
+                        <Border
+                            Padding="12,10"
+                            Margin="0,0,0,6"
+                            CornerRadius="8"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderThickness="1"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                            <StackPanel Spacing="6">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        Text="{x:Bind FileName}"
+                                        TextTrimming="CharacterEllipsis"
+                                        Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        Text="{x:Bind SizeText}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}" />
+                                </Grid>
+                                <ProgressBar Value="{x:Bind Percent, Mode=OneWay}" Maximum="100" />
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        Text="{x:Bind Target}"
+                                        TextTrimming="CharacterEllipsis"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        Text="{x:Bind SpeedText, Mode=OneWay}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}" />
+                                </Grid>
+                                <TextBlock
+                                    Text="{x:Bind StatusText, Mode=OneWay}"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Grid>
+
+        <!-- 接收到的文件 -->
+        <TextBlock
+            x:Name="IncomingTitle"
+            Grid.Row="7"
+            Style="{StaticResource SubtitleTextBlockStyle}" />
+
+        <Grid Grid.Row="8">
+            <ListView x:Name="IncomingList" SelectionMode="None">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:LanReceivedVm">
+                        <Border
+                            Padding="12,10"
+                            Margin="0,0,0,6"
+                            CornerRadius="8"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderThickness="1"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                            <StackPanel Spacing="6">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        Text="{x:Bind Name}"
+                                        TextTrimming="CharacterEllipsis"
+                                        Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        Text="{x:Bind SizeText}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}" />
+                                </Grid>
+                                <ProgressBar Value="{x:Bind Percent}" Maximum="100" Visibility="{x:Bind ProgressVisibility}" />
+                                <TextBlock
+                                    Text="{x:Bind DetailText}"
+                                    TextTrimming="CharacterEllipsis"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+            <TextBlock
+                x:Name="IncomingEmptyText"
+                Margin="4,12,0,0"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Visibility="Collapsed" />
+        </Grid>
+    </Grid>
+</Page>
