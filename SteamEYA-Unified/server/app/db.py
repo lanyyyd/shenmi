@@ -308,7 +308,90 @@ CREATE TABLE IF NOT EXISTS settings (
     value      TEXT NOT NULL,
     updated_at INTEGER
 );
+
+-- ============ 今天吃点啥（美食） ============
+-- 店铺（评分不落库，由该店所有菜品的所有评价实时聚合得到）
+CREATE TABLE IF NOT EXISTS eat_stores (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    image      TEXT DEFAULT '',
+    location   TEXT DEFAULT '',    -- 位置小字，如「新餐厅 2楼」（添加店铺时填写，后台可改）
+    owner_id   INTEGER,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS eat_dishes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    store_id   INTEGER NOT NULL,
+    name       TEXT NOT NULL,
+    image      TEXT DEFAULT '',
+    price      REAL NOT NULL DEFAULT 0,
+    owner_id   INTEGER,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_eat_dish_store ON eat_dishes(store_id);
+
+-- 任务：owner_id 为 NULL 表示「全局共享任务」（所有人同一个转盘结果）
+CREATE TABLE IF NOT EXISTS eat_tasks (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id   INTEGER,
+    dish_id    INTEGER NOT NULL,
+    store_id   INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+-- 每个用户「我要吃别的」的覆盖标记：置 1 后该用户不再跟随全局任务
+CREATE TABLE IF NOT EXISTS eat_optout (
+    user_id    INTEGER PRIMARY KEY,
+    override   INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER
+);
+
+-- 评价：parent_id 为空是顶层评价，非空是「同评」（挂在某条评价下）
+CREATE TABLE IF NOT EXISTS eat_reviews (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    store_id   INTEGER,
+    dish_id    INTEGER,
+    parent_id  INTEGER,
+    rating     INTEGER,             -- 1~5，可为空（同评可以什么都不填）
+    comment    TEXT DEFAULT '',
+    image      TEXT DEFAULT '',
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_eat_review_parent ON eat_reviews(parent_id, id);
+CREATE INDEX IF NOT EXISTS idx_eat_review_dish ON eat_reviews(dish_id, id);
+
+-- 点赞：一条评价每人只能点一次（再次点击即删除 → 取消点赞）
+CREATE TABLE IF NOT EXISTS eat_review_likes (
+    review_id  INTEGER NOT NULL,
+    user_id    INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (review_id, user_id)
+);
 """
+
+
+def _migrate() -> None:
+    """轻量迁移：为已存在的旧库补齐后加的列。
+
+    `CREATE TABLE IF NOT EXISTS` 不会改动已存在的旧表，所以已有部署需要
+    用 ALTER TABLE 补列，保证升级后老库也能用上新功能。
+    """
+    wanted = {
+        "point_redemptions": [
+            ("note", "TEXT DEFAULT ''"),
+            ("media_path", "TEXT DEFAULT ''"),
+            ("media_type", "TEXT DEFAULT ''"),
+            ("issued_at", "INTEGER"),
+        ],
+    }
+    with cursor() as cur:
+        for table, cols in wanted.items():
+            have = {row[1] for row in cur.execute(f"PRAGMA table_info({table})").fetchall()}
+            for name, ddl in cols:
+                if name not in have:
+                    cur.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
 
 
 def init_db() -> None:

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>今天吃点啥</title>
+<link rel="stylesheet" href="/css/eat.css?v=1">
+</head>
+<body>
+
+<!-- ================= 登录 ================= -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-card">
+    <div class="login-logo">🍜</div>
+    <h2>今天吃点啥</h2>
+    <p>登录后开吃，转盘随时转起来～</p>
+    <input type="text" id="loginUser" placeholder="用户名" autocomplete="username">
+    <input type="password" id="loginPass" placeholder="密码" autocomplete="current-password">
+    <div class="login-err" id="loginErr"></div>
+    <button class="btn btn-primary" id="loginBtn">登录</button>
+  </div>
+</div>
+
+<!-- ================= 主应用 ================= -->
+<div id="app">
+
+  <header>
+    <div class="hd-top">
+      <div>
+        <h1>今天吃点啥</h1>
+        <div class="hd-sub">按时吃饭，快乐干饭</div>
+      </div>
+      <div class="avatar" id="hdAvatar">🍜</div>
+    </div>
+  </header>
+
+  <!-- ---- 首页 ---- -->
+  <section class="page active" id="page-home">
+    <div class="page-title"><span class="dot"></span>附近好店 · 就等你来</div>
+    <div id="storeList"></div>
+  </section>
+
+  <!-- ---- 店铺详情（页内切换） ---- -->
+  <section class="page" id="page-store">
+    <div class="back" id="backToList">‹ 返回店铺列表</div>
+    <div class="hero" id="storeHero"></div>
+    <div class="store-acts" id="storeActions"></div>
+    <div class="page-title" style="margin-top:18px;"><span class="dot"></span>招牌菜品</div>
+    <div id="dishList"></div>
+    <div class="sticky-action" id="storeAction">
+      <button class="btn btn-primary" id="eatHereBtn">🍽️ 就吃这家了！</button>
+    </div>
+  </section>
+
+  <!-- ---- 转盘 ---- -->
+  <section class="page" id="page-wheel">
+    <div class="page-title"><span class="dot"></span>全局大转盘</div>
+    <div class="wheel-notice">📢 此转盘为全局共享，所有人抽到同一个结果；点『我要吃别的』可单独重抽。</div>
+    <div class="wheel-wrap">
+      <div class="wheel-stage">
+        <div class="plate"></div>
+        <canvas id="wheelCanvas"></canvas>
+        <div class="pointer"></div>
+      </div>
+      <div class="spin-btns">
+        <button class="btn btn-primary" id="spinBtn">🎯 抽！</button>
+        <button class="btn btn-ghost" id="againBtn">🍽️ 我要吃别的</button>
+      </div>
+      <div class="empty" id="wheelEmpty" style="display:none;">还没有菜品，先去「我的」页添加吧～</div>
+      <div id="resultArea" style="width:100%;"></div>
+      <div class="tip-note">💡 「我要吃别的」只会重置你自己的转盘，之后抽取只对你生效，不会影响别人看到的结果。</div>
+    </div>
+  </section>
+
+  <!-- ---- 评价 ---- -->
+  <section class="page" id="page-review">
+    <div class="feed-top">
+      <div class="page-title"><span class="dot"></span>大家的评价</div>
+      <button class="btn btn-ghost btn-sm" id="newReviewBtn">✍️ 发评价</button>
+    </div>
+    <div id="reviewFeed"></div>
+  </section>
+
+  <!-- ---- 我的 ---- -->
+  <section class="page" id="page-mine">
+    <div class="page-title"><span class="dot"></span>我的干饭足迹</div>
+    <div id="mineTask"></div>
+
+    <div class="seg">
+      <button class="seg-btn on" data-period="month">本月</button>
+      <button class="seg-btn" data-period="year">今年</button>
+    </div>
+    <div class="stat-row">
+      <div class="stat"><div class="num" id="statCount">0</div><div class="lbl"><span id="statPeriod">本月</span>吃了（次）</div></div>
+      <div class="stat"><div class="num" id="statSpend">¥0</div><div class="lbl">花掉的银子</div></div>
+      <div class="stat"><div class="num" id="statTop">—</div><div class="lbl" id="statTopLbl">最常吃的菜</div></div>
+    </div>
+
+    <div class="mine-actions">
+      <button class="btn btn-soft" id="addStoreBtn">＋ 添加店铺</button>
+      <button class="btn btn-soft" id="addDishBtn">＋ 添加菜品</button>
+    </div>
+    <div class="mine-actions">
+      <button class="btn btn-soft" id="logoutBtn">🚪 退出登录</button>
+    </div>
+
+    <div class="page-title" style="margin-top:16px;"><span class="dot"></span>我的评价</div>
+    <div id="mineRecords"></div>
+
+    <div class="wall-head">
+      <div class="page-title"><span class="dot"></span>图片墙</div>
+      <button class="btn btn-ghost btn-sm" id="exportWallBtn">⬇️ 导出大图</button>
+    </div>
+    <div class="wall" id="imgWall"></div>
+  </section>
+
+  <!-- ---- 底部固定 Tab ---- -->
+  <nav id="tabbar">
+    <div class="tab active" data-tab="home"><span class="ic">🏠</span>首页</div>
+    <div class="tab" data-tab="wheel"><span class="ic">🎡</span>转盘</div>
+    <div class="tab" data-tab="review"><span class="ic">⭐</span>评价</div>
+    <div class="tab" data-tab="mine"><span class="ic">👤</span>我的</div>
+  </nav>
+
+</div>
+
+<!-- ================= 打开页面时的任务弹窗 ================= -->
+<div class="mask" id="taskMask">
+  <div class="modal">
+    <h2>🔔 你有新任务</h2>
+    <div class="sub">大家已经帮你决定了，去吃这一个吧！</div>
+    <div class="task-dish-box" id="taskBox"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="goReviewBtn">我要评价</button>
+      <button class="btn btn-soft" id="knowBtn">我知道了</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 通用信息 / 确认弹窗 ================= -->
+<div class="mask" id="infoMask">
+  <div class="modal">
+    <h2 id="infoTitle"></h2>
+    <div class="sub" id="infoSub"></div>
+    <div id="infoBody"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="infoPrimary">确定</button>
+      <button class="btn btn-soft" id="infoSecondary">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 评价 / 同评编辑器 ================= -->
+<div class="mask" id="reviewMask">
+  <div class="modal">
+    <h2 id="reviewTitle">✍️ 发评价</h2>
+    <div class="sub" id="reviewSub">说说这一顿吃得怎么样～（都可以不填）</div>
+
+    <div class="target-box" id="reviewTarget" style="display:none;"></div>
+    <div id="reviewPick" style="display:none;">
+      <div class="field"><label>选择店铺</label><select id="rvStore"></select></div>
+      <div class="field"><label>选择菜品</label><select id="rvDish"></select></div>
+    </div>
+
+    <div class="field">
+      <label style="text-align:center;">打个分（可不填）</label>
+      <div class="stars-input" id="rvStars">
+        <span data-v="1">★</span><span data-v="2">★</span><span data-v="3">★</span><span data-v="4">★</span><span data-v="5">★</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>说点什么（可不填）</label>
+      <textarea id="rvComment" placeholder="比如：面条筋道，汤头浓郁，分量很足！"></textarea>
+    </div>
+    <div class="field">
+      <label>上传一张图片（可不填）</label>
+      <input type="file" id="rvFile" accept="image/*">
+      <img class="preview" id="rvPreview" alt="预览">
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="rvSubmit">提交</button>
+      <button class="btn btn-soft" id="rvCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 通用表单弹窗（添加/编辑店铺、菜品） ================= -->
+<div class="mask" id="formMask">
+  <div class="modal">
+    <h2 id="formTitle"></h2>
+    <div class="sub" id="formSub"></div>
+    <div id="formFields"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="formSave">保存</button>
+      <button class="btn btn-soft" id="formCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 图片查看器 ================= -->
+<div class="viewer-mask" id="viewerMask">
+  <img id="viewerImg" alt="">
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/js/eat.js?v=1"></script>
+</body>
+</html>
