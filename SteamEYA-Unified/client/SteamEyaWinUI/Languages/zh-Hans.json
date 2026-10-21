@@ -825,6 +825,7 @@
     "Assist_Status_Cancelled": "已取消",
     "Assist_Status_Failed": "已失败",
     "Assist_Status_Expired": "已失效",
-    "Assist_ApproveFailed": "同意失败：对方可能已断开，或本机无法采集屏幕"
+    "Assist_ApproveFailed": "同意失败：对方可能已断开，或本机无法采集屏幕",
+    "Assist_NoVideo": "未收到对方画面：对方可能无法采集屏幕，或显卡/会话不支持。"
   }
 }

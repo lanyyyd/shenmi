@@ -36,17 +36,22 @@ internal sealed class DxContext : IDisposable
 
     public ID3D11VideoContext VideoContext { get; }
 
-    public static DxContext Create()
+    /// <summary>
+    /// 创建设备。adapter 为 null 时用 DXGI 默认适配器（主控端解码够用）；
+    /// 被控端采集必须传入"显示器所属的适配器"——DXGI 要求 DuplicateOutput 的设备与输出同适配器，
+    /// 否则一律返回 DXGI_ERROR_UNSUPPORTED（笔记本双显卡上这是最常见的失败原因）。
+    /// </summary>
+    public static DxContext Create(IDXGIAdapter? adapter = null)
     {
         // BGRA：桌面复制要求；VideoSupport：NV12 转换要 ID3D11VideoDevice。
         var flags = DeviceCreationFlags.BgraSupport | DeviceCreationFlags.VideoSupport;
-        var result = D3D11.D3D11CreateDevice(null, DriverType.Hardware, flags, Levels,
+        var result = D3D11.D3D11CreateDevice(adapter, DriverType.Hardware, flags, Levels,
             out ID3D11Device device, out ID3D11DeviceContext context);
 
         if (result.Failure)
         {
             // 少数虚拟机上 VideoSupport 不受支持，退一档再试；VideoDevice 为空时由调用方报错。
-            result = D3D11.D3D11CreateDevice(null, DriverType.Hardware, DeviceCreationFlags.BgraSupport,
+            result = D3D11.D3D11CreateDevice(adapter, DriverType.Hardware, DeviceCreationFlags.BgraSupport,
                 Levels, out device, out context);
         }
 

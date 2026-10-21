@@ -29,6 +29,7 @@ public sealed partial class RemoteAssistWindow : Window
     private bool _renderPending;
     private bool _disposed;
     private bool _fullScreen;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _noVideoTimer;
 
     internal RemoteAssistWindow(AssistSession session)
     {
@@ -84,6 +85,7 @@ public sealed partial class RemoteAssistWindow : Window
                     _frameHeight = height;
                     _bitmap = new WriteableBitmap(width, height);
                     ScreenImage.Source = _bitmap;
+                    _noVideoTimer.Stop();
                     UpdateStatus();
                 }
 
@@ -352,6 +354,7 @@ public sealed partial class RemoteAssistWindow : Window
             return;
         }
         _disposed = true;
+        _noVideoTimer.Stop();
 
         _session.FrameReady -= OnFrameReady;
         _session.CursorMoved -= OnCursorMoved;

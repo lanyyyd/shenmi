@@ -825,6 +825,7 @@
     "Assist_Status_Cancelled": "Cancelled",
     "Assist_Status_Failed": "Failed",
     "Assist_Status_Expired": "Expired",
-    "Assist_ApproveFailed": "Failed to allow: the peer may be gone or screen capture is unavailable"
+    "Assist_ApproveFailed": "Failed to allow: the peer may be gone or screen capture is unavailable",
+    "Assist_NoVideo": "No frames received: the remote side cannot capture its screen, or the GPU/session does not support it."
   }
 }

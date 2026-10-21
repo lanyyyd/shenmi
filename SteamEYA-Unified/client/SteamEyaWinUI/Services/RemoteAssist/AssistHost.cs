@@ -296,17 +296,51 @@ internal sealed partial class AssistHost : IDisposable
         }
 
         var token = Guid.NewGuid().ToString("N");
+
+        // 先建会话（采集/编码都在这儿初始化），成功了才回"同意"。
+        // 反过来的话，采集一失败，对端已经收到 Accepted，只能一直卡在"连接中"黑屏。
+        var session = CreateSession(pending, token);
+        if (session is null)
+        {
+            await SendResultAsync(pending, new AssistInviteResult
+            {
+                RequestId = requestId,
+                Accepted = false,
+                Reason = "capture_failed",
+            }).ConfigureAwait(false);
+            lock (_gate)
+            {
+                _pending.Remove(requestId);
+            }
+            ClosePending(pending);
+            Store.UpdateStatus(requestId, AssistRequestStatus.Failed);
+            return false;
+        }
+
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await AssistFraming.WriteJsonAsync(pending.Tcp.GetStream(), AssistMessageType.InviteResult,
-                new AssistInviteResult { RequestId = requestId, Accepted = true, Token = token },
-                AssistJsonContext.Default.AssistInviteResult, pending.WriteGate, timeout.Token)
-                .ConfigureAwait(false);
+            var sent = await SendResultAsync(pending, new AssistInviteResult
+            {
+                RequestId = requestId,
+                Accepted = true,
+                Token = token,
+            }).ConfigureAwait(false);
+            if (!sent)
+            {
+                session.Dispose();
+                lock (_gate)
+                {
+                    _pending.Remove(requestId);
+                }
+                ClosePending(pending);
+                Store.UpdateStatus(requestId, AssistRequestStatus.Failed);
+                return false;
+            }
         }
         catch (Exception ex)
         {
             AppLog.Warn($"回执同意失败：{ex.Message}");
+            session.Dispose();
             ClosePending(pending);
             Store.UpdateStatus(requestId, AssistRequestStatus.Failed);
             return false;
@@ -315,14 +349,6 @@ internal sealed partial class AssistHost : IDisposable
         lock (_gate)
         {
             _pending.Remove(requestId);
-        }
-
-        var session = CreateSession(pending, token);
-        if (session is null)
-        {
-            ClosePending(pending);
-            Store.UpdateStatus(requestId, AssistRequestStatus.Failed);
-            return false;
         }
 
         session.PeerNick = pending.Nick;
@@ -344,14 +370,30 @@ internal sealed partial class AssistHost : IDisposable
     {
         try
         {
-            var dx = DxContext.Create();
-            return AssistSession.CreateHost(pending.Tcp, token, dx);
+            return AssistSession.CreateHost(pending.Tcp, token);
         }
         catch (Exception ex)
         {
             AppLog.Error("创建被控会话失败。", ex);
             Faulted?.Invoke($"无法启动屏幕采集：{ex.Message}");
             return null;
+        }
+    }
+
+    /// <summary>给对端回一条 InviteResult；连接已断时返回 false（不抛）。</summary>
+    private static async Task<bool> SendResultAsync(PendingInvite pending, AssistInviteResult result)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            await AssistFraming.WriteJsonAsync(pending.Tcp.GetStream(), AssistMessageType.InviteResult,
+                result, AssistJsonContext.Default.AssistInviteResult, pending.WriteGate, timeout.Token)
+                .ConfigureAwait(false);
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 

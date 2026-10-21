@@ -145,6 +145,7 @@ internal sealed class AssistClient
                 {
                     "timeout" => "对方未在 5 分钟内处理，请求已失效",
                     "in_session" => "对方正在进行远程协助",
+                    "capture_failed" => "对方无法采集屏幕（显卡/会话限制），请让对方查看日志",
                     _ => "对方拒绝了协助请求",
                 };
                 StateChanged?.Invoke(state, message);

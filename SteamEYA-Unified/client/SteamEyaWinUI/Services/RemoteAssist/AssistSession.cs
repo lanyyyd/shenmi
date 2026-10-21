@@ -21,6 +21,7 @@ internal enum AssistRole
 internal sealed class AssistSession : IDisposable
 {
     private const int TargetFps = 30;
+    private const int FallbackFps = 12;
     private const int Bitrate = 8_000_000;
     private const int HeartbeatMs = 3_000;
     private const int IdleTimeoutMs = 20_000;
@@ -31,17 +32,18 @@ internal sealed class AssistSession : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly string _token;
 
-    private readonly DxContext _dx;
-    private readonly DesktopCapture? _capture;
-    private readonly FrameConverter _converter;
+    private readonly DxContext? _dx;
+    private readonly ICaptureSource? _capture;
+    private readonly FrameConverter? _converter;
     private readonly H264Encoder? _encoder;
     private readonly H264Decoder? _decoder;
+    private readonly int _fps;
 
     private long _lastReceiveTicks = Environment.TickCount64;
     private int _lastCursorSent = -1;
     private volatile bool _disposed;
 
-    private AssistSession(TcpClient tcp, AssistRole role, string token, DxContext dx)
+    private AssistSession(TcpClient tcp, AssistRole role, string token, DxContext? dx)
     {
         _tcp = tcp;
         _stream = tcp.GetStream();
@@ -52,13 +54,19 @@ internal sealed class AssistSession : IDisposable
 
         if (role == AssistRole.Host)
         {
-            _capture = DesktopCapture.Create(dx);
-            _converter = FrameConverter.CreateBgraToNv12(dx);
-            _encoder = H264Encoder.Create(_capture.Width, _capture.Height, TargetFps, Bitrate);
+            // 采集失败会直接抛出（DXGI 与 GDI 都试过），由调用方回给对方"采集失败"。
+            _capture = CaptureFactory.Create(out var device);
+            _dx = device;
+            _fps = _capture.GpuAvailable ? TargetFps : FallbackFps;
+            _converter = _capture.GpuAvailable && device is not null
+                ? FrameConverter.CreateBgraToNv12(device)
+                : null;
+            _encoder = H264Encoder.Create(_capture.Width, _capture.Height, _fps, Bitrate);
         }
         else
         {
-            _converter = FrameConverter.CreateNv12ToBgra(dx);
+            _fps = TargetFps;
+            _converter = FrameConverter.CreateNv12ToBgra(dx!);
             _decoder = H264Decoder.Create();
         }
     }
@@ -90,8 +98,8 @@ internal sealed class AssistSession : IDisposable
     private int _frameWidth;
     private int _frameHeight;
 
-    public static AssistSession CreateHost(TcpClient tcp, string token, DxContext dx)
-        => new(tcp, AssistRole.Host, token, dx);
+    public static AssistSession CreateHost(TcpClient tcp, string token)
+        => new(tcp, AssistRole.Host, token, null);
 
     public static AssistSession CreateController(TcpClient tcp, string token, DxContext dx)
         => new(tcp, AssistRole.Controller, token, dx);
@@ -110,7 +118,7 @@ internal sealed class AssistSession : IDisposable
     private async Task CaptureLoopAsync()
     {
         var ct = _cts.Token;
-        var frameInterval = 1000.0 / TargetFps;
+        var frameInterval = 1000.0 / _fps;
         var clock = Stopwatch.StartNew();
         var forceKey = true;   // 首帧必须是 IDR，否则对端解不出来
 
@@ -120,7 +128,7 @@ internal sealed class AssistSession : IDisposable
             {
                 var started = clock.Elapsed.TotalMilliseconds;
 
-                if (!_capture!.TryAcquire(16, out var texture, out var desktopUpdated, out var cursor))
+                if (!_capture!.TryAcquire(16, out var frame))
                 {
                     await Task.Delay(4, ct).ConfigureAwait(false);
                     continue;
@@ -128,6 +136,7 @@ internal sealed class AssistSession : IDisposable
 
                 try
                 {
+                    var cursor = frame.Cursor;
                     var cursorX = cursor.Visible && _capture.Width > 0
                         ? cursor.X / _capture.Width
                         : 0f;
@@ -138,9 +147,12 @@ internal sealed class AssistSession : IDisposable
                         ? HashCode.Combine((int)cursor.X, (int)cursor.Y)
                         : -1;
 
-                    if (desktopUpdated || forceKey)
+                    if (frame.DesktopUpdated || forceKey)
                     {
-                        var nv12 = _converter.ConvertFromTexture(texture!, _capture.Width, _capture.Height);
+                        // GPU 路径用 VideoProcessor 转 NV12；GDI 兜底走 CPU 转换。
+                        var nv12 = frame.Texture is not null
+                            ? _converter!.ConvertFromTexture(frame.Texture, _capture.Width, _capture.Height)
+                            : Nv12CpuConverter.FromBgra(frame.Bgra!, _capture.Width, _capture.Height);
                         var encoded = _encoder!.Encode(nv12, (long)clock.Elapsed.TotalMilliseconds, forceKey);
                         if (encoded.Length > 0)
                         {
@@ -404,11 +416,14 @@ internal sealed class AssistSession : IDisposable
     public void Dispose()
     {
         Close("disposed");
-        _capture?.Dispose();
+        _capture?.Dispose();     // DXGI 采集源自己持有并释放 DxContext
         _encoder?.Dispose();
         _decoder?.Dispose();
-        _converter.Dispose();
-        _dx.Dispose();
+        _converter?.Dispose();
+        if (Role != AssistRole.Host)
+        {
+            _dx?.Dispose();
+        }
         _writeGate.Dispose();
         _cts.Dispose();
     }

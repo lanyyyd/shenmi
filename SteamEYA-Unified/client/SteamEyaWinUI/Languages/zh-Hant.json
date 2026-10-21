@@ -825,6 +825,7 @@
     "Assist_Status_Cancelled": "已取消",
     "Assist_Status_Failed": "已失敗",
     "Assist_Status_Expired": "已失效",
-    "Assist_ApproveFailed": "同意失敗：對方可能已中斷，或本機無法擷取螢幕"
+    "Assist_ApproveFailed": "同意失敗：對方可能已中斷，或本機無法擷取螢幕",
+    "Assist_NoVideo": "未收到對方畫面：對方可能無法擷取螢幕，或顯示卡/工作階段不支援。"
   }
 }
