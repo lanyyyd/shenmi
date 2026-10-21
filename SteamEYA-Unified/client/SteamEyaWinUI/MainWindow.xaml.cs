@@ -72,6 +72,7 @@ public sealed partial class MainWindow : Window
             ChatHub.Shutdown();
             EngineLauncher.Stop();
             GatewayLauncher.Stop();
+            JiYuService.Stop();
         };
 
         // 背景层按系统能力挑：Windows 11 用 Mica；Windows 10 没有 Mica（设了会让边框/内容缝隙透出黑色，
@@ -290,6 +291,7 @@ public sealed partial class MainWindow : Window
             "cachedAccounts" => typeof(CachedAccountsPage),
             "cloudSave" => typeof(CloudSavePage),
             "lanTransfer" => typeof(LanTransferPage),
+            "tools" => typeof(ToolsPage),
             "settings" => typeof(SettingsPage),
             "about" => typeof(AboutPage),
             _ => typeof(LoginPage)
@@ -477,6 +479,7 @@ public sealed partial class MainWindow : Window
         CachedAccountsNavItem.Content = Loc.T("Nav_CachedAccounts");
         CloudSaveNavItem.Content = Loc.T("Nav_CloudSave");
         LanTransferNavItem.Content = Loc.T("Nav_LanTransfer");
+        ToolsNavItem.Content = Loc.T("Nav_Tools");
         SettingsNavItem.Content = Loc.T("Nav_Settings");
         AboutNavItem.Content = Loc.T("Nav_About");
     }

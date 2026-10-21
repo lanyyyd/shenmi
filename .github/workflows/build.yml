@@ -121,6 +121,32 @@ jobs:
         shell: pwsh
         run: choco install innosetup -y --no-progress
 
+      # ---- 极域电子教室绕过组件（32 位原生）----
+      # JiYuHost.exe 由客户端启动，负责向 StudentMain.exe 注入 SteamEya.JiYuHook.dll。
+      # 两个工程都是 Win32（极域学生端是 32 位进程），随安装包放到 <安装目录>\jiyu。
+      - name: 构建极域绕过组件（JiYuHost + Hook DLL）
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe 未找到" }
+          $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
+          if (-not $msbuild) { throw "MSBuild.exe 未找到" }
+
+          & $msbuild "native\JiYu\Hook\JiYuTrainerHooks.vcxproj" /p:Configuration=Release /p:Platform=Win32 /m /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "Hook DLL 构建失败" }
+          & $msbuild "native\JiYu\Host\JiYuHost.vcxproj" /p:Configuration=Release /p:Platform=Win32 /m /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "JiYuHost 构建失败" }
+
+          $hook = "native\JiYu\Hook\bin\Win32\Release\SteamEya.JiYuHook.dll"
+          $hostExe = "native\JiYu\Host\bin\Win32\Release\JiYuHost.exe"
+          if (-not (Test-Path $hook)) { throw "Hook DLL 未生成" }
+          if (-not (Test-Path $hostExe)) { throw "JiYuHost.exe 未生成" }
+
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\publish\jiyu" | Out-Null
+          Copy-Item $hook "$env:GITHUB_WORKSPACE\publish\jiyu\" -Force
+          Copy-Item $hostExe "$env:GITHUB_WORKSPACE\publish\jiyu\" -Force
+          Get-ChildItem "$env:GITHUB_WORKSPACE\publish\jiyu" | Select-Object -ExpandProperty Name
+
       # 把 Native AOT 自包含发布目录整体压成单个安装包 exe：用户只需下载/运行这一个文件。
       - name: Package installer (single setup.exe)
         shell: pwsh

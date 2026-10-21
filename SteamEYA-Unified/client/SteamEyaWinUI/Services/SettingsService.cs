@@ -276,6 +276,21 @@ internal sealed class AppSettings
 
     /// <summary>自定义背景不透明度，范围 0.1～0.9。</summary>
     public double CustomBackgroundOpacity { get; set; } = DefaultCustomBackgroundOpacity;
+
+    /// <summary>「小工具」页：是否启用极域电子教室绕过（默认开启，客户端启动即注入）。</summary>
+    public bool JiYuBypassEnabled { get; set; } = true;
+
+    /// <summary>「小工具」页：是否允许广播窗口置顶（对应 Hook 的 AllowGbTop）。</summary>
+    public bool JiYuAllowGbTop { get; set; }
+
+    /// <summary>「小工具」页：是否启用老板键。</summary>
+    public bool JiYuBossKeyEnabled { get; set; } = true;
+
+    /// <summary>老板键修饰键（Win32 MOD_* 位组合，Ctrl=2 / Alt=1 / Shift=4 / Win=8）。</summary>
+    public uint JiYuBossKeyMods { get; set; } = JiYuService.ModControl | JiYuService.ModAlt;
+
+    /// <summary>老板键虚拟键码（默认 B）。</summary>
+    public uint JiYuBossKeyVk { get; set; } = 0x42;
 }
 
 // 与账号历史一致用 source generator：JsonSerializerDefaults.Web（camelCase、大小写不敏感），AOT 下可读写。
