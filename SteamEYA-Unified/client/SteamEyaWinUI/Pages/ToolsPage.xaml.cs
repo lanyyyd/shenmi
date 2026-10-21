@@ -9,6 +9,11 @@ using SteamEyaWinUI.Services;
 using Windows.System;
 using Windows.UI.Core;
 
+// Windows.System 与 Microsoft.UI.Dispatching 都有 DispatcherQueue 系列类型，
+// 客户端必须使用 WinUI 3 的 Microsoft.UI.Dispatching 版本，这里用别名消除歧义。
+using DispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue;
+using DispatcherQueueTimer = Microsoft.UI.Dispatching.DispatcherQueueTimer;
+
 namespace SteamEyaWinUI.Pages;
 
 /// <summary>
