@@ -74,7 +74,7 @@ public sealed partial class AssistInviteToast : Window
     }
 
     /// <summary>弹出一条新的协助邀请（可在后台线程调用，内部已封送到 UI 线程）。</summary>
-    public static void ShowInvite(AssistRequestRecord record)
+    internal static void ShowInvite(AssistRequestRecord record)
     {
         if (MainWindow.Instance?.DispatcherQueue is not { } ui)
         {
@@ -89,7 +89,7 @@ public sealed partial class AssistInviteToast : Window
     }
 
     /// <summary>被控会话建立：切换为常驻的"正在被协助"条。</summary>
-    public static void ShowSessionBar(AssistSession session)
+    internal static void ShowSessionBar(AssistSession session)
     {
         if (MainWindow.Instance?.DispatcherQueue is not { } ui)
         {
@@ -108,7 +108,7 @@ public sealed partial class AssistInviteToast : Window
         });
     }
 
-    public static void CloseSessionBar()
+    internal static void CloseSessionBar()
     {
         _session = null;
         var instance = _instance;
@@ -122,7 +122,7 @@ public sealed partial class AssistInviteToast : Window
         }
     }
 
-    public static void CloseAll()
+    internal static void CloseAll()
     {
         Queue.Clear();
         _session = null;

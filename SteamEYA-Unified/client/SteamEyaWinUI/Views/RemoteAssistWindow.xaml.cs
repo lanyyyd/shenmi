@@ -29,7 +29,7 @@ public sealed partial class RemoteAssistWindow : Window
     private bool _disposed;
     private bool _fullScreen;
 
-    public RemoteAssistWindow(AssistSession session)
+    internal RemoteAssistWindow(AssistSession session)
     {
         InitializeComponent();
         _session = session;
@@ -45,13 +45,13 @@ public sealed partial class RemoteAssistWindow : Window
         _session.Closed += OnSessionClosed;
 
         Closed += (_, _) => TearDown();
-        Activated += (_, _) => RootGrid.Focus(FocusState.Programmatic);
+        Activated += (_, _) => RootHost.Focus(FocusState.Programmatic);
 
         var presenter = AppWindow.Presenter as OverlappedPresenter;
         presenter?.IsResizable = true;
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1280, 760));
 
-        RootGrid.Focus(FocusState.Programmatic);
+        RootHost.Focus(FocusState.Programmatic);
     }
 
     private void OnFrameReady(byte[] bgra, int width, int height)
