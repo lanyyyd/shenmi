@@ -85,6 +85,10 @@ internal static class GatewayLauncher
         // 显式开启局域网发现：离线模式本就默认开启；在线模式下由聊天室的“局域网互传”按需拉起本机网关，
         // 让“在线/离线都能局域网互传”在客户端侧也成立。
         psi.Environment["EYA_LAN_DISCOVERY"] = "1";
+        // 远程协助端口：写进 UDP 广播包，对端双击设备时直接连这个端口。
+        psi.Environment["EYA_ASSIST_PORT"] = "8900";
+        psi.Environment["EYA_ASSIST_ENABLED"] = "1";
+        psi.Environment["EYA_USER_ID"] = SessionState.InstallId;
         // 聊天前端目录：优先 <AppDir>\web，其次 <AppDir>\gateway\web
         var webDir = Path.Combine(AppContext.BaseDirectory, "web");
         if (!Directory.Exists(webDir))

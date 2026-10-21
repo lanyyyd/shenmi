@@ -1,4 +1,4 @@
-; SteamEYA 单文件安装包脚本（Inno Setup 6 / 7）。
+﻿; SteamEYA 单文件安装包脚本（Inno Setup 6 / 7）。
 ; 由 ISCC.exe 编译：把 Native AOT 自包含发布目录（publish/）整体收进一个 setup.exe，
 ; 用户双击安装即可，无需另装 .NET 或 Windows App Runtime。
 ;
@@ -66,4 +66,10 @@ Name: "{autoprograms}\SteamEYA"; Filename: "{app}\SteamEyaWinUI.exe"
 Name: "{autodesktop}\SteamEYA"; Filename: "{app}\SteamEyaWinUI.exe"; Tasks: desktopicon
 
 [Run]
+; 远程协助要监听 TCP 8900（局域网内被控），首次安装即放行，否则对端会被静默拦截。
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""SteamEYA Remote Assist"""; Flags: runhidden; StatusMsg: "配置防火墙规则..."
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""SteamEYA Remote Assist"" dir=in action=allow protocol=TCP localport=8900 profile=private"; Flags: runhidden; StatusMsg: "配置防火墙规则（远程协助 TCP 8900）..."
 Filename: "{app}\SteamEyaWinUI.exe"; Description: "{cm:LaunchProgram,SteamEYA}"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""SteamEYA Remote Assist"""; Flags: runhidden

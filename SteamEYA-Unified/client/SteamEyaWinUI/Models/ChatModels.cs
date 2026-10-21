@@ -116,6 +116,12 @@ internal sealed class LanPeerDto
     public string Name { get; set; } = string.Empty;
     public int Port { get; set; }
     public long LastSeen { get; set; }
+
+    /// <summary>对端远程协助端口（由广播包带出，0 表示没开启）。</summary>
+    public int AssistPort { get; set; }
+
+    /// <summary>对端是否开着远程协助。</summary>
+    public bool AssistEnabled { get; set; }
 }
 
 internal sealed class LanPeersResponse

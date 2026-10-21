@@ -133,6 +133,13 @@
                         <FontIcon Glyph="&#xE839;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem
+                    x:Name="RemoteAssistNavItem"
+                    Tag="remoteAssist">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE8AF;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
             <NavigationView.FooterMenuItems>
                 <NavigationViewItem

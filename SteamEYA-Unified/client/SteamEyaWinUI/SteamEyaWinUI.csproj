@@ -63,6 +63,20 @@
          避免 WindowsAppSDK 元包拖入 onnxruntime/DirectML/AI 等无用载荷（约 40 MB）。
          自包含模式下 WinUI 组件包自带运行时 DLL，无需 Runtime 包。 -->
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.2.1" />
+    <!-- 远程协助：DXGI 桌面复制 / D3D11 VideoProcessor（NV12 转换）/ Media Foundation H.264 编解码。
+         三者都是纯 P/Invoke 封装，AOT 友好；比起手写 COM 互操作，省掉大量 vtable 顺序相关的隐患。 -->
+    <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.MediaFoundation" Version="3.8.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Vortice/SharpGen 大量使用函数指针与 COM vtable，Native AOT 裁剪时若把内部类型裁掉，
+         运行期才会以 MissingMethod/TypeLoad 的形式炸出来。这里整体保根，代价约 1~2 MB 体积。 -->
+    <TrimmerRootAssembly Include="SharpGen.Runtime" />
+    <TrimmerRootAssembly Include="Vortice.DXGI" />
+    <TrimmerRootAssembly Include="Vortice.Direct3D11" />
+    <TrimmerRootAssembly Include="Vortice.MediaFoundation" />
   </ItemGroup>
 
   <!-- workaround：无打包 WinUI 应用 dotnet publish 时不会复制 PRI 资源索引文件，

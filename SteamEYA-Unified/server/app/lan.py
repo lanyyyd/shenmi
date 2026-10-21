@@ -58,7 +58,15 @@ class LanDiscovery:
         except Exception:
             return
 
-        beacon = json.dumps({"app": "steameya", "name": self.name, "port": self.port}).encode("utf-8")
+        # assistPort / assistEnabled：远程协助端口随发现一起广播，对端双击即可直连，无需手工配置。
+        beacon = json.dumps({
+            "app": "steameya",
+            "name": self.name,
+            "port": self.port,
+            "assistPort": int(os.getenv("EYA_ASSIST_PORT", "8900")),
+            "assistEnabled": os.getenv("EYA_ASSIST_ENABLED", "1") == "1",
+            "uid": os.getenv("EYA_USER_ID", ""),
+        }).encode("utf-8")
         last_beacon = 0.0
         while not self._stop.is_set():
             now = time.time()
@@ -88,6 +96,9 @@ class LanDiscovery:
                 "ip": ip,
                 "name": info.get("name") or ip,
                 "port": int(info.get("port") or self.port),
+                "assistPort": int(info.get("assistPort") or 0),
+                "assistEnabled": bool(info.get("assistEnabled", False)),
+                "uid": str(info.get("uid") or ""),
                 "lastSeen": int(now * 1000),
             }
         self._prune()
@@ -113,9 +124,13 @@ class LanDiscovery:
         self._prune()
         return list(self.peers.values())
 
-    def add_manual(self, ip: str, port: int, name: str = "") -> dict:
+    def add_manual(self, ip: str, port: int, name: str = "", assist_port: int = 8900) -> dict:
         ip = ip.strip()
-        self.peers[ip] = {"ip": ip, "name": name or ip, "port": int(port), "lastSeen": int(time.time() * 1000)}
+        self.peers[ip] = {
+            "ip": ip, "name": name or ip, "port": int(port),
+            "assistPort": int(assist_port), "assistEnabled": True, "uid": "",
+            "lastSeen": int(time.time() * 1000),
+        }
         return self.peers[ip]
 
     # ---------------- 本机身份（供互传时标识来源） ----------------
