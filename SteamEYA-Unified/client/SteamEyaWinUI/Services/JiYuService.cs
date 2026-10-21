@@ -276,7 +276,7 @@ internal static partial class JiYuService
                 switch (key)
                 {
                     case "student": status.StudentRunning = value == "1"; break;
-                    case "pid": _ = int.TryParse(value, out status.Pid); break;
+                    case "pid": status.Pid = int.TryParse(value, out var pid) ? pid : 0; break;
                     case "studentPath": status.StudentPath = value; break;
                     case "injected": status.Injected = value == "1"; break;
                     case "controlled": status.Controlled = value == "1"; break;
