@@ -63,6 +63,8 @@ public sealed partial class MainWindow : Window
         ChatNotifyService.SetUiDispatcher(DispatcherQueue);
         ChatNotifyService.Initialize();
         ChatNotifyService.Invoked += OnNotificationInvoked;
+        // 远程协助：注入 UI 派发器，让后台的邀请/会话事件能弹右下角窗口。
+        AssistService.AttachUi(DispatcherQueue);
 
         // 关窗口时：停背景视频释放解码器与文件句柄；断开常驻聊天；
         // 结束本机拉起的网关 / 云游戏引擎（含 PyInstaller onefile 派生的子进程与浏览器驱动），避免残留。
@@ -70,6 +72,7 @@ public sealed partial class MainWindow : Window
         {
             StopBackgroundVideo();
             ChatHub.Shutdown();
+            AssistService.Stop();
             EngineLauncher.Stop();
             GatewayLauncher.Stop();
         };
@@ -105,6 +108,9 @@ public sealed partial class MainWindow : Window
         // 预载历史账号，登录页的头像/资料复用依赖该缓存。
         AppState.ReloadHistory();
         ApplyAccessMode();
+
+        // 登录后即进入"可被邀请"状态：UDP 广播上线 + 协助端口监听，两者幂等。
+        AssistService.EnsureStarted();
 
         // 首次启动即解析并持久化 Steam 安装路径（之后上号直接复用，不再每次探测）。
         // 等内容进入可视树（XamlRoot 就绪）后再跑，检测失败才需要弹框。
@@ -290,6 +296,7 @@ public sealed partial class MainWindow : Window
             "cachedAccounts" => typeof(CachedAccountsPage),
             "cloudSave" => typeof(CloudSavePage),
             "lanTransfer" => typeof(LanTransferPage),
+            "remoteAssist" => typeof(RemoteAssistPage),
             "settings" => typeof(SettingsPage),
             "about" => typeof(AboutPage),
             _ => typeof(LoginPage)
@@ -477,6 +484,7 @@ public sealed partial class MainWindow : Window
         CachedAccountsNavItem.Content = Loc.T("Nav_CachedAccounts");
         CloudSaveNavItem.Content = Loc.T("Nav_CloudSave");
         LanTransferNavItem.Content = Loc.T("Nav_LanTransfer");
+        RemoteAssistNavItem.Content = Loc.T("Nav_RemoteAssist");
         SettingsNavItem.Content = Loc.T("Nav_Settings");
         AboutNavItem.Content = Loc.T("Nav_About");
     }
