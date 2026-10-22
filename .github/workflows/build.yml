@@ -7,8 +7,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+# 发布安装包需要写权限：把产物传到 Release（Release 附件不占 Actions 存储配额）
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -168,21 +169,48 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
           Get-ChildItem artifacts
 
-      - name: Upload installer (single exe)
-        uses: actions/upload-artifact@v4
-        with:
-          name: SteamEYA-setup-win-x64
-          path: artifacts/*.exe
-          if-no-files-found: error
-          # 产物 2 天后自动过期：单份 ~53MB，留太久会堆满账号 500MB 的 Actions 存储额度
-          retention-days: 2
+      # 安装包传到 GitHub Release 而不是 Actions artifact：
+      # Release 附件不占用 500MB 的 Actions 存储配额，避免再次触发
+      # “Artifact storage quota has been hit”导致整个构建失败。
+      - name: Publish installer to GitHub Release
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "v0.1.${{ github.run_number }}"
+          $exe = Get-ChildItem artifacts/*.exe | Select-Object -First 1
+          if (-not $exe) { throw "安装包 exe 不存在" }
 
-      # 便携包 ~83MB，与 setup.exe 内容重复，只在手动触发时上传，避免日常 push 双份占额度
-      - name: Upload portable folder (解压即用)
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "SteamEYA $tag" --notes "自动构建 ${{ github.sha }}"
+            if ($LASTEXITCODE -ne 0) { throw "创建 Release 失败" }
+          }
+          gh release upload $tag $exe.FullName --clobber
+          if ($LASTEXITCODE -ne 0) { throw "上传安装包到 Release 失败" }
+          Write-Host "Release: https://github.com/${{ github.repository }}/releases/tag/$tag"
+
+      # 便携包 ~83MB，与 setup.exe 内容重复，只在手动触发时打包上传，
+      # 同样走 Release 附件，不占 Actions 存储额度。
+      - name: Package portable zip
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
-        with:
-          name: SteamEyaWinUI-win-x64-portable
-          path: publish/**
-          if-no-files-found: error
-          retention-days: 2
+        shell: pwsh
+        run: |
+          Compress-Archive -Path publish/* -DestinationPath artifacts/SteamEyaWinUI-win-x64-portable.zip -Force
+          if (-not (Test-Path artifacts/SteamEyaWinUI-win-x64-portable.zip)) { throw "便携包未生成" }
+
+      - name: Publish portable to GitHub Release (manual only)
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "v0.1.${{ github.run_number }}"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "SteamEYA $tag" --notes "自动构建 ${{ github.sha }}"
+            if ($LASTEXITCODE -ne 0) { throw "创建 Release 失败" }
+          }
+          gh release upload $tag artifacts/SteamEyaWinUI-win-x64-portable.zip --clobber
+          if ($LASTEXITCODE -ne 0) { throw "上传便携包到 Release 失败" }
