@@ -43,13 +43,13 @@ internal sealed class DownloadEngine
     public DownloadEngine(string url, string directory, int threads)
     {
         Url = url;
-        Directory = directory;
+        TargetDirectory = directory;
         RequestedThreads = Math.Clamp(threads, 1, MaxThreads);
     }
 
     public string Url { get; }
 
-    public string Directory { get; }
+    public string TargetDirectory { get; }
 
     public int RequestedThreads { get; }
 
@@ -160,7 +160,7 @@ internal sealed class DownloadEngine
             Interlocked.Exchange(ref _received, alreadyDone);
 
             var partPath = DownloadPaths.PartPathFor(_targetPath!);
-            Directory.CreateDirectory(Directory);
+            System.IO.Directory.CreateDirectory(TargetDirectory);
 
             using var handle = File.OpenHandle(
                 partPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read, FileOptions.Asynchronous);
@@ -219,7 +219,7 @@ internal sealed class DownloadEngine
     private void PrepareTarget(RemoteFileInfo info)
     {
         var fileName = DownloadPaths.SanitizeFileName(info.FileName);
-        var direct = Path.Combine(Directory, fileName);
+        var direct = Path.Combine(TargetDirectory, fileName);
 
         if (File.Exists(DownloadPaths.StatePathFor(direct)))
         {
@@ -228,7 +228,7 @@ internal sealed class DownloadEngine
             return;
         }
 
-        _targetPath = DownloadPaths.ResolveUniquePath(Directory, fileName);
+        _targetPath = DownloadPaths.ResolveUniquePath(TargetDirectory, fileName);
         _fileName = Path.GetFileName(_targetPath);
     }
 
@@ -512,7 +512,7 @@ internal sealed class DownloadEngine
     {
         try
         {
-            var root = Path.GetPathRoot(Path.GetFullPath(Directory));
+            var root = Path.GetPathRoot(Path.GetFullPath(TargetDirectory));
             if (string.IsNullOrWhiteSpace(root))
             {
                 return true;
