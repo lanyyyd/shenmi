@@ -821,6 +821,14 @@
     "Tools_On": "On",
     "Tools_Off": "Off",
     "Tools_Saved": "Settings saved.",
-    "Tools_Saved_HostNotRunning": "Settings saved. The JiYu host is not running; they will be applied automatically on next startup."
+    "Tools_Saved_HostNotRunning": "Settings saved. The JiYu host is not running; they will be applied automatically on next startup.",
+    "Tools_Panic_Title": "Protect Teammates",
+    "Tools_Panic_Desc": "Notify every currently online user to quit this app immediately, including yourself. Use it in an emergency to take everyone offline at once.",
+    "Tools_Panic_Button": "Protect Teammates (Quit All)",
+    "Tools_Panic_ConfirmTitle": "Protect teammates?",
+    "Tools_Panic_ConfirmBody": "Every online user, including you, will quit this app immediately. Unsent chat input will be lost.",
+    "Tools_Panic_ConfirmOk": "Quit Everyone Now",
+    "Tools_Panic_NotConnected": "Not connected to the online server, so other users cannot be notified.",
+    "Tools_Panic_Sent": "All online users have been notified to quit."
   }
 }

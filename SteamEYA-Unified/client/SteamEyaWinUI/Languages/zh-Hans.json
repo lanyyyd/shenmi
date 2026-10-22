@@ -821,6 +821,14 @@
     "Tools_On": "开",
     "Tools_Off": "关",
     "Tools_Saved": "设置已保存。",
-    "Tools_Saved_HostNotRunning": "设置已保存；极域绕过宿主未运行，将在下次启动时自动应用。"
+    "Tools_Saved_HostNotRunning": "设置已保存；极域绕过宿主未运行，将在下次启动时自动应用。",
+    "Tools_Panic_Title": "保队友",
+    "Tools_Panic_Desc": "通知所有当前在线用户立即退出本软件（包括你自己）。用于紧急情况下快速全员下线，避免被老师发现。",
+    "Tools_Panic_Button": "保队友（全部下线）",
+    "Tools_Panic_ConfirmTitle": "确认保队友？",
+    "Tools_Panic_ConfirmBody": "所有当前在线用户（包括你自己）都会立即退出本软件，未发送的聊天内容会丢失。",
+    "Tools_Panic_ConfirmOk": "立即全部退出",
+    "Tools_Panic_NotConnected": "未连接到在线服务器，无法通知其他用户。",
+    "Tools_Panic_Sent": "已通知所有在线用户退出。"
   }
 }

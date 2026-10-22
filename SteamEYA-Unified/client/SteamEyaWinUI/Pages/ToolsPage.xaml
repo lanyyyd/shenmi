@@ -130,6 +130,18 @@
                         Click="OnTestClick" />
                 </StackPanel>
             </Border>
+
+            <!-- 保队友 -->
+            <Border Style="{StaticResource CardBorderStyle}">
+                <StackPanel Spacing="8">
+                    <TextBlock x:Name="PanicTitle" Style="{StaticResource SectionTitleTextStyle}" />
+                    <TextBlock x:Name="PanicDesc" Style="{StaticResource FieldLabelTextStyle}" TextWrapping="Wrap" />
+                    <Button
+                        x:Name="PanicButton"
+                        Style="{StaticResource AuroraGlassButtonStyle}"
+                        Click="OnPanicClick" />
+                </StackPanel>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </Page>

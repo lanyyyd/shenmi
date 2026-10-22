@@ -821,6 +821,14 @@
     "Tools_On": "開",
     "Tools_Off": "關",
     "Tools_Saved": "設定已儲存。",
-    "Tools_Saved_HostNotRunning": "設定已儲存；極域繞過宿主未執行，將在下次啟動時自動套用。"
+    "Tools_Saved_HostNotRunning": "設定已儲存；極域繞過宿主未執行，將在下次啟動時自動套用。",
+    "Tools_Panic_Title": "保隊友",
+    "Tools_Panic_Desc": "通知所有目前在線使用者立即退出本軟體（包括你自己）。用於緊急情況下快速全員下線，避免被老師發現。",
+    "Tools_Panic_Button": "保隊友（全部下線）",
+    "Tools_Panic_ConfirmTitle": "確認保隊友？",
+    "Tools_Panic_ConfirmBody": "所有目前在線使用者（包括你自己）都會立即退出本軟體，未送出的聊天內容會遺失。",
+    "Tools_Panic_ConfirmOk": "立即全部退出",
+    "Tools_Panic_NotConnected": "未連線到線上伺服器，無法通知其他使用者。",
+    "Tools_Panic_Sent": "已通知所有線上使用者退出。"
   }
 }

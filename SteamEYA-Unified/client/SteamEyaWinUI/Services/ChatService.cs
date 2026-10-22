@@ -36,6 +36,9 @@ internal sealed class ChatService : IAsyncDisposable
     /// <summary>连接状态变化。</summary>
     public event Action<bool>? ConnectionChanged;
 
+    /// <summary>收到服务端广播的「保队友」指令：所有在线客户端应立即退出本软件。</summary>
+    public event Action? PanicReceived;
+
     public bool IsConnected => _ws?.State == WebSocketState.Open;
 
     private static string BaseUrl => SessionState.BaseUrl.TrimEnd('/');
@@ -277,6 +280,9 @@ internal sealed class ChatService : IAsyncDisposable
                 case "ready":
                     UsersChanged?.Invoke();
                     break;
+                case "panic":
+                    PanicReceived?.Invoke();
+                    break;
                 case "recall":
                     if (doc.RootElement.TryGetProperty("id", out var rid) && rid.TryGetInt64(out var id))
                     {
@@ -352,6 +358,20 @@ internal sealed class ChatService : IAsyncDisposable
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         return await JsonSerializer.DeserializeAsync(stream, ChatJsonContext.Default.ChatStickerUploadResponse, ct)
                ?? new ChatStickerUploadResponse();
+    }
+
+    /// <summary>
+    /// 发送「保队友」指令：服务端会广播给所有在线客户端（包括自己），收到后立即退出本软件。
+    /// 返回 false 表示当前没有可用的在线连接。
+    /// </summary>
+    public async Task<bool> SendPanicAsync(CancellationToken ct = default)
+    {
+        if (!IsConnected)
+        {
+            return false;
+        }
+        await SendRawAsync("{\"type\":\"panic\"}", ct);
+        return true;
     }
 
     public Task RecallAsync(long id, CancellationToken ct = default)

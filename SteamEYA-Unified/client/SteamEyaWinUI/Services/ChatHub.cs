@@ -1,3 +1,4 @@
+using Microsoft.UI.Xaml;
 using SteamEyaWinUI.Localization;
 using SteamEyaWinUI.Models;
 
@@ -79,6 +80,9 @@ internal static class ChatHub
         _ = Instance.StopAsync();
     }
 
+    /// <summary>发送「保队友」指令：服务端会广播给所有在线客户端（含自己），收到后立即退出本软件。</summary>
+    public static Task<bool> SendPanicAsync() => Instance.SendPanicAsync();
+
     private static void Wire()
     {
         if (_wired)
@@ -87,6 +91,42 @@ internal static class ChatHub
         }
         _wired = true;
         Instance.MessageReceived += OnMessageReceived;
+        Instance.PanicReceived += OnPanicReceived;
+    }
+
+    private static void OnPanicReceived()
+    {
+        if (_ui is { } ui)
+        {
+            ui.TryEnqueue(ForceExit);
+        }
+        else
+        {
+            ForceExit();
+        }
+    }
+
+    /// <summary>「保队友」：立即结束本软件。先停极域宿主，Application.Exit 不保证触发 Closed 清理。</summary>
+    private static void ForceExit()
+    {
+        try
+        {
+            JiYuService.Stop();
+        }
+        catch
+        {
+            // 退出路径不因清理失败而卡住
+        }
+
+        var app = Application.Current;
+        if (app is not null)
+        {
+            app.Exit();
+        }
+        else
+        {
+            Environment.Exit(0);
+        }
     }
 
     private static async Task LoadMyIdAsync()

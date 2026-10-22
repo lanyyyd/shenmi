@@ -69,6 +69,18 @@ async def ws_endpoint(ws: WebSocket):
                 await ws.send_text(json.dumps({"type": "pong"}))
                 continue
 
+            if m.get("type") == "panic":
+                # 「保队友」：任意在线用户可触发，服务端把指令广播给所有在线连接（含发起者），
+                # 客户端收到后立即退出本软件。服务端不落库，也不做二次确认。
+                await hub.broadcast_all({
+                    "type": "panic",
+                    "userId": user["id"],
+                    "username": user["username"],
+                    "displayName": CL.display_name(user),
+                    "at": security.now_ms(),
+                })
+                continue
+
             if m.get("type") == "recall":
                 rid = int(m.get("id") or 0)
                 row = CL.get_msg(rid) if rid > 0 else None

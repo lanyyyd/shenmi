@@ -100,6 +100,10 @@ public sealed partial class ToolsPage : Page
         RecordButton.Content = Loc.T(_recording ? "Tools_Boss_Recording" : "Tools_Boss_Record");
         TestButton.Content = Loc.T("Tools_Boss_Test");
 
+        PanicTitle.Text = Loc.T("Tools_Panic_Title");
+        PanicDesc.Text = Loc.T("Tools_Panic_Desc");
+        PanicButton.Content = Loc.T("Tools_Panic_Button");
+
         if (_recording)
         {
             HotkeyBox.Text = Loc.T("Tools_Boss_PressKeys");
@@ -282,6 +286,35 @@ public sealed partial class ToolsPage : Page
 
         ShowStatus(Loc.T("Tools_Boss_TestSent"), InfoBarSeverity.Success);
         RefreshStatus();
+    }
+
+    private async void OnPanicClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = Loc.T("Tools_Panic_ConfirmTitle"),
+            Content = Loc.T("Tools_Panic_ConfirmBody"),
+            PrimaryButtonText = Loc.T("Tools_Panic_ConfirmOk"),
+            CloseButtonText = Loc.T("Common_Cancel"),
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        PanicButton.IsEnabled = false;
+        if (!await ChatHub.SendPanicAsync())
+        {
+            PanicButton.IsEnabled = true;
+            ShowStatus(Loc.T("Tools_Panic_NotConnected"), InfoBarSeverity.Warning);
+            return;
+        }
+
+        // 发送成功后服务端会把 panic 广播回本机，ChatHub 收到后立即退出，这里无需再处理。
+        ShowStatus(Loc.T("Tools_Panic_Sent"), InfoBarSeverity.Success);
     }
 
     private void RefreshStatus()
