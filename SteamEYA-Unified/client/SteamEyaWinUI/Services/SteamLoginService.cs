@@ -10,7 +10,6 @@ internal sealed class SteamLoginService
     private readonly SteamConfigService _steamConfigService = new();
     private readonly SteamProcessService _steamProcessService = new();
     private readonly SteamLoginCacheService _loginCacheService = new();
-    private readonly AccountHistoryService _accountHistoryService = new();
 
     public LoginResult Login(string accountName, string eyaToken, IProgress<string>? progress = null)
     {
@@ -51,7 +50,6 @@ internal sealed class SteamLoginService
             progress?.Report(Loc.T("Steam_Progress_StartingSteam"));
             _steamProcessService.LaunchSteamWithLogin(paths, accountName);
 
-            TryPushCs2Cloud(paths, token.SteamId, progress);
 
             AppLog.Info("==== 上号流程完成（已请求启动 Steam）====");
             return new LoginResult(accountName, token.SteamId, token.ExpiresAt);
@@ -89,7 +87,6 @@ internal sealed class SteamLoginService
             progress?.Report(Loc.T("Steam_Progress_StartingSteam"));
             _steamProcessService.LaunchSteamWithLogin(paths, account.AccountName);
 
-            TryPushCs2Cloud(paths, account.SteamId, progress);
 
             AppLog.Info($"==== 已请求恢复缓存账号：{account.AccountName} ({account.SteamId}) ====");
             return account;
@@ -114,30 +111,6 @@ internal sealed class SteamLoginService
     public Task<int> RefreshCachedLoginProfilesAsync(IReadOnlyCollection<CachedSteamLoginAccount> accounts)
     {
         return _loginCacheService.RefreshProfilesAsync(accounts);
-    }
-
-    // 若开启「登录时同步 CS2 设置」，登录后把来源账号的 CS2 配置强推到目标账号的 Steam 云。
-    // Steam 刚启动尚未登好，ForcePush 内部会重试等待；放后台执行，不阻塞上号返回，失败只记日志。
-    private void TryPushCs2Cloud(SteamPaths paths, string targetSteamId, IProgress<string>? progress)
-    {
-        try
-        {
-            // 直接用全局单例（而非字段捕获）：AppState.LoginService 是 AppState 静态初始化里第一个 new 的，
-            // 那时 SettingsService/Cs2CloudService 尚未赋值，字段初始化器会捕获到 null；此处在真正登录时才求值，
-            // 静态初始化早已完成。共享单例仍能让 settings.json 读写与设置页保存串行化（实例级锁）。
-            var settings = AppState.SettingsService.Load();
-            if (!settings.Cs2SyncOnLogin || string.IsNullOrWhiteSpace(settings.Cs2SyncSourceSteamId))
-            {
-                return;
-            }
-
-            var source = settings.Cs2SyncSourceSteamId;
-            _ = Task.Run(() => AppState.Cs2CloudService.PushSourceForLogin(paths, source, targetSteamId, progress));
-        }
-        catch (Exception ex)
-        {
-            AppLog.Warn($"CS2 云推送调度失败，忽略：{ex.Message}");
-        }
     }
 
     private void CacheLoginAccounts(
@@ -187,14 +160,8 @@ internal sealed class SteamLoginService
     {
         try
         {
-            if (_loginCacheService.IsEyaLogin(account))
-            {
-                return true;
-            }
-
-            return _accountHistoryService.Load().Any(historyAccount =>
-                string.Equals(historyAccount.SteamId, account.SteamId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(historyAccount.AccountName, account.AccountName, StringComparison.OrdinalIgnoreCase));
+            // 历史账号功能已移除：只按登录缓存里的 EYA 登录标记判断。
+            return _loginCacheService.IsEyaLogin(account);
         }
         catch
         {

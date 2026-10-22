@@ -225,79 +225,74 @@
                 </StackPanel>
             </Border>
 
-            <!-- CS2 设置同步（issue #10）：登录时把来源账号的准星/灵敏度/键位等强推到目标账号的 Steam 云 -->
+            <!-- 百宝箱·多线程下载：默认保存目录与并发线程数 -->
             <Border Style="{StaticResource CardBorderStyle}">
-                <StackPanel Spacing="10">
-                    <Grid ColumnSpacing="16">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
-                            <TextBlock
-                                Text="{x:Bind Strings.Get('Settings_Cs2Sync_Section'), Mode=OneWay}"
-                                Style="{StaticResource SectionTitleTextStyle}" />
-                            <TextBlock
-                                Text="{x:Bind Strings.Get('Settings_Cs2Sync_Desc'), Mode=OneWay}"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                TextWrapping="Wrap" />
-                        </StackPanel>
-                        <ToggleSwitch
-                            x:Name="Cs2SyncToggle"
-                            Grid.Column="1"
-                            VerticalAlignment="Center"
-                            MinWidth="0"
-                            OnContent="{x:Null}"
-                            OffContent="{x:Null}"
-                            Toggled="Cs2SyncToggle_Toggled" />
-                    </Grid>
+                <StackPanel Spacing="12">
+                    <TextBlock
+                        Text="{x:Bind Strings.Get('Settings_Download_Section'), Mode=OneWay}"
+                        Style="{StaticResource SectionTitleTextStyle}" />
+                    <TextBlock
+                        Text="{x:Bind Strings.Get('Settings_Download_Desc'), Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock
                             Grid.Column="0"
                             VerticalAlignment="Center"
-                            Text="{x:Bind Strings.Get('Settings_Cs2Sync_Source'), Mode=OneWay}"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <AutoSuggestBox
-                            x:Name="Cs2SyncSourceBox"
+                            Text="{x:Bind Strings.Get('Settings_Download_Dir'), Mode=OneWay}"
+                            Style="{StaticResource FieldLabelTextStyle}" />
+                        <TextBlock
+                            x:Name="DownloadDirText"
                             Grid.Column="1"
-                            HorizontalAlignment="Stretch"
                             VerticalAlignment="Center"
-                            QueryIcon="Find"
-                            UpdateTextOnSelect="False"
-                            PlaceholderText="{x:Bind Strings.Get('Settings_Cs2Sync_Source_Placeholder'), Mode=OneWay}"
-                            TextChanged="Cs2SyncSourceBox_TextChanged"
-                            QuerySubmitted="Cs2SyncSourceBox_QuerySubmitted"
-                            GotFocus="Cs2SyncSourceBox_GotFocus"
-                            LostFocus="Cs2SyncSourceBox_LostFocus" />
-                        <Button
-                            x:Name="Cs2SyncRefreshButton"
-                            Grid.Column="2"
-                            Click="Cs2SyncRefreshButton_Click"
-                            ToolTipService.ToolTip="{x:Bind Strings.Get('Common_Refresh'), Mode=OneWay}">
-                            <FontIcon Glyph="&#xE72C;" FontSize="14" />
-                        </Button>
-                        <Button
-                            x:Name="Cs2SyncPushNowButton"
-                            Grid.Column="3"
-                            Click="Cs2SyncPushNowButton_Click"
-                            ToolTipService.ToolTip="{x:Bind Strings.Get('Settings_Cs2Sync_PushNow_Tooltip'), Mode=OneWay}">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon Glyph="&#xE898;" FontSize="14" />
-                                <TextBlock Text="{x:Bind Strings.Get('Settings_Cs2Sync_PushNow'), Mode=OneWay}" />
-                            </StackPanel>
-                        </Button>
+                            IsTextSelectionEnabled="True"
+                            TextTrimming="CharacterEllipsis"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="DownloadDirButton" Click="DownloadDirButton_Click">
+                                <TextBlock Text="{x:Bind Strings.Get('Settings_Download_Dir_Change'), Mode=OneWay}" />
+                            </Button>
+                            <Button x:Name="DownloadDirResetButton" Click="DownloadDirResetButton_Click">
+                                <TextBlock Text="{x:Bind Strings.Get('Settings_Download_Reset'), Mode=OneWay}" />
+                            </Button>
+                        </StackPanel>
                     </Grid>
-                    <TextBlock
-                        Text="{x:Bind Strings.Get('Settings_Cs2Sync_Note'), Mode=OneWay}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        TextWrapping="Wrap" />
+
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            Text="{x:Bind Strings.Get('Settings_Download_Thread'), Mode=OneWay}"
+                            Style="{StaticResource FieldLabelTextStyle}" />
+                        <NumberBox
+                            x:Name="DownloadThreadBox"
+                            Grid.Column="1"
+                            Width="120"
+                            Minimum="1"
+                            Maximum="256"
+                            SmallChange="1"
+                            SpinButtonPlacementMode="Compact"
+                            ValueChanged="DownloadThreadBox_ValueChanged" />
+                        <TextBlock
+                            Grid.Column="2"
+                            VerticalAlignment="Center"
+                            Text="{x:Bind Strings.Get('Settings_Download_Thread_Desc'), Mode=OneWay}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+                    </Grid>
                 </StackPanel>
             </Border>
 

@@ -271,10 +271,6 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="88" />
@@ -309,45 +305,8 @@
                             Grid.Column="1"
                             Style="{StaticResource FieldValueTextStyle}" />
 
-                        <TextBlock Grid.Row="4" Text="{x:Bind Strings.Get('Login_Label_PremierScore'), Mode=OneWay}" Style="{StaticResource FieldLabelTextStyle}" />
-                        <TextBlock
-                            x:Name="AccountInfoPremierScoreText"
-                            Grid.Row="4"
-                            Grid.Column="1"
-                            Style="{StaticResource FieldValueTextStyle}" />
-
-                        <TextBlock Grid.Row="5" Text="{x:Bind Strings.Get('Login_Label_CsLevel'), Mode=OneWay}" Style="{StaticResource FieldLabelTextStyle}" />
-                        <TextBlock
-                            x:Name="AccountInfoCsLevelText"
-                            Grid.Row="5"
-                            Grid.Column="1"
-                            Style="{StaticResource FieldValueTextStyle}" />
-
-                        <TextBlock Grid.Row="6" Text="{x:Bind Strings.Get('Login_Label_Cooldown'), Mode=OneWay}" Style="{StaticResource FieldLabelTextStyle}" />
-                        <TextBlock
-                            x:Name="AccountInfoCooldownStatusText"
-                            Grid.Row="6"
-                            Grid.Column="1"
-                            Style="{StaticResource FieldValueTextStyle}" />
-
-                        <TextBlock Grid.Row="7" Text="{x:Bind Strings.Get('Login_Label_Cs2IsChina'), Mode=OneWay}" Style="{StaticResource FieldLabelTextStyle}" />
-                        <TextBlock
-                            x:Name="AccountInfoCs2IsChinaText"
-                            Grid.Row="7"
-                            Grid.Column="1"
-                            Style="{StaticResource FieldValueTextStyle}" />
                     </Grid>
 
-                    <Button
-                        x:Name="OneClickQueryButton"
-                        HorizontalAlignment="Stretch"
-                        Click="OneClickQueryButton_Click"
-                        ToolTipService.ToolTip="{x:Bind Strings.Get('Login_Btn_OneClickQuery_Tip'), Mode=OneWay}">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE9D9;" FontSize="16" />
-                            <TextBlock Text="{x:Bind Strings.Get('Common_OneClickQuery'), Mode=OneWay}" />
-                        </StackPanel>
-                    </Button>
                 </StackPanel>
             </Border>
         </Grid>

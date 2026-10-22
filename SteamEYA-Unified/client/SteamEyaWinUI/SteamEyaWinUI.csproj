@@ -15,7 +15,7 @@
     <InformationalVersion>v$(Version)</InformationalVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- 自定义 Program.Main：先拦截 CS2 云推送辅助进程模式（cs2-cloud-push 开关）再走 XAML 启动（见 Program.cs）。 -->
+    <!-- 自定义 Program.Main：绕过 XAML 生成的入口，便于控制 COM 初始化时机（见 Program.cs）。 -->
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
 
     <!-- Native AOT 发布（dotnet publish -r win-x64 -p:Platform=x64 时生效）。
@@ -41,12 +41,6 @@
   <ItemGroup>
     <Content Include="Assets\AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\Logo.png" CopyToOutputDirectory="PreserveNewest" />
-    <!-- CS2 武器矢量图标（取自 Juknum/counter-strike-icons，CS2 游戏内 panorama 图标）。 -->
-    <Content Include="Assets\weapons\*.svg" CopyToOutputDirectory="PreserveNewest" />
-    <!-- Steamworks SDK 再分发库：供「CS2 设置同步」用 ISteamRemoteStorage 强推 cfg 到 Steam 云。
-         已随仓库入库（Steamworks SDK redistributable_bin\win64\steam_api64.dll），构建/发布自动拷到输出目录，
-         确保 CI/CD 产物自带该 DLL。Condition 仅作保底：万一被删除也不阻断编译，运行时会提示“缺少 steam_api64.dll”。 -->
-    <Content Include="steam_api64.dll" Condition="Exists('steam_api64.dll')" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

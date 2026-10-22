@@ -103,8 +103,6 @@ public sealed partial class MainWindow : Window
 
         ConfigureWindowSize();
 
-        // 预载历史账号，登录页的头像/资料复用依赖该缓存。
-        AppState.ReloadHistory();
         ApplyAccessMode();
 
         // 首次启动即解析并持久化 Steam 安装路径（之后上号直接复用，不再每次探测）。
@@ -127,7 +125,6 @@ public sealed partial class MainWindow : Window
         {
             LoginNavItem.Visibility = Visibility.Collapsed;
             CloudGameNavItem.Visibility = Visibility.Collapsed;
-            HistoryNavItem.Visibility = Visibility.Collapsed;
             CachedAccountsNavItem.Visibility = Visibility.Collapsed;
             CloudSaveNavItem.Visibility = Visibility.Collapsed;
             SettingsNavItem.Visibility = Visibility.Collapsed;
@@ -264,13 +261,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>历史页“载入到登录页”：切到登录页并填充账号。</summary>
-    public void LoadAccountIntoLogin(SteamAccountHistoryItem account)
-    {
-        RootNavigationView.SelectedItem = LoginNavItem;
-        AppState.LoginPage?.LoadHistoryAccount(account);
-    }
-
     private void RootNavigationView_SelectionChanged(
         NavigationView sender,
         NavigationViewSelectionChangedEventArgs args)
@@ -287,7 +277,7 @@ public sealed partial class MainWindow : Window
         {
             "cloudGame" => typeof(CloudGamePage),
             "chat" => typeof(ChatPage),
-            "history" => typeof(HistoryPage),
+            "toolbox" => typeof(ToolboxPage),
             "cachedAccounts" => typeof(CachedAccountsPage),
             "cloudSave" => typeof(CloudSavePage),
             "lanTransfer" => typeof(LanTransferPage),
@@ -475,7 +465,7 @@ public sealed partial class MainWindow : Window
         LoginNavItem.Content = Loc.T("Nav_Login");
         CloudGameNavItem.Content = Loc.T("Nav_CloudGame");
         ChatNavItem.Content = Loc.T("Nav_Chat");
-        HistoryNavItem.Content = Loc.T("Nav_History");
+        ToolboxNavItem.Content = Loc.T("Nav_Toolbox");
         CachedAccountsNavItem.Content = Loc.T("Nav_CachedAccounts");
         CloudSaveNavItem.Content = Loc.T("Nav_CloudSave");
         LanTransferNavItem.Content = Loc.T("Nav_LanTransfer");

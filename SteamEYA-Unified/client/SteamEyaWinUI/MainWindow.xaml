@@ -106,13 +106,6 @@
                 </NavigationViewItem>
 
                 <NavigationViewItem
-                    x:Name="HistoryNavItem"
-                    Tag="history">
-                    <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE81C;" />
-                    </NavigationViewItem.Icon>
-                </NavigationViewItem>
-                <NavigationViewItem
                     x:Name="CachedAccountsNavItem"
                     Tag="cachedAccounts">
                     <NavigationViewItem.Icon>
@@ -138,6 +131,14 @@
                     Tag="tools">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE90F;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
+                <NavigationViewItem
+                    x:Name="ToolboxNavItem"
+                    Tag="toolbox">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE71D;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
             </NavigationView.MenuItems>

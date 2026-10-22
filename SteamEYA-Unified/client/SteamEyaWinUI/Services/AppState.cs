@@ -12,19 +12,13 @@ internal static class AppState
 {
     public static SteamLoginService LoginService { get; } = new();
     public static SteamWorkshopService WorkshopService { get; } = new();
-    public static SteamLicenseClient LicenseClient { get; } = new();
     public static JwtTokenService JwtTokenService { get; } = new();
     public static SteamTokenOnlineValidationService TokenOnlineValidationService { get; } = new();
-    public static AccountHistoryService AccountHistoryService { get; } = new();
-    public static CsPremierScoreService PremierScoreService { get; } = new();
-    public static CsLoadoutService LoadoutService { get; } = new();
-    public static SteamProfileService ProfileService { get; } = new();
     public static SteamCredentialsAuthService CredentialsAuthService { get; } = new();
     public static RemoteAccountService RemoteAccountService { get; } = new();
     public static UpdateService UpdateService { get; } = new();
     public static UpdateInstallerService UpdateInstallerService { get; } = new();
     public static SettingsService SettingsService { get; } = new();
-    public static Cs2CloudService Cs2CloudService { get; } = new();
 
     /// <summary>Aurora 主题换色服务：按用户设置的主题色实时重算界面画刷。</summary>
     public static UiColorService UiColorService { get; } = new();
@@ -96,47 +90,6 @@ internal static class AppState
         _busyCts = null;
     }
 
-    // ---------- 历史账号缓存 ----------
-
-    public static IReadOnlyList<SteamAccountHistoryItem> HistoryAccounts { get; private set; } = [];
-
-    /// <summary>
-    /// 希望历史页选中的 SteamID。历史页是懒加载的，登录/查询时发出的选中意图
-    /// 在历史页首次构造前没有订阅者，存在这里供历史页构造时取用。
-    /// </summary>
-    public static string? PendingHistorySelection { get; set; }
-
-    /// <summary>历史账号已重新加载；参数为希望选中的 SteamID（null 表示保持当前选择）。</summary>
-    public static event Action<string?>? HistoryChanged;
-
-    public static void ReloadHistory(string? selectSteamId = null)
-    {
-        try
-        {
-            HistoryAccounts = AccountHistoryService.Load();
-        }
-        catch (Exception ex)
-        {
-            HistoryAccounts = [];
-            ShowStatus(Loc.Tf("AppState_HistoryLoadFailed_Format", ex.Message), InfoBarSeverity.Warning);
-        }
-
-        if (!string.IsNullOrWhiteSpace(selectSteamId))
-        {
-            PendingHistorySelection = selectSteamId;
-        }
-
-        HistoryChanged?.Invoke(selectSteamId);
-    }
-
-    public static SteamAccountHistoryItem? FindHistoryAccount(string? steamId)
-    {
-        return string.IsNullOrWhiteSpace(steamId)
-            ? null
-            : HistoryAccounts.FirstOrDefault(item =>
-                string.Equals(item.SteamId, steamId, StringComparison.OrdinalIgnoreCase));
-    }
-
     // ---------- 更新检查协调 ----------
 
     public static AppUpdateInfo? LatestUpdate { get; private set; }
@@ -199,19 +152,5 @@ internal static class AppState
             IsCheckingForUpdates = false;
             UpdateStateChanged?.Invoke();
         }
-    }
-
-    public static async Task OpenUrlAsync(string url)
-    {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-        {
-            ShowStatus(Loc.T("AppState_Url_Invalid"), InfoBarSeverity.Error);
-            return;
-        }
-
-        var opened = await Windows.System.Launcher.LaunchUriAsync(uri);
-        ShowStatus(
-            opened ? Loc.T("AppState_Url_Opened") : Loc.T("AppState_Url_OpenFailed"),
-            opened ? InfoBarSeverity.Success : InfoBarSeverity.Error);
     }
 }

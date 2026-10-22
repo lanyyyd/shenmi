@@ -27,9 +27,6 @@ internal sealed class SettingsService
     /// <summary>数据根目录（%AppData%\SteamEYA），供“打开数据目录”使用。</summary>
     public string AppFolderPath { get; }
 
-    /// <summary>「个性化」头像的固定落盘路径（裁剪后的 512² JPEG）。</summary>
-    public string PersonalizationAvatarPath => Path.Combine(AppFolderPath, "personalization", "avatar.jpg");
-
     public AppSettings Load()
     {
         lock (_gate)
@@ -42,12 +39,6 @@ internal sealed class SettingsService
                     var settings = JsonSerializer.Deserialize(json, AppSettingsJsonContext.Default.AppSettings);
                     if (settings is not null)
                     {
-                        // JSON 里显式的 "groups": null 会覆盖属性初始值，消费方（LoadGroups 等）直接 .Groups 会 NRE。
-                        settings.Groups ??= [];
-                        // 同理防护配装预设：显式 null 会让配装页导航、一键配装直接 NRE。
-                        settings.Loadout ??= CsLoadoutPreset.Default();
-                        settings.Loadout.T ??= new Dictionary<uint, uint>();
-                        settings.Loadout.Ct ??= new Dictionary<uint, uint>();
                         return settings;
                     }
                 }
@@ -229,29 +220,18 @@ internal sealed class AppSettings
     /// </summary>
     public string? SteamInstallPath { get; set; }
 
-    /// <summary>唯一的 CS2 配装预设，供装备页面编辑与登录页一键装配。新用户用项目内置默认配装。</summary>
-    public CsLoadoutPreset Loadout { get; set; } = CsLoadoutPreset.Default();
+    /// <summary>
+    /// 百宝箱·多线程下载的默认保存目录。null/空表示用安装目录下的 Downloads。
+    /// </summary>
+    public string? DownloadDirectory { get; set; }
 
-    /// <summary>「个性化」面板里设置的昵称，供登录页一键把账号资料设为该值。null/空表示不改昵称。</summary>
-    public string? PersonaName { get; set; }
+    /// <summary>百宝箱·多线程下载的默认线程数（分片并发上限），范围 1–256，默认 64。</summary>
+    public int DownloadThreadCount { get; set; } = DefaultDownloadThreadCount;
 
-    /// <summary>「个性化」面板里设置的真实姓名（资料页 real_name 字段）。null/空表示不改。</summary>
-    public string? ProfileRealName { get; set; }
+    /// <summary>同时进行的下载任务数，默认 1（避免多个任务同时各开 64 连接）。</summary>
+    public int DownloadConcurrentTasks { get; set; } = 1;
 
-    /// <summary>「个性化」面板里设置的概要（资料页 summary 字段，可多行）。null/空表示不改。</summary>
-    public string? ProfileSummary { get; set; }
-
-    /// <summary>是否在「一键个性化」完成后清空账号的曾用名记录。</summary>
-    public bool ClearAliasHistoryOnPersonalize { get; set; }
-
-    /// <summary>用户自定义账号分组定义（名称/排序）。成员关系存于各账号的 GroupIds，此处只存定义。</summary>
-    public List<AccountGroup> Groups { get; set; } = [];
-
-    /// <summary>是否在登录时把「来源账号」的 CS2 本地设置复制到要登录的账号。</summary>
-    public bool Cs2SyncOnLogin { get; set; }
-
-    /// <summary>CS2 设置同步的「来源账号」SteamID64；空表示未选择。详见 <see cref="Cs2CloudService"/>。</summary>
-    public string? Cs2SyncSourceSteamId { get; set; }
+    public const int DefaultDownloadThreadCount = 64;
 
     /// <summary>自定义界面主题色，格式 #RRGGBB 或 #AARRGGBB；null 表示使用默认 Aurora 主题色。</summary>
     public string? UiColor { get; set; }
@@ -296,6 +276,4 @@ internal sealed class AppSettings
 // 与账号历史一致用 source generator：JsonSerializerDefaults.Web（camelCase、大小写不敏感），AOT 下可读写。
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web, WriteIndented = true)]
 [JsonSerializable(typeof(AppSettings))]
-[JsonSerializable(typeof(CsLoadoutPreset))]
-[JsonSerializable(typeof(AccountGroup))]
 internal sealed partial class AppSettingsJsonContext : JsonSerializerContext;
