@@ -25,12 +25,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 不开 setup-dotnet 的 cache：Windows 上 NuGet 全局包目录单个缓存就有 ~500MB，
+      # 已经顶满账号 500MB 的 Actions 存储免费额度（PR 的 merge ref 还会另存一份独立副本），
+      # 超配额后 Actions 会被锁停。代价只是每次构建多花约 1 分钟做 restore。
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-          cache: true
-          cache-dependency-path: '**/*.csproj'
 
       - name: 环境信息
         run: dotnet --info
@@ -173,12 +174,15 @@ jobs:
           name: SteamEYA-setup-win-x64
           path: artifacts/*.exe
           if-no-files-found: error
-          retention-days: 14
+          # 产物 2 天后自动过期：单份 ~53MB，留太久会堆满账号 500MB 的 Actions 存储额度
+          retention-days: 2
 
+      # 便携包 ~83MB，与 setup.exe 内容重复，只在手动触发时上传，避免日常 push 双份占额度
       - name: Upload portable folder (解压即用)
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: SteamEyaWinUI-win-x64-portable
           path: publish/**
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 2
