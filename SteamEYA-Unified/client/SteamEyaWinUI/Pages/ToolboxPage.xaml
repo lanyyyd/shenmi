@@ -221,6 +221,13 @@
                                             Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </Grid>
 
+                                    <TextBlock
+                                        Text="{x:Bind ErrorText, Mode=OneWay}"
+                                        Visibility="{x:Bind ErrorVisibility, Mode=OneWay}"
+                                        Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        TextWrapping="Wrap" />
+
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <Button
                                             Click="PauseClick"

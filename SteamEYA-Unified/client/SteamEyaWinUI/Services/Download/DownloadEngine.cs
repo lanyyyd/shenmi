@@ -32,7 +32,7 @@ internal sealed class DownloadEngine
     private long _total;
     private double _speed;
     private int _connections;
-    private int _status = (int)DownloadStatus.Probing;
+    private int _status = (int)DownloadStatus.Queued;
     private string? _error;
     private string? _fileName;
     private string? _targetPath;
@@ -412,7 +412,10 @@ internal sealed class DownloadEngine
 
             var json = File.ReadAllText(path);
             var state = JsonSerializer.Deserialize(json, DownloadStateJsonContext.Default.DownloadState);
-            if (state is null || state.SegmentCount != segments || state.TotalBytes != info.TotalBytes)
+            if (state is null ||
+                state.SegmentCount != segments ||
+                state.TotalBytes != info.TotalBytes ||
+                !string.Equals(state.Url, Url, StringComparison.OrdinalIgnoreCase))
             {
                 return null;
             }

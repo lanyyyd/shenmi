@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.UI.Xaml;
 using SteamEyaWinUI.Localization;
 
 namespace SteamEyaWinUI.Models;
@@ -56,7 +58,7 @@ public sealed partial class DownloadTaskItem : INotifyPropertyChanged
 
     public long ReceivedBytes => _receivedBytes;
 
-    public DownloadStatus Status => _status;
+    internal DownloadStatus Status => _status;
 
     public string? ErrorMessage => _errorMessage;
 
@@ -84,6 +86,28 @@ public sealed partial class DownloadTaskItem : INotifyPropertyChanged
             return Loc.Tf("Dl_Remaining_Format", DownloadFormat.FormatDuration(seconds));
         }
     }
+
+    /// <summary>失败原因（本地化）。成功/进行中返回空串。</summary>
+    public string ErrorText
+    {
+        get
+        {
+            if (_status != DownloadStatus.Failed || string.IsNullOrWhiteSpace(_errorMessage))
+            {
+                return string.Empty;
+            }
+
+            return _errorMessage switch
+            {
+                "DiskFull" => Loc.T("Dl_Error_DiskFull"),
+                "RangeNotSupported" => Loc.T("Dl_Error_RangeNotSupported"),
+                _ when _errorMessage.StartsWith("Incomplete:", StringComparison.Ordinal) => Loc.T("Dl_Error_Incomplete"),
+                _ => _errorMessage
+            };
+        }
+    }
+
+    public Visibility ErrorVisibility => string.IsNullOrEmpty(ErrorText) ? Visibility.Collapsed : Visibility.Visible;
 
     public string StatusText => _status switch
     {
@@ -164,6 +188,8 @@ public sealed partial class DownloadTaskItem : INotifyPropertyChanged
         handler(this, new PropertyChangedEventArgs(nameof(RemainingText)));
         handler(this, new PropertyChangedEventArgs(nameof(Status)));
         handler(this, new PropertyChangedEventArgs(nameof(StatusText)));
+        handler(this, new PropertyChangedEventArgs(nameof(ErrorText)));
+        handler(this, new PropertyChangedEventArgs(nameof(ErrorVisibility)));
         handler(this, new PropertyChangedEventArgs(nameof(ErrorMessage)));
         handler(this, new PropertyChangedEventArgs(nameof(Threads)));
         handler(this, new PropertyChangedEventArgs(nameof(ActiveConnections)));

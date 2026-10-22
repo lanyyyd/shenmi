@@ -486,6 +486,9 @@
     "Settings_Download_Dir_Changed": "下载目录已更新",
     "Settings_Download_Dir_ChangeFailed_Format": "更改下载目录失败：{0}",
     "Settings_Download_Thread": "默认线程数",
-    "Settings_Download_Thread_Desc": "1–256，默认 64；小文件会自动降级"
+    "Settings_Download_Thread_Desc": "1–256，默认 64；小文件会自动降级",
+    "Dl_Error_DiskFull": "磁盘空间不足，请清理后重试",
+    "Dl_Error_RangeNotSupported": "服务器不支持分片下载",
+    "Dl_Error_Incomplete": "下载未完成（连接提前中断）"
   }
 }

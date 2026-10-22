@@ -486,6 +486,9 @@
     "Settings_Download_Dir_Changed": "Download folder updated",
     "Settings_Download_Dir_ChangeFailed_Format": "Failed to change download folder: {0}",
     "Settings_Download_Thread": "Threads",
-    "Settings_Download_Thread_Desc": "1–256, default 64; small files use fewer connections"
+    "Settings_Download_Thread_Desc": "1–256, default 64; small files use fewer connections",
+    "Dl_Error_DiskFull": "Not enough disk space. Free some space and try again.",
+    "Dl_Error_RangeNotSupported": "This server does not support ranged downloads.",
+    "Dl_Error_Incomplete": "Download incomplete (connection closed early)."
   }
 }

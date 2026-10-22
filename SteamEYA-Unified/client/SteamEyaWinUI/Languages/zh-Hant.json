@@ -486,6 +486,9 @@
     "Settings_Download_Dir_Changed": "下載目錄已更新",
     "Settings_Download_Dir_ChangeFailed_Format": "變更下載目錄失敗：{0}",
     "Settings_Download_Thread": "預設執行緒數",
-    "Settings_Download_Thread_Desc": "1–256，預設 64；小檔案會自動降級"
+    "Settings_Download_Thread_Desc": "1–256，預設 64；小檔案會自動降級",
+    "Dl_Error_DiskFull": "磁碟空間不足，請清理後重試",
+    "Dl_Error_RangeNotSupported": "伺服器不支援分片下載",
+    "Dl_Error_Incomplete": "下載未完成（連線提前中斷）"
   }
 }

@@ -142,7 +142,14 @@ internal sealed class DownloadManager
             }
 
             var status = engine.Status;
-            if (task.Status != status)
+
+            // 用户点了暂停/取消后引擎还在收尾（正在落盘续传状态），此时不要把 UI 刷回「下载中」。
+            var pendingPause = task.Status == DownloadStatus.Paused &&
+                               status is DownloadStatus.Downloading or DownloadStatus.Probing;
+            var pendingCancel = task.Status == DownloadStatus.Canceled &&
+                                status is DownloadStatus.Downloading or DownloadStatus.Probing;
+
+            if (!pendingPause && !pendingCancel && task.Status != status)
             {
                 task.SetStatus(status, engine.Error);
             }

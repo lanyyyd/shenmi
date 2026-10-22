@@ -1,5 +1,3 @@
-using SteamEyaWinUI.Models;
-
 namespace SteamEyaWinUI.Services;
 
 /// <summary>
