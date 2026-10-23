@@ -518,6 +518,25 @@
     "Close_Remember": "不再提醒",
     "Tray_Tip": "SteamEYA（点击显示主界面）",
     "Tray_Show": "显示主界面",
-    "Tray_Exit": "退出"
+    "Tray_Exit": "退出",
+    "Settings_Notify_Section": "通知",
+    "Settings_Notify_Desc": "聊天收到新消息、下载完成或失败时提醒。系统通知不可用的机器会自动改用右下角浮窗，保证一定看得到。",
+    "Settings_Notify_Mode": "提醒方式",
+    "Settings_Notify_Mode_Auto": "自动（推荐）",
+    "Settings_Notify_Mode_InApp": "仅应用内浮窗",
+    "Settings_Notify_Mode_System": "仅系统通知",
+    "Settings_Notify_Mode_Off": "关闭",
+    "Settings_Notify_TestDone": "已发送测试通知，下方为通道状态",
+    "Settings_Debug_Section": "调试模式",
+    "Settings_Debug_Desc": "开启后额外记录通知、下载、聊天等过程日志，排查问题时使用。",
+    "Settings_Debug_On": "开",
+    "Settings_Debug_Off": "关",
+    "Settings_Debug_OpenLog": "打开日志文件夹",
+    "Settings_Debug_OpenLogFail": "打开日志文件夹失败",
+    "Dl_Notify_Completed_Title": "下载完成",
+    "Dl_Notify_Completed_Body_Format": "{0} 已保存",
+    "Dl_Notify_Failed_Title": "下载失败",
+    "Dl_Notify_Failed_Body_Format": "{0} 未能下载完成",
+    "Dl_Notify_Failed_Body_Reason_Format": "{0} 失败：{1}"
   }
 }

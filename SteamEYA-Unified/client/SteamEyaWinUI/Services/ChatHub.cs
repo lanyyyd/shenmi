@@ -62,11 +62,11 @@ internal static class ChatHub
         Wire();
         if (_ui is { } ui)
         {
-            ui.TryEnqueue(ChatNotifyService.Initialize);
+            ui.TryEnqueue(NotificationService.Initialize);
         }
         else
         {
-            ChatNotifyService.Initialize();
+            NotificationService.Initialize();
         }
 
         Instance.Start();
@@ -185,6 +185,7 @@ internal static class ChatHub
         }
 
         var title = Loc.Tf(dto.Room == "group" ? "Chat_Notify_Group" : "Chat_Notify_Private", dto.FromName);
-        ChatNotifyService.Notify(title, preview, dto.Room);   // 带房间参数，点击通知可直接跳到该房间
+        AppLog.Debug($"收到聊天消息：room={dto.Room} from={dto.FromName} kind={dto.EffectiveKind} len={preview.Length}");
+        NotificationService.NotifyChat(title, preview, dto.Room);   // 带房间参数，点击通知可直接跳到该房间
     }
 }

@@ -9,6 +9,14 @@
     </windowsSettings>
   </application>
 
+  <!-- 声明支持 Windows 10/11：不声明时系统会让 GetVersionEx / Environment.OSVersion 返回
+       兼容层版本（6.2），通知与 DPI 相关的分支判断会走错路。 -->
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </application>
+  </compatibility>
+
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">

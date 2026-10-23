@@ -91,6 +91,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
             // 背景文件状态文案是代码设置的，语言切换后重算。
             UpdateCustomBackgroundControls();
             UpdateDownloadDirText();
+            BuildNotifyModeItems(AppState.SettingsService.Load().NotificationMode);
 
             if (!_recordingScreenshotHotkey)
             {
@@ -135,6 +136,10 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
             CustomBackgroundOpacitySlider.Value = Math.Clamp(settings.CustomBackgroundOpacity, 0.1, 0.9);
             UpdateCustomBackgroundControls();
             DownloadThreadBox.Value = Math.Clamp(settings.DownloadThreadCount, 1, 256);
+            BuildNotifyModeItems(settings.NotificationMode);
+            DebugModeSwitch.IsOn = settings.DebugMode;
+            LogPathText.Text = AppLog.LogFilePath;
+            RefreshNotifyDiagnostics();
             ScreenshotHotkeyBox.Text = ScreenshotService.FormatHotkey(
                 settings.ScreenshotHotkeyMods, settings.ScreenshotHotkeyVk);
         }
@@ -680,6 +685,117 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         }
     }
 
-    // 自检系统通知是否可用：立刻弹一条测试通知；不可用时会提示查看日志。
-    private void NotifyTestButton_Click(object sender, RoutedEventArgs e) => ChatNotifyService.Test();
+    // ---------------- 通知与调试 ----------------
+
+    private static readonly string[] NotifyModes = ["auto", "inapp", "system", "off"];
+
+    private void BuildNotifyModeItems(string? mode)
+    {
+        var index = Array.IndexOf(NotifyModes, mode ?? "auto");
+        if (index < 0)
+        {
+            index = 0;
+        }
+
+        var wasSyncing = _syncing;
+        _syncing = true;
+        try
+        {
+            NotifyModeBox.Items.Clear();
+            NotifyModeBox.Items.Add(Loc.T("Settings_Notify_Mode_Auto"));
+            NotifyModeBox.Items.Add(Loc.T("Settings_Notify_Mode_InApp"));
+            NotifyModeBox.Items.Add(Loc.T("Settings_Notify_Mode_System"));
+            NotifyModeBox.Items.Add(Loc.T("Settings_Notify_Mode_Off"));
+            NotifyModeBox.SelectedIndex = index;
+        }
+        finally
+        {
+            _syncing = wasSyncing;
+        }
+    }
+
+    private void NotifyModeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncing || NotifyModeBox.SelectedIndex < 0)
+        {
+            return;
+        }
+
+        var mode = NotifyModes[Math.Clamp(NotifyModeBox.SelectedIndex, 0, NotifyModes.Length - 1)];
+        var settings = AppState.SettingsService.Load();
+        if (string.Equals(settings.NotificationMode, mode, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        settings.NotificationMode = mode;
+        AppState.SettingsService.Save(settings);
+        NotificationService.ReloadChannel();
+        AppLog.Debug($"通知方式改为 {mode}");
+        RefreshNotifyDiagnostics();
+    }
+
+    // 自检：立刻弹一条测试通知，并把两条通道的实际状态写在下方，便于用户直接回传。
+    private void NotifyTestButton_Click(object sender, RoutedEventArgs e)
+    {
+        var diag = NotificationService.Test();
+        NotifyDiagText.Text = diag;
+        AppState.ShowStatus(Loc.T("Settings_Notify_TestDone"), InfoBarSeverity.Informational);
+    }
+
+    private void DebugModeSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_syncing)
+        {
+            return;
+        }
+
+        var enabled = DebugModeSwitch.IsOn;
+        var settings = AppState.SettingsService.Load();
+        if (settings.DebugMode == enabled)
+        {
+            return;
+        }
+
+        settings.DebugMode = enabled;
+        AppState.SettingsService.Save(settings);
+        AppLog.SetDebugEnabled(enabled);
+        RefreshNotifyDiagnostics();
+    }
+
+    private void OpenLogFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var file = AppLog.LogFilePath;
+            var folder = Path.GetDirectoryName(file);
+            Directory.CreateDirectory(folder!);
+
+            // 日志已存在就选中它，否则只打开目录。
+            var args = File.Exists(file) ? $"/select,\"{file}\"" : $"\"{folder}\"";
+            Process.Start(new ProcessStartInfo("explorer.exe", args) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("打开日志目录失败。", ex);
+            AppState.ShowStatus(Loc.T("Settings_Debug_OpenLogFail"), InfoBarSeverity.Error);
+        }
+    }
+
+    private void RefreshNotifyDiagnostics()
+    {
+        if (NotifyDiagText is null)
+        {
+            return;
+        }
+
+        try
+        {
+            NotifyDiagText.Text = NotificationService.Describe();
+        }
+        catch (Exception ex)
+        {
+            NotifyDiagText.Text = ex.Message;
+        }
+    }
 }

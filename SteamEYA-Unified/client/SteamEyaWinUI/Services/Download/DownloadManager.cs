@@ -66,6 +66,7 @@ internal sealed class DownloadManager
             _queue.Enqueue(entry);
         }
 
+        AppLog.Debug($"下载入队：{url} → {directory}（线程 {threads}）");
         Pump();
         return task;
     }
@@ -234,7 +235,28 @@ internal sealed class DownloadManager
                 _running--;
             }
 
+            NotifyIfFinished(entry);
             Pump();
+        }
+    }
+
+    /// <summary>
+    /// 任务结束时提醒用户。注意只在 Completed / Failed 时发：
+    /// 暂停和取消是用户主动操作，再弹一条只会打扰。
+    /// 这里不依赖页面的 SyncUi 定时器——用户可能早就切到别的页面了。
+    /// </summary>
+    private static void NotifyIfFinished(Entry entry)
+    {
+        var status = entry.Engine.Status;
+        AppLog.Debug($"下载任务结束：{entry.Task.FileName} 状态={status} 已收={entry.Engine.ReceivedBytes}/{entry.Engine.TotalBytes}");
+
+        if (status == DownloadStatus.Completed)
+        {
+            NotificationService.NotifyDownloadCompleted(entry.Task.FileName, entry.Task.Directory);
+        }
+        else if (status == DownloadStatus.Failed)
+        {
+            NotificationService.NotifyDownloadFailed(entry.Task.FileName, entry.Engine.Error);
         }
     }
 

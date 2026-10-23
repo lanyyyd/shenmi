@@ -263,6 +263,15 @@ internal sealed class AppSettings
     /// <summary>是否记住关闭选择、不再每次询问。</summary>
     public bool RememberCloseAction { get; set; }
 
+    /// <summary>
+    /// 通知发送方式："auto"（默认，浮窗总是弹，窗口不在前台时叠加系统通知）、
+    /// "inapp"（只弹应用内浮窗）、"system"（只发系统通知）、"off"（关闭）。
+    /// </summary>
+    public string NotificationMode { get; set; } = "auto";
+
+    /// <summary>调试模式：开启后额外写入 DEBUG 级别过程日志（通知/下载/聊天链路）。</summary>
+    public bool DebugMode { get; set; }
+
     /// <summary>截图全局热键的修饰键（Win32 MOD_* 位组合），默认 Alt。</summary>
     public uint ScreenshotHotkeyMods { get; set; } = 0x0001;
 

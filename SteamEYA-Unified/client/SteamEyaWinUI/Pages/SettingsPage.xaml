@@ -333,6 +333,98 @@
                 </StackPanel>
             </Border>
 
+            <!-- 通知与调试：通知通道选择、自检、调试日志开关 -->
+            <Border Style="{StaticResource CardBorderStyle}">
+                <StackPanel Spacing="12">
+                    <TextBlock
+                        Text="{x:Bind Strings.Get('Settings_Notify_Section'), Mode=OneWay}"
+                        Style="{StaticResource SectionTitleTextStyle}" />
+                    <TextBlock
+                        Text="{x:Bind Strings.Get('Settings_Notify_Desc'), Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            Text="{x:Bind Strings.Get('Settings_Notify_Mode'), Mode=OneWay}"
+                            Style="{StaticResource FieldLabelTextStyle}" />
+                        <ComboBox
+                            x:Name="NotifyModeBox"
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            SelectionChanged="NotifyModeBox_SelectionChanged" />
+                        <Button
+                            x:Name="NotifyTestButton"
+                            Grid.Column="2"
+                            Click="NotifyTestButton_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE7E7;" FontSize="16" />
+                                <TextBlock Text="{x:Bind Strings.Get('Settings_Notify_Test'), Mode=OneWay}" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+
+                    <TextBlock
+                        x:Name="NotifyDiagText"
+                        IsTextSelectionEnabled="True"
+                        FontSize="12"
+                        TextWrapping="Wrap"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="{x:Bind Strings.Get('Settings_Debug_Section'), Mode=OneWay}" />
+                            <TextBlock
+                                Text="{x:Bind Strings.Get('Settings_Debug_Desc'), Mode=OneWay}"
+                                FontSize="12"
+                                TextWrapping="Wrap"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <ToggleSwitch
+                            x:Name="DebugModeSwitch"
+                            Grid.Column="1"
+                            OnContent="{x:Bind Strings.Get('Settings_Debug_On'), Mode=OneWay}"
+                            OffContent="{x:Bind Strings.Get('Settings_Debug_Off'), Mode=OneWay}"
+                            Toggled="DebugModeSwitch_Toggled" />
+                    </Grid>
+
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            x:Name="LogPathText"
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            IsTextSelectionEnabled="True"
+                            TextTrimming="CharacterEllipsis"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <Button
+                            x:Name="OpenLogFolderButton"
+                            Grid.Column="1"
+                            Click="OpenLogFolderButton_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE838;" FontSize="16" />
+                                <TextBlock Text="{x:Bind Strings.Get('Settings_Debug_OpenLog'), Mode=OneWay}" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
             <!-- 离线聊天同步：手动把离线期间的消息推送到云端 -->
             <Border Style="{StaticResource CardBorderStyle}">
                 <Grid ColumnSpacing="16">
@@ -420,28 +512,6 @@
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon Glyph="&#xE838;" FontSize="16" />
                                 <TextBlock Text="{x:Bind Strings.Get('Settings_Btn_OpenDataFolder'), Mode=OneWay}" />
-                            </StackPanel>
-                        </Button>
-                    </Grid>
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock
-                            Grid.Column="0"
-                            VerticalAlignment="Center"
-                            Text="{x:Bind Strings.Get('Settings_Notify_Test_Desc'), Mode=OneWay}"
-                            TextWrapping="Wrap"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <Button
-                            x:Name="NotifyTestButton"
-                            Grid.Column="1"
-                            Click="NotifyTestButton_Click">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon Glyph="&#xE7E7;" FontSize="16" />
-                                <TextBlock Text="{x:Bind Strings.Get('Settings_Notify_Test'), Mode=OneWay}" />
                             </StackPanel>
                         </Button>
                     </Grid>

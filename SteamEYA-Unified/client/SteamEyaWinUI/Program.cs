@@ -1,5 +1,6 @@
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using SteamEyaWinUI.Services;
 
 namespace SteamEyaWinUI;
 
@@ -13,6 +14,11 @@ public static class Program
     private static int Main(string[] args)
     {
         WinRT.ComWrappersSupport.InitializeComWrappers();
+
+        // AUMID 必须在创建任何窗口前确定：系统通知的设置项与通知中心条目都按它归档，
+        // 晚于窗口设置会让首条通知落到按 exe 路径生成的默认 AUMID 上。
+        NotificationService.SetProcessAppUserModelId();
+
         Application.Start(p =>
         {
             var context = new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread());

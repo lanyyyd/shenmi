@@ -518,6 +518,25 @@
     "Close_Remember": "Don't ask again",
     "Tray_Tip": "SteamEYA (click to show)",
     "Tray_Show": "Show window",
-    "Tray_Exit": "Exit"
+    "Tray_Exit": "Exit",
+    "Settings_Notify_Section": "Notifications",
+    "Settings_Notify_Desc": "Alerts for new chat messages and finished or failed downloads. If system notifications are unavailable, a corner popup is used instead.",
+    "Settings_Notify_Mode": "Delivery",
+    "Settings_Notify_Mode_Auto": "Automatic (recommended)",
+    "Settings_Notify_Mode_InApp": "In-app popup only",
+    "Settings_Notify_Mode_System": "System notification only",
+    "Settings_Notify_Mode_Off": "Off",
+    "Settings_Notify_TestDone": "Test notification sent; channel status is shown below",
+    "Settings_Debug_Section": "Debug mode",
+    "Settings_Debug_Desc": "Also log notification, download and chat details. Useful when reporting an issue.",
+    "Settings_Debug_On": "On",
+    "Settings_Debug_Off": "Off",
+    "Settings_Debug_OpenLog": "Open log folder",
+    "Settings_Debug_OpenLogFail": "Failed to open the log folder",
+    "Dl_Notify_Completed_Title": "Download complete",
+    "Dl_Notify_Completed_Body_Format": "{0} saved",
+    "Dl_Notify_Failed_Title": "Download failed",
+    "Dl_Notify_Failed_Body_Format": "{0} could not be downloaded",
+    "Dl_Notify_Failed_Body_Reason_Format": "{0} failed: {1}"
   }
 }

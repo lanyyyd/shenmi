@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Composition.SystemBackdrops;
@@ -66,9 +67,9 @@ public sealed partial class MainWindow : Window
         // 通知需要回到 UI 线程，这里把窗口的派发器交给常驻聊天服务。
         ChatHub.AttachUi(DispatcherQueue);
         // 系统通知：注入 UI 派发器、确保注册，并接管「点击通知 → 跳到对应聊天房间」。
-        ChatNotifyService.SetUiDispatcher(DispatcherQueue);
-        ChatNotifyService.Initialize();
-        ChatNotifyService.Invoked += OnNotificationInvoked;
+        NotificationService.SetUiDispatcher(DispatcherQueue);
+        NotificationService.Initialize();
+        NotificationService.Invoked += OnNotificationInvoked;
 
         // 关窗口时：停背景视频释放解码器与文件句柄；断开常驻聊天；
         // 结束本机拉起的网关 / 云游戏引擎（含 PyInstaller onefile 派生的子进程与浏览器驱动），避免残留。
@@ -403,6 +404,7 @@ public sealed partial class MainWindow : Window
     internal void ExitFromTray()
     {
         _exiting = true;
+        ToastWindow.CloseAll();
         TrayIconService.Hide(s_hwnd);
         Close();
     }
@@ -463,6 +465,12 @@ public sealed partial class MainWindow : Window
     /// <summary>点击系统通知：把窗口带到前台并打开通知对应的聊天房间（argument 形如 room=group / room=pm:1:2）。</summary>
     private void OnNotificationInvoked(string argument)
     {
+        // 下载完成的通知带 openpath=<目录>：点开后直接定位到下载好的文件所在文件夹。
+        if (TryHandleOpenPath(argument))
+        {
+            return;
+        }
+
         var room = ParseRoomArgument(argument);
         if (string.IsNullOrEmpty(room))
         {
@@ -478,6 +486,34 @@ public sealed partial class MainWindow : Window
         {
             AppLog.Warn($"处理通知点击失败：{ex.Message}");
         }
+    }
+
+    /// <summary>处理「打开下载目录」类通知参数。</summary>
+    private static bool TryHandleOpenPath(string argument)
+    {
+        const string prefix = "openpath=";
+        if (!argument.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var path = Uri.UnescapeDataString(argument[prefix.Length..]);
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            AppLog.Warn($"通知指定的目录不存在：{path}");
+            return true;    // 参数已经消费掉，不要再当房间参数解析
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"打开目录失败：{ex.Message}");
+        }
+
+        return true;
     }
 
     /// <summary>从通知参数里取出 room 值；参数是 key=value&... 形式，值做过 URL 编码。</summary>

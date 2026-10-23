@@ -149,6 +149,30 @@ jobs:
           Copy-Item $hostExe "$env:GITHUB_WORKSPACE\publish\jiyu\" -Force
           Get-ChildItem "$env:GITHUB_WORKSPACE\publish\jiyu" | Select-Object -ExpandProperty Name
 
+      # 体积诊断：安装包 50MB+ 时先看清构成，避免盲目裁剪。
+      - name: 诊断 · 发布目录体积构成
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not (Test-Path publish)) { Write-Host "publish 目录不存在"; exit 0 }
+          $files = Get-ChildItem publish -Recurse -File
+          $total = ($files | Measure-Object Length -Sum).Sum
+          Write-Host ("===== publish 合计 {0:N1} MB / {1} 个文件 =====" -f ($total/1MB), $files.Count)
+          Write-Host ""
+          Write-Host "===== 按一级子目录 ====="
+          Get-ChildItem publish -Directory | ForEach-Object {
+            $s = (Get-ChildItem $_.FullName -Recurse -File | Measure-Object Length -Sum).Sum
+            Write-Host ("{0,-16} {1,9:N2} MB" -f $_.Name, ($s/1MB))
+          }
+          $rootSum = (Get-ChildItem publish -File | Measure-Object Length -Sum).Sum
+          Write-Host ("{0,-16} {1,9:N2} MB" -f "(顶层散装)", ($rootSum/1MB))
+          Write-Host ""
+          Write-Host "===== 最大的 25 个文件 ====="
+          $base = (Get-Location).Path + '\publish\'
+          $files | Sort-Object Length -Descending | Select-Object -First 25 | ForEach-Object {
+            Write-Host ("{0,9:N2} MB  {1}" -f ($_.Length/1MB), $_.FullName.Replace($base,''))
+          }
+
       # 把 Native AOT 自包含发布目录整体压成单个安装包 exe：用户只需下载/运行这一个文件。
       - name: Package installer (single setup.exe)
         shell: pwsh
