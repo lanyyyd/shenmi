@@ -296,6 +296,43 @@
                 </StackPanel>
             </Border>
 
+            <!-- 截图：全局热键 + 框选后复制/另存为 -->
+            <Border Style="{StaticResource CardBorderStyle}">
+                <StackPanel Spacing="10">
+                    <TextBlock
+                        Text="{x:Bind Strings.Get('Settings_Screenshot_Section'), Mode=OneWay}"
+                        Style="{StaticResource SectionTitleTextStyle}" />
+                    <TextBlock
+                        Text="{x:Bind Strings.Get('Settings_Screenshot_Desc'), Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            Text="{x:Bind Strings.Get('Settings_Screenshot_Hotkey'), Mode=OneWay}"
+                            Style="{StaticResource FieldLabelTextStyle}" />
+                        <TextBox
+                            x:Name="ScreenshotHotkeyBox"
+                            Grid.Column="1"
+                            IsReadOnly="True"
+                            IsSpellCheckEnabled="False"
+                            KeyDown="ScreenshotHotkeyBox_KeyDown" />
+                        <Button
+                            x:Name="ScreenshotRecordButton"
+                            Grid.Column="2"
+                            Click="ScreenshotRecordButton_Click">
+                            <TextBlock Text="{x:Bind Strings.Get('Settings_Screenshot_Record'), Mode=OneWay}" />
+                        </Button>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
             <!-- 离线聊天同步：手动把离线期间的消息推送到云端 -->
             <Border Style="{StaticResource CardBorderStyle}">
                 <Grid ColumnSpacing="16">

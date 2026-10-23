@@ -84,7 +84,7 @@ INT screenWidth, screenHeight;
 bool outlineEndJiy = false;
 HWND hWndOpConformNoBtn = NULL;
 bool bandAllRunOp = false, allowNextRunOp = false, allowAllRunOp  = false, ProhibitKillProcess = false, ProhibitCloseWindow = false;
-bool allowMonitor = false, allowControl = false, allowGbTop = false, fakeFull = false, gbFullManual = false,
+bool allowMonitor = true, allowControl = false, allowGbTop = false, fakeFull = false, gbFullManual = false,
 doNotShowVirusWindow = true, forceDisableWatchDog = false;
 bool isLocked = false, gbCurrentIsTop = false, isGbFounded = false;
 std::list<std::wstring> runOPWhiteList;
@@ -265,8 +265,8 @@ DWORD WINAPI VMsgCenterRunThread(LPVOID lpThreadParameter) {
 	hWndMsgCenter = CreateDialog(hInst, MAKEINTRESOURCE(IDD_MSGCT), desktopWindow, MainWndProc);
 	// 集成到 SteamEYA 后由客户端「小工具」页展示状态，Hook 自己的状态窗口保持隐藏。
 	ShowWindow(hWndMsgCenter, SW_HIDE);
-	ShowWindow(fakeDesktopWindow, SW_SHOW);
-	UpdateWindow(fakeDesktopWindow);
+	// 仅作为历史遗留的占位窗口，不再显示、也不再作为 GetDesktopWindow 的返回值。
+	ShowWindow(fakeDesktopWindow, SW_HIDE);
 
 	hListBoxStatus = GetDlgItem(hWndMsgCenter, IDC_STATUS_LIST);
 
@@ -315,10 +315,10 @@ void VInitSettings()
 	GetPrivateProfileString(L"JTSettings", L"BandAllRunOp", L"TRUE", w, 32, mainIniPath);
 	if (!StrEqual(w, L"TRUE") && !StrEqual(w, L"true") && !StrEqual(w, L"1")) bandAllRunOp = false;
 	else bandAllRunOp = true;
-	GetPrivateProfileString(L"JTSettings", L"ProhibitKillProcess", L"TRUE", w, 32, mainIniPath);
+	GetPrivateProfileString(L"JTSettings", L"ProhibitKillProcess", L"FALSE", w, 32, mainIniPath);
 	if (!StrEqual(w, L"TRUE") && !StrEqual(w, L"true") && !StrEqual(w, L"1")) ProhibitKillProcess = false;
 	else ProhibitKillProcess = true;
-	GetPrivateProfileString(L"JTSettings", L"ProhibitCloseWindow", L"TRUE", w, 32, mainIniPath);
+	GetPrivateProfileString(L"JTSettings", L"ProhibitCloseWindow", L"FALSE", w, 32, mainIniPath);
 	if (!StrEqual(w, L"TRUE") && !StrEqual(w, L"true") && !StrEqual(w, L"1")) ProhibitCloseWindow = false;
 	else ProhibitCloseWindow = true;
 	
@@ -738,7 +738,10 @@ void VSendMessageBack(LPCWSTR buff, HWND hDlg) {
 		COPYDATASTRUCT copyData = { 0 };
 		copyData.lpData = (PVOID)buff;
 		copyData.cbData = sizeof(WCHAR) * (wcslen(buff) + 1);
-		SendMessageTimeout(receiveWindow, WM_COPYDATA, (WPARAM)hDlg, (LPARAM)&copyData, SMTO_NORMAL, 500, 0);
+		// 原来是 SMTO_NORMAL + 500ms：宿主稍一忙，极域的窗口线程就要干等半秒（多次叠加成卡死）。
+		// 改成可中断 + 50ms，宿主没空就丢弃这条状态通知，下一次节拍会再补。
+		SendMessageTimeout(receiveWindow, WM_COPYDATA, (WPARAM)hDlg, (LPARAM)&copyData,
+			SMTO_ABORTIFHUNG | SMTO_BLOCK, 50, 0);
 		if (hWndMsgCenter) SendMessage(hWndMsgCenter, WM_COMMAND, IDC_SW_STATUS_RB_FLASH_FAST, 0);
 	}
 	// 集成模式：宿主不在线时保持静默，不再弹出“失去联系”对话框，也不结束极域进程。
@@ -1375,11 +1378,11 @@ BOOL WINAPI hkSetWindowPos(HWND hWnd, HWND hWndInsertAfter, int x, int y, int cx
 				if (VIsInIllegalCanSizeWindows(hWnd))
 				{
 					jiYuWndCanSize.remove(hWnd);
-					raSetWindowPos(hWnd, hWndInsertAfter, x, y, cx, cy, uFlags | SWP_NOZORDER);
-					SendMessage(hWnd, WM_SIZE, NULL, NULL);
-					return TRUE;
+					return raSetWindowPos(hWnd, hWndInsertAfter, x, y, cx, cy, uFlags | SWP_NOZORDER);
 				}
-				return TRUE;
+
+				// 不再吞掉全屏化：极域按全屏尺寸建 D3D 共享表面，窗口尺寸没变就会画面错位/全黑。
+				return raSetWindowPos(hWnd, hWndInsertAfter, x, y, cx, cy, uFlags);
 			}
 			else {
 				VSwitchLockState(hWnd, FALSE);
@@ -1388,8 +1391,8 @@ BOOL WINAPI hkSetWindowPos(HWND hWnd, HWND hWndInsertAfter, int x, int y, int cx
 			}
 		}
 
-		if (VIsInIllegalWindows(hWnd)) 
-			return TRUE;
+		if (VIsInIllegalWindows(hWnd))
+			return raSetWindowPos(hWnd, hWndInsertAfter, x, y, cx, cy, uFlags);
 	}
 	BOOL result = raSetWindowPos(hWnd, hWndInsertAfter, x, y, cx, cy, uFlags);
 	// 极域在广播过程中还可能单独改置顶/全屏，菜单必须立刻跟随真实窗口状态。
@@ -1408,11 +1411,9 @@ HDWP WINAPI hkDeferWindowPos(HDWP hWinPosInfo, HWND hWnd, HWND hWndInsertAfter, 
 					return faDeferWindowPos(hWinPosInfo, hWnd, hWndInsertAfter, x, y, cx, cy, uFlags);
 				if (VIsInIllegalCanSizeWindows(hWnd)) {
 					jiYuWndCanSize.remove(hWnd);
-					HDWP rs = faDeferWindowPos(hWinPosInfo, hWnd, hWndInsertAfter, x, y, cx, cy, uFlags | SWP_NOZORDER);
-					SendMessage(hWnd, WM_SIZE, NULL, NULL);
-					return rs;
+					return faDeferWindowPos(hWinPosInfo, hWnd, hWndInsertAfter, x, y, cx, cy, uFlags | SWP_NOZORDER);
 				}
-				return NULL;
+				return faDeferWindowPos(hWinPosInfo, hWnd, hWndInsertAfter, x, y, cx, cy, uFlags);
 			}
 			else {
 				VSwitchLockState(hWnd, FALSE);
@@ -1424,7 +1425,7 @@ HDWP WINAPI hkDeferWindowPos(HDWP hWinPosInfo, HWND hWnd, HWND hWndInsertAfter, 
 		}
 
 		if (VIsInIllegalWindows(hWnd))
-			return NULL;
+			return faDeferWindowPos(hWinPosInfo, hWnd, hWndInsertAfter, x, y, cx, cy, uFlags);
 	}
 	return faDeferWindowPos(hWinPosInfo, hWnd, hWndInsertAfter, x, y, cx, cy, uFlags);
 }
@@ -1440,7 +1441,7 @@ BOOL WINAPI hkMoveWindow(HWND hWnd, int x, int y, int cx, int cy, BOOL bRepaint)
 				jiYuWndCanSize.remove(hWnd);
 				return raMoveWindow(hWnd,  x, y, cx, cy, bRepaint);
 			}
-			return TRUE;
+			return raMoveWindow(hWnd, x, y, cx, cy, bRepaint);
 		}
 		else {
 			VSwitchLockState(hWnd, FALSE);
@@ -1699,7 +1700,14 @@ BOOL WINAPI hkShowWindow(HWND hWnd, int nCmdShow)
 			if(VIsWindowHp(hWnd))
 				VSwitchLockState(hWnd, TRUE);
 			if (VIsWindowGb(hWnd)) isGbFounded = true;
-			VSendMessageBack(L"hkb:immck", hWndMsgCenter);
+
+			// 广播窗口显示时极域会连续调用 ShowWindow，每次通知宿主都要跨进程同步一次，这里做 1 秒节流。
+			static DWORD s_lastImmckTick = 0;
+			DWORD nowTick = GetTickCount();
+			if (nowTick - s_lastImmckTick > 1000) {
+				s_lastImmckTick = nowTick;
+				VSendMessageBack(L"hkb:immck", hWndMsgCenter);
+			}
 		}
 		else if (nCmdShow == SW_HIDE) {
 			if (VIsWindowGb(hWnd)) isGbFounded = false;
@@ -1775,7 +1783,6 @@ BOOL WINAPI hkUnhookWindowsHookEx(HHOOK hhk)
 }
 BOOL WINAPI hkPostMessageW(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 {
-	if (loaded && hWnd == mainWindow) return 0;
 	if (loaded && VIsInIllegalWindowMessage(Msg)  && ProhibitCloseWindow) {
 		DWORD pid;
 		GetWindowThreadProcessId(hWnd, &pid);
@@ -1786,7 +1793,6 @@ BOOL WINAPI hkPostMessageW(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 }
 LRESULT WINAPI hkSendMessageW(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 {
-	if (loaded && hWnd == mainWindow) return 0;
 	if (loaded && VIsInIllegalWindowMessage(Msg) && ProhibitCloseWindow) {
 		DWORD pid;
 		GetWindowThreadProcessId(hWnd, &pid);
@@ -1811,33 +1817,26 @@ HRESULT WINAPI hkFilterConnectCommunicationPort(LPCWSTR lpPortName, DWORD dwOpti
 }
 HWND WINAPI hkGetDesktopWindow(VOID)
 {
-	if (loaded)
-		return allowMonitor ? desktopWindow : fakeDesktopWindow;
+	// 永远返回真桌面：原先在 allowMonitor=false 时返回 fakeDesktopWindow，
+	// 极域采集桌面会拿到一个空对话框（表现为广播全黑）。
 	return desktopWindow;
 }
 HDC WINAPI hkGetWindowDC(__in_opt HWND hWnd) {
-	if (loaded && hWnd == desktopWindow && !allowMonitor)
-		return faGetWindowDC(fakeDesktopWindow);
 	return faGetWindowDC(hWnd);
 }
 BOOL __cdecl hkEncodeToJPEGBuffer(int a1, int a2, int a3, int a4, int a5, DWORD * a6, int a7, int a8, int a9)
 {
-	if (!allowMonitor) return FALSE;
+	// 编码失败会直接导致广播黑屏，无论 AllowMonitor 如何都必须放行。
 	return faEncodeToJPEGBuffer(a1, a2, a3, a4, a5, a6, a7, a8, a9);
 }
 HWND WINAPI hkGetForegroundWindow(VOID)
 {
-	return allowAllRunOp ? faGetForegroundWindow() : NULL;
+	// 返回 NULL 会让极域/系统的窗口焦点判断进入异常分支，这里始终透传。
+	return faGetForegroundWindow();
 }
 HDC WINAPI hkCreateDCW(LPCWSTR pwszDriver, LPCWSTR pwszDevice, LPCWSTR pszPort, const DEVMODEW * pdm)
 {
-	if (isGbFounded)
-		return faCreateDCW(pwszDriver, pwszDevice, pszPort, pdm);
-	if (!allowMonitor)
-	{
-		if (StrEqual(pwszDriver, L"DISPLAY"))
-			return NULL;
-	}
+	// 对 DISPLAY 返回 NULL 会让极域的广播渲染建不出 DC（黑屏），一律放行。
 	return faCreateDCW(pwszDriver, pwszDevice, pszPort, pdm);
 }
 BOOL WINAPI hkEnableMenuItem(HMENU hMenu, UINT uIDEnableItem, UINT uEnable)

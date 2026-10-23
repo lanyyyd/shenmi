@@ -24,6 +24,7 @@ public sealed partial class MainWindow : Window
     private const int MinWindowWidth = 1180;
     private const int MinWindowHeight = 780;
     private const uint WmGetMinMaxInfo = 0x0024;
+    private const uint WmHotkey = 0x0312;
     private const nuint WindowSubclassId = 1;
 
     private static nint s_hwnd;
@@ -102,6 +103,9 @@ public sealed partial class MainWindow : Window
         AppState.BusyChanged += OnBusyChanged;
 
         ConfigureWindowSize();
+
+        // 截图全局热键：必须等 hwnd 就绪后再注册（失败说明被其它程序占用，状态栏会提示）。
+        ApplyScreenshotHotkey(startupSettings);
 
         ApplyAccessMode();
 
@@ -239,6 +243,25 @@ public sealed partial class MainWindow : Window
         {
             await UpdateFlow.StartAsync(info, Close);
         }
+    }
+
+    /// <summary>注册/重注册截图热键；设置页改键后也走这里。</summary>
+    internal static bool ApplyScreenshotHotkey(AppSettings settings)
+    {
+        if (s_hwnd == 0)
+        {
+            return false;
+        }
+
+        var ok = ScreenshotService.RegisterHotkey(
+            s_hwnd, settings.ScreenshotHotkeyMods, settings.ScreenshotHotkeyVk);
+
+        if (!ok)
+        {
+            Instance?.ShowStatus(Loc.T("Screenshot_Hotkey_Conflict"), InfoBarSeverity.Warning);
+        }
+
+        return ok;
     }
 
     public void ShowStatus(string message, InfoBarSeverity severity)
@@ -512,6 +535,24 @@ public sealed partial class MainWindow : Window
         nuint subclassId,
         nuint referenceData)
     {
+        if (message == WmHotkey)
+        {
+            if ((int)wParam == ScreenshotService.HotkeyId)
+            {
+                // UnmanagedCallersOnly 里不能让异常跨边界，兜底住。
+                try
+                {
+                    ScreenshotService.BeginCapture();
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Warn($"截图触发失败：{ex.Message}");
+                }
+
+                return 0;
+            }
+        }
+
         if (message == WmGetMinMaxInfo)
         {
             var scale = GetDpiForWindow(hWnd) / 96.0;

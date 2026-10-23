@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="SteamEyaWinUI.ScreenshotWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid
+        x:Name="Root"
+        Background="Black"
+        IsTabStop="True"
+        Loaded="OnRootLoaded"
+        KeyDown="OnRootKeyDown"
+        PointerPressed="OnPointerPressed"
+        PointerMoved="OnPointerMoved"
+        PointerReleased="OnPointerReleased"
+        SizeChanged="OnRootSizeChanged">
+
+        <Image x:Name="ShotImage" Stretch="Fill" />
+
+        <!-- 未开始框选时的整屏压暗 -->
+        <Rectangle x:Name="MaskFull" Fill="#8C000000" />
+
+        <!-- 选区外的四块压暗 + 选区描边；不参与命中测试，鼠标事件全部交给根 Grid -->
+        <Canvas x:Name="Overlay" IsHitTestVisible="False">
+            <Rectangle x:Name="MaskTop" Fill="#8C000000" Visibility="Collapsed" />
+            <Rectangle x:Name="MaskBottom" Fill="#8C000000" Visibility="Collapsed" />
+            <Rectangle x:Name="MaskLeft" Fill="#8C000000" Visibility="Collapsed" />
+            <Rectangle x:Name="MaskRight" Fill="#8C000000" Visibility="Collapsed" />
+            <Border
+                x:Name="SelectionBorder"
+                BorderBrush="#FF4FA3FF"
+                BorderThickness="1"
+                Visibility="Collapsed" />
+        </Canvas>
+
+        <!-- 提示条 -->
+        <Border
+            x:Name="HintBar"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Top"
+            Margin="0,24,0,0"
+            Padding="14,8"
+            CornerRadius="8"
+            Background="#CC1F1F1F">
+            <TextBlock
+                x:Name="HintText"
+                Foreground="White"
+                FontSize="13" />
+        </Border>
+
+        <!-- 确认工具条（Canvas 无背景，不拦截空白区域的指针事件） -->
+        <Canvas x:Name="ToolLayer">
+            <Border
+                x:Name="Toolbar"
+                Padding="8"
+                CornerRadius="10"
+                Background="#E61F1F1F"
+                Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button
+                        x:Name="CopyButton"
+                        Click="OnCopyClick"
+                        Background="#FF2D7FF9"
+                        Foreground="White"
+                        BorderThickness="0"
+                        Padding="12,6">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE73E;" FontSize="14" />
+                            <TextBlock x:Name="CopyLabel" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="SaveButton"
+                        Click="OnSaveClick"
+                        Padding="12,6">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE74E;" FontSize="14" />
+                            <TextBlock x:Name="SaveLabel" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="CancelButton"
+                        Click="OnCancelClick"
+                        Padding="12,6"
+                        ToolTipService.ToolTip="Esc">
+                        <FontIcon Glyph="&#xE711;" FontSize="14" />
+                    </Button>
+                </StackPanel>
+            </Border>
+        </Canvas>
+    </Grid>
+</Window>

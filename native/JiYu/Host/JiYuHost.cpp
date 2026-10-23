@@ -32,6 +32,7 @@ static const wchar_t* kHostWindowTitle = L"SteamEYA.JiYuHost.Window";
 static const wchar_t* kHookWindowTitle = L"SteamEYA.JiYuHook.Window";
 
 static const UINT_PTR kTimerTick = 1;
+#define WM_APP_ENUM_WINDOWS (WM_APP + 1)
 static const int kHotkeyId = 1;
 
 struct Config
@@ -208,6 +209,29 @@ static void WriteHookIni()
     WritePrivateProfileStringW(L"JTSettings", L"DoNotShowVirusWindow", L"TRUE", g_cfg.iniPath.c_str());
     WritePrivateProfileStringW(L"JTSettings", L"AllowMonitor", L"TRUE", g_cfg.iniPath.c_str());
     WritePrivateProfileStringW(L"JTSettings", L"AllowControl", L"FALSE", g_cfg.iniPath.c_str());
+    // 这两项默认关闭：否则极域被 Hook 卡住时任务管理器都结束不了，用户只能重启。
+    WritePrivateProfileStringW(L"JTSettings", L"ProhibitKillProcess", L"FALSE", g_cfg.iniPath.c_str());
+    WritePrivateProfileStringW(L"JTSettings", L"ProhibitCloseWindow", L"FALSE", g_cfg.iniPath.c_str());
+}
+
+// 统一转 UTF-8：不要再依赖 ccs=UTF-16LE + fwprintf 写中文，那条路径在非 Unicode locale 下
+// 会把中文转成 MBCS 再落盘（出现乱码），且末尾容易带出缓冲残留。
+static std::string ToUtf8(const std::wstring& text)
+{
+    if (text.empty()) return std::string();
+    int len = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), (int)text.size(), nullptr, 0, nullptr, nullptr);
+    if (len <= 0) return std::string();
+    std::string out((size_t)len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, text.c_str(), (int)text.size(), &out[0], len, nullptr, nullptr);
+    return out;
+}
+
+static void AppendLine(std::string& out, const char* key, const std::string& value)
+{
+    out += key;
+    out += '=';
+    out += value;
+    out += '\n';
 }
 
 static void WriteStatus()
@@ -215,26 +239,29 @@ static void WriteStatus()
     if (g_cfg.statusPath.empty()) return;
 
     std::wstring temp = g_cfg.statusPath + L".tmp";
-    FILE* fp = nullptr;
-    // 客户端按 UTF-16 读取状态文件，这里必须用同样的编码写，否则中文状态会变成乱码。
-    if (_wfopen_s(&fp, temp.c_str(), L"wb, ccs=UTF-16LE") != 0 || !fp) return;
 
-    fwprintf(fp, L"student=%d\n", g_state.studentPid ? 1 : 0);
-    fwprintf(fp, L"pid=%lu\n", g_state.studentPid);
-    fwprintf(fp, L"studentPath=%ls\n", Sanitize(g_state.studentPath).c_str());
-    fwprintf(fp, L"injected=%d\n", g_state.injected ? 1 : 0);
-    fwprintf(fp, L"controlled=%d\n", g_state.controlled ? 1 : 0);
-    fwprintf(fp, L"hook=%d\n", g_state.hookFound ? 1 : 0);
-    fwprintf(fp, L"bypass=%d\n", g_cfg.bypassEnabled ? 1 : 0);
-    fwprintf(fp, L"allowTop=%d\n", g_cfg.allowGbTop ? 1 : 0);
-    fwprintf(fp, L"gbTop=%d\n", g_state.gbTopmost ? 1 : 0);
-    fwprintf(fp, L"gbFull=%d\n", g_state.gbFullscreen ? 1 : 0);
-    fwprintf(fp, L"locked=%d\n", g_state.inputLocked ? 1 : 0);
-    fwprintf(fp, L"hotkeyEnabled=%d\n", g_cfg.hotkeyEnabled ? 1 : 0);
-    fwprintf(fp, L"hotkeyRegistered=%d\n", g_state.hotkeyRegistered ? 1 : 0);
-    fwprintf(fp, L"hotkey=%ls\n", HotkeyText().c_str());
-    fwprintf(fp, L"message=%ls\n", Sanitize(g_state.lastMessage).c_str());
-    fwprintf(fp, L"updated=%lu\n", NowTick());
+    std::string body;
+    body.reserve(512);
+    AppendLine(body, "student", g_state.studentPid ? "1" : "0");
+    AppendLine(body, "pid", std::to_string(g_state.studentPid));
+    AppendLine(body, "studentPath", ToUtf8(Sanitize(g_state.studentPath)));
+    AppendLine(body, "injected", g_state.injected ? "1" : "0");
+    AppendLine(body, "controlled", g_state.controlled ? "1" : "0");
+    AppendLine(body, "hook", g_state.hookFound ? "1" : "0");
+    AppendLine(body, "bypass", g_cfg.bypassEnabled ? "1" : "0");
+    AppendLine(body, "allowTop", g_cfg.allowGbTop ? "1" : "0");
+    AppendLine(body, "gbTop", g_state.gbTopmost ? "1" : "0");
+    AppendLine(body, "gbFull", g_state.gbFullscreen ? "1" : "0");
+    AppendLine(body, "locked", g_state.inputLocked ? "1" : "0");
+    AppendLine(body, "hotkeyEnabled", g_cfg.hotkeyEnabled ? "1" : "0");
+    AppendLine(body, "hotkeyRegistered", g_state.hotkeyRegistered ? "1" : "0");
+    AppendLine(body, "hotkey", ToUtf8(HotkeyText()));
+    AppendLine(body, "message", ToUtf8(Sanitize(g_state.lastMessage)));
+    AppendLine(body, "updated", std::to_string(NowTick()));
+
+    FILE* fp = nullptr;
+    if (_wfopen_s(&fp, temp.c_str(), L"wb") != 0 || !fp) return;
+    if (!body.empty()) fwrite(body.data(), 1, body.size(), fp);
     fclose(fp);
 
     MoveFileExW(temp.c_str(), g_cfg.statusPath.c_str(),
@@ -565,7 +592,9 @@ static void HandleHookMessage(const std::wstring& message)
     }
     else if (message == L"hkb:immck")
     {
-        EnumWindows(EnumJiYuWindowsProc, (LPARAM)g_state.studentPid);
+        // 不要在 WM_COPYDATA 的栈上枚举窗口：EnumWindows 里的 GetWindowTextW 是跨进程同步消息，
+        // 会把 Hook 那侧（极域 UI 线程）的 SendMessageTimeout 一起拖住。改成投递到自己的消息队列。
+        PostMessageW(g_hostWnd, WM_APP_ENUM_WINDOWS, 0, 0);
     }
     else if (message.rfind(L"hkb:jyk:", 0) == 0)
     {
@@ -743,6 +772,13 @@ static LRESULT CALLBACK HostWndProc(HWND hWnd, UINT message, WPARAM wParam, LPAR
         if ((int)wParam == kHotkeyId)
         {
             TriggerBossKey();
+        }
+        return 0;
+
+    case WM_APP_ENUM_WINDOWS:
+        if (g_state.studentPid)
+        {
+            EnumWindows(EnumJiYuWindowsProc, (LPARAM)g_state.studentPid);
         }
         return 0;
 

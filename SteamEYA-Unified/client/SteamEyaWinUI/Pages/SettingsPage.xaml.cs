@@ -2,16 +2,20 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using SteamEyaWinUI.Localization;
 using SteamEyaWinUI.Services;
 using Windows.Storage;
 using Windows.Storage.Pickers;
+using Windows.System;
 using Windows.UI;
+using Windows.UI.Core;
 
 namespace SteamEyaWinUI.Pages;
 
@@ -28,6 +32,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".mp4", ".m4v", ".mov", ".wmv", ".avi", ".mkv"];
 
     private bool _pickingBackground;
+    private bool _recordingScreenshotHotkey;
 
     public SettingsPage()
     {
@@ -87,6 +92,12 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
             UpdateCustomBackgroundControls();
             UpdateDownloadDirText();
 
+            if (!_recordingScreenshotHotkey)
+            {
+                var current = AppState.SettingsService.Load();
+                ScreenshotHotkeyBox.Text = ScreenshotService.FormatHotkey(
+                    current.ScreenshotHotkeyMods, current.ScreenshotHotkeyVk);
+            }
         });
     }
 
@@ -124,6 +135,8 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
             CustomBackgroundOpacitySlider.Value = Math.Clamp(settings.CustomBackgroundOpacity, 0.1, 0.9);
             UpdateCustomBackgroundControls();
             DownloadThreadBox.Value = Math.Clamp(settings.DownloadThreadCount, 1, 256);
+            ScreenshotHotkeyBox.Text = ScreenshotService.FormatHotkey(
+                settings.ScreenshotHotkeyMods, settings.ScreenshotHotkeyVk);
         }
         finally
         {
@@ -209,6 +222,82 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         AppState.SettingsService.Save(settings);
         UpdateDownloadDirText();
     }
+
+    // ---------- 截图快捷键 ----------
+
+    private void ScreenshotRecordButton_Click(object sender, RoutedEventArgs e)
+    {
+        _recordingScreenshotHotkey = true;
+        ScreenshotHotkeyBox.Text = Loc.T("Settings_Screenshot_PressKeys");
+        ScreenshotHotkeyBox.Focus(FocusState.Programmatic);
+    }
+
+    private void ScreenshotHotkeyBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (!_recordingScreenshotHotkey)
+        {
+            return;
+        }
+
+        var vk = (uint)e.Key;
+        if (vk == (uint)VirtualKey.Escape)
+        {
+            _recordingScreenshotHotkey = false;
+            var current = AppState.SettingsService.Load();
+            ScreenshotHotkeyBox.Text = ScreenshotService.FormatHotkey(
+                current.ScreenshotHotkeyMods, current.ScreenshotHotkeyVk);
+            e.Handled = true;
+            return;
+        }
+
+        if (IsModifierKey(vk))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        var mods = CurrentModifiers();
+        if (mods == 0)
+        {
+            AppState.ShowStatus(Loc.T("Settings_Screenshot_NeedModifier"), InfoBarSeverity.Warning);
+            e.Handled = true;
+            return;
+        }
+
+        _recordingScreenshotHotkey = false;
+
+        var settings = AppState.SettingsService.Load();
+        settings.ScreenshotHotkeyMods = mods;
+        settings.ScreenshotHotkeyVk = vk;
+        AppState.SettingsService.Save(settings);
+
+        ScreenshotHotkeyBox.Text = ScreenshotService.FormatHotkey(mods, vk);
+
+        if (MainWindow.ApplyScreenshotHotkey(settings))
+        {
+            AppState.ShowStatus(
+                Loc.Tf("Settings_Screenshot_Saved_Format", ScreenshotHotkeyBox.Text),
+                InfoBarSeverity.Success);
+        }
+
+        e.Handled = true;
+    }
+
+    private static bool IsModifierKey(uint vk) =>
+        vk is 16 or 17 or 18 or 91 or 92 or 160 or 161 or 162 or 163 or 164 or 165;
+
+    private static uint CurrentModifiers()
+    {
+        var mods = 0u;
+        if (IsKeyDown(VirtualKey.Control)) mods |= ScreenshotService.ModControl;
+        if (IsKeyDown(VirtualKey.Menu)) mods |= ScreenshotService.ModAlt;
+        if (IsKeyDown(VirtualKey.Shift)) mods |= ScreenshotService.ModShift;
+        if (IsKeyDown(VirtualKey.LeftWindows) || IsKeyDown(VirtualKey.RightWindows)) mods |= ScreenshotService.ModWin;
+        return mods;
+    }
+
+    private static bool IsKeyDown(VirtualKey key) =>
+        (InputKeyboardSource.GetKeyStateForCurrentThread(key) & CoreVirtualKeyStates.Down) != 0;
 
     private static ComboBoxItem? FindByTag(ComboBox combo, string tag) =>
         combo.Items

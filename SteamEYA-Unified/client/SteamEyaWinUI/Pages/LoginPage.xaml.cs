@@ -32,6 +32,7 @@ public sealed partial class LoginPage : Page, INotifyPropertyChanged
         ApplyModeVisibility();
 
         UpdateAccountInfoFromCurrentInputs();
+        RefreshGreeting();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -52,6 +53,7 @@ public sealed partial class LoginPage : Page, INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Strings)));
             UpdateRemotePanelState();
             UpdateAccountInfoFromCurrentInputs();
+            RefreshGreeting();
             OnBusyChanged(AppState.IsBusy);
         });
     }
@@ -84,6 +86,39 @@ public sealed partial class LoginPage : Page, INotifyPropertyChanged
     {
         ShowStatus(Loc.T("Login_Status_Cancelling"), InfoBarSeverity.Informational);
         AppState.CancelBusyOperation();
+    }
+
+    private void OnPageLoaded(object sender, RoutedEventArgs e)
+    {
+        RefreshGreeting();
+    }
+
+    /// <summary>按本机当前时间选问候语，替换原来的固定「登录」标题。</summary>
+    private static string BuildGreeting(string? name)
+    {
+        var greetingKey = DateTime.Now.Hour switch
+        {
+            >= 5 and < 9 => "Greeting_Morning",
+            >= 9 and < 11 => "Greeting_Forenoon",
+            >= 11 and < 13 => "Greeting_Noon",
+            >= 13 and < 18 => "Greeting_Afternoon",
+            _ => "Greeting_Evening"
+        };
+
+        var greeting = Loc.T(greetingKey);
+        return string.IsNullOrWhiteSpace(name)
+            ? greeting
+            : Loc.Tf("Greeting_WithName_Format", greeting, name);
+    }
+
+    private void RefreshGreeting()
+    {
+        if (GreetingTitleText is null)
+        {
+            return;
+        }
+
+        GreetingTitleText.Text = BuildGreeting(SessionState.Nickname);
     }
 
     // 账密模式（调试）：用账号密码经 Web API 换取 EYA 令牌，直接填进手动模式（不落本地记录）。
@@ -329,7 +364,7 @@ public sealed partial class LoginPage : Page, INotifyPropertyChanged
         {
             RemoteAuthPanel.Visibility = Visibility.Collapsed;
             RemoteGetAccountPanel.Visibility = Visibility.Visible;
-            RemoteWelcomeText.Text = Loc.Tf("Login_Remote_Welcome_Format", SessionState.Nickname);
+            RemoteWelcomeText.Text = BuildGreeting(SessionState.Nickname);
         }
         else
         {

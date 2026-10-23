@@ -257,6 +257,12 @@ internal sealed class AppSettings
     /// <summary>自定义背景不透明度，范围 0.1～0.9。</summary>
     public double CustomBackgroundOpacity { get; set; } = DefaultCustomBackgroundOpacity;
 
+    /// <summary>截图全局热键的修饰键（Win32 MOD_* 位组合），默认 Alt。</summary>
+    public uint ScreenshotHotkeyMods { get; set; } = 0x0001;
+
+    /// <summary>截图全局热键的虚拟键码，默认 A。</summary>
+    public uint ScreenshotHotkeyVk { get; set; } = 0x41;
+
     /// <summary>「小工具」页：是否启用极域电子教室绕过（默认开启，客户端启动即注入）。</summary>
     public bool JiYuBypassEnabled { get; set; } = true;
 

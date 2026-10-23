@@ -260,7 +260,8 @@ internal static partial class JiYuService
 
             using var stream = new FileStream(StatusFilePath, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete);
-            using var reader = new StreamReader(stream, Encoding.Unicode);
+            // 宿主已改为 UTF-8 无 BOM 输出；detectEncodingFromByteOrderMarks 兼容旧的 UTF-16 状态文件。
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
             var status = new JiYuStatus { Available = true };
 
             while (reader.ReadLine() is { } line)
