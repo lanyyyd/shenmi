@@ -274,7 +274,7 @@ internal static class ScreenshotService
         for (var row = 0; row < height; row++)
         {
             var sourceOffset = ((y + row) * frame.Width + x) * 4;
-            Buffer.BlockCopy(frame.Pixels, sourceOffset, result, row * width * 4, width * 4);
+            System.Buffer.BlockCopy(frame.Pixels, sourceOffset, result, row * width * 4, width * 4);
         }
 
         return result;
