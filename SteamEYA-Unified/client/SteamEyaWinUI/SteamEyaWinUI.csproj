@@ -44,6 +44,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Windows App SDK 通知栈的字符串资源 DLL（34KB，只依赖 KERNEL32 + UCRT）。
+         WinUI 组件包的自包含部署不包含它，AppNotificationManager.Register() 会以
+         0x8007007E「找不到指定的模块」失败，表现是系统通知完全不可用、且不抛到 UI。
+         取自 Microsoft.WindowsAppSDK.Runtime 2.2.0 的 Microsoft.WindowsAppRuntime.2.msix 根目录。 -->
+    <Content Include="..\..\..\native\WindowsAppRuntime\Microsoft.WindowsAppRuntime.Insights.Resource.dll">
+      <Link>Microsoft.WindowsAppRuntime.Insights.Resource.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- 界面语言包：随发布拷到 Languages\ 供贡献者/用户增改，并内嵌一份作发布漏拷时的保底（见 LanguageCatalog）。
          显式 LogicalName 既让清单名稳定（SteamEyaWinUI.Languages.<code>.json），也避免 en/zh-Hant 被当作附属语言 culture。 -->
     <Content Include="Languages\*.json" CopyToOutputDirectory="PreserveNewest" />
@@ -58,6 +70,14 @@
          自包含模式下 WinUI 组件包自带运行时 DLL，无需 Runtime 包。 -->
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.2.1" />
   </ItemGroup>
+
+  <!-- 构建期校验：这个 DLL 丢了系统通知会静默退化成「注册失败」，只有真机点测试通知才发现。
+       放在发布流程里直接失败，避免升级 WindowsAppSDK 后又悄悄坏掉。 -->
+  <Target Name="VerifyWindowsAppRuntimeResource" AfterTargets="Publish">
+    <Error
+      Condition="!Exists('$(PublishDir)Microsoft.WindowsAppRuntime.Insights.Resource.dll')"
+      Text="发布目录缺少 Microsoft.WindowsAppRuntime.Insights.Resource.dll，系统通知将因 0x8007007E 失效。" />
+  </Target>
 
   <!-- workaround：无打包 WinUI 应用 dotnet publish 时不会复制 PRI 资源索引文件，
        缺少它会在启动时抛 XamlParseException。 -->

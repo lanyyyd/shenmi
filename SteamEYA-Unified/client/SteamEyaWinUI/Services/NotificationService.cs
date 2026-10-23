@@ -340,29 +340,30 @@ internal static partial class NotificationService
                 return;
             }
 
-            var foreground = IsMainWindowForeground();
-
-            // 自动模式：前台时用户本就能看到界面，只弹轻量浮窗；不在前台时系统通知与应用内浮窗都发，
-            // 因为系统通知存在「注册成功但被系统策略吞掉」的情况，浮窗保证一定能看到。
+            // 通道选择只看「系统通道是否真的可用」，不再看窗口是否在前台：
+            // 之前按前台判断会导致窗口在设置页时把系统通知吞掉，只剩浮窗，看起来像检测失效。
             var wantSystem = _channel switch
             {
                 NotificationChannel.System => true,
                 NotificationChannel.InApp => false,
-                _ => _systemRegistered && !foreground
+                NotificationChannel.Auto => _systemRegistered,
+                _ => false
             };
 
             var wantInApp = _channel switch
             {
                 NotificationChannel.System => false,
                 NotificationChannel.InApp => true,
-                _ => true
+                NotificationChannel.Auto => !_systemRegistered,
+                _ => false
             };
 
+            // 兜底：系统通道实际不可用时一律退回浮窗——宁可多弹一条，也不要让用户什么都收不到。
             if (wantSystem && !_systemRegistered)
             {
-                AppLog.Debug("系统通道不可用，本次只发应用内浮窗。");
+                AppLog.Debug("系统通道不可用，改发应用内浮窗。");
                 wantSystem = false;
-                wantInApp = _channel != NotificationChannel.System;
+                wantInApp = true;
             }
 
             if (wantSystem)
@@ -440,19 +441,6 @@ internal static partial class NotificationService
         else
         {
             ui.TryEnqueue(Create);
-        }
-    }
-
-    private static bool IsMainWindowForeground()
-    {
-        try
-        {
-            var hwnd = MainWindow.Hwnd;
-            return hwnd != 0 && GetForegroundWindow() == hwnd;
-        }
-        catch
-        {
-            return false;
         }
     }
 
@@ -568,6 +556,4 @@ internal static partial class NotificationService
     [LibraryImport("shell32.dll", StringMarshalling = StringMarshalling.Utf16)]
     private static partial int SetCurrentProcessExplicitAppUserModelID(string appUserModelId);
 
-    [LibraryImport("user32.dll")]
-    private static partial nint GetForegroundWindow();
 }

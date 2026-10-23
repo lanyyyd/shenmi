@@ -264,10 +264,10 @@ internal sealed class AppSettings
     public bool RememberCloseAction { get; set; }
 
     /// <summary>
-    /// 通知发送方式："auto"（默认，浮窗总是弹，窗口不在前台时叠加系统通知）、
-    /// "inapp"（只弹应用内浮窗）、"system"（只发系统通知）、"off"（关闭）。
+    /// 通知发送方式："system"（默认，系统通知；通道不可用时自动退回浮窗）、
+    /// "auto"（系统优先，不可用时浮窗）、"inapp"（只弹应用内浮窗）、"off"（关闭）。
     /// </summary>
-    public string NotificationMode { get; set; } = "auto";
+    public string NotificationMode { get; set; } = "system";
 
     /// <summary>调试模式：开启后额外写入 DEBUG 级别过程日志（通知/下载/聊天链路）。</summary>
     public bool DebugMode { get; set; }
