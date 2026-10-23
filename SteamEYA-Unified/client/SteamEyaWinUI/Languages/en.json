@@ -511,6 +511,13 @@
     "Settings_Screenshot_Record": "Record",
     "Settings_Screenshot_PressKeys": "Press a key combination…",
     "Settings_Screenshot_NeedModifier": "The hotkey must include Ctrl, Alt, Shift or Win.",
-    "Settings_Screenshot_Saved_Format": "Screenshot hotkey set to {0}"
+    "Settings_Screenshot_Saved_Format": "Screenshot hotkey set to {0}",
+    "Close_Title": "Close SteamEYA",
+    "Close_Tray": "Hide to system tray",
+    "Close_Exit": "Exit",
+    "Close_Remember": "Don't ask again",
+    "Tray_Tip": "SteamEYA (click to show)",
+    "Tray_Show": "Show window",
+    "Tray_Exit": "Exit"
   }
 }

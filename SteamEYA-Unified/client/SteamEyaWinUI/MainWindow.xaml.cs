@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Composition.SystemBackdrops;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -34,6 +35,10 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherQueueTimer _statusDismissTimer;
 
     public static MainWindow? Instance { get; private set; }
+
+    // 关闭确认：_exiting 用于区分「用户确认退出」与「点了 X 但被拦下来询问」。
+    private bool _exiting;
+    private bool _closeDialogOpen;
 
     /// <summary>主窗口句柄，供文件/目录选择器等 WinRT 互操作（InitializeWithWindow）使用；在 ConfigureWindowSize 中赋值。</summary>
     public static nint Hwnd => s_hwnd;
@@ -106,6 +111,9 @@ public sealed partial class MainWindow : Window
 
         // 截图全局热键：必须等 hwnd 就绪后再注册（失败说明被其它程序占用，状态栏会提示）。
         ApplyScreenshotHotkey(startupSettings);
+
+        // 关闭拦截：先问「隐藏到托盘还是退出」，再决定是否真的关窗。
+        AppWindow.Closing += OnAppWindowClosing;
 
         ApplyAccessMode();
 
@@ -262,6 +270,141 @@ public sealed partial class MainWindow : Window
         }
 
         return ok;
+    }
+
+    // ---------------- 关闭确认与托盘 ----------------
+
+    private static bool IsExitAction(string? action) =>
+        string.Equals(action, "exit", StringComparison.OrdinalIgnoreCase);
+
+    private async void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (_exiting)
+        {
+            return;
+        }
+
+        // 先无条件取消，等用户选完再决定是否真的 Close()。
+        args.Cancel = true;
+
+        if (_closeDialogOpen)
+        {
+            return;
+        }
+
+        _closeDialogOpen = true;
+        try
+        {
+            var settings = AppState.SettingsService.Load();
+
+            if (settings.RememberCloseAction)
+            {
+                if (IsExitAction(settings.CloseAction))
+                {
+                    ExitFromTray();
+                }
+                else
+                {
+                    HideToTray();
+                }
+
+                return;
+            }
+
+            var (action, remember) = await ShowCloseDialogAsync(settings);
+            if (action is null)
+            {
+                return;   // 用户点了取消
+            }
+
+            if (remember)
+            {
+                settings.RememberCloseAction = true;
+                settings.CloseAction = action;
+                AppState.SettingsService.Save(settings);
+            }
+
+            if (IsExitAction(action))
+            {
+                ExitFromTray();
+            }
+            else
+            {
+                HideToTray();
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("处理关闭确认失败。", ex);
+        }
+        finally
+        {
+            _closeDialogOpen = false;
+        }
+    }
+
+    private async Task<(string? Action, bool Remember)> ShowCloseDialogAsync(AppSettings settings)
+    {
+        var options = new RadioButtons { MaxColumns = 1 };
+        options.Items.Add(Loc.T("Close_Tray"));
+        options.Items.Add(Loc.T("Close_Exit"));
+        options.SelectedIndex = IsExitAction(settings.CloseAction) ? 1 : 0;
+
+        var remember = new CheckBox
+        {
+            Content = Loc.T("Close_Remember"),
+            IsChecked = settings.RememberCloseAction
+        };
+
+        var panel = new StackPanel { Spacing = 14 };
+        panel.Children.Add(options);
+        panel.Children.Add(remember);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = Loc.T("Close_Title"),
+            Content = panel,
+            PrimaryButtonText = Loc.T("Common_Confirm"),
+            CloseButtonText = Loc.T("Common_Cancel"),
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result != ContentDialogResult.Primary)
+        {
+            return (null, false);
+        }
+
+        return (options.SelectedIndex == 1 ? "exit" : "tray", remember.IsChecked == true);
+    }
+
+    private void HideToTray()
+    {
+        TrayIconService.Show(s_hwnd, Loc.T("Tray_Tip"));
+        AppWindow.Hide();
+    }
+
+    internal void RestoreFromTray()
+    {
+        try
+        {
+            AppWindow.Show();
+            Activate();
+            TrayIconService.Hide(s_hwnd);
+            SetForegroundWindow(s_hwnd);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"从托盘恢复窗口失败：{ex.Message}");
+        }
+    }
+
+    internal void ExitFromTray()
+    {
+        _exiting = true;
+        TrayIconService.Hide(s_hwnd);
+        Close();
     }
 
     public void ShowStatus(string message, InfoBarSeverity severity)
@@ -535,6 +678,38 @@ public sealed partial class MainWindow : Window
         nuint subclassId,
         nuint referenceData)
     {
+        if (message == TrayIconService.WmTrayIcon)
+        {
+            try
+            {
+                if (TrayIconService.HandleCallback(hWnd, lParam, out var restore) && restore)
+                {
+                    Instance?.RestoreFromTray();
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLog.Warn($"处理托盘消息失败：{ex.Message}");
+            }
+
+            return 0;
+        }
+
+        if (message == TrayIconService.WmTrayCommand)
+        {
+            var command = (int)wParam;
+            if (command == TrayIconService.CommandShow)
+            {
+                Instance?.RestoreFromTray();
+            }
+            else if (command == TrayIconService.CommandExit)
+            {
+                Instance?.ExitFromTray();
+            }
+
+            return 0;
+        }
+
         if (message == WmHotkey)
         {
             if ((int)wParam == ScreenshotService.HotkeyId)
@@ -567,6 +742,10 @@ public sealed partial class MainWindow : Window
 
     [LibraryImport("user32.dll")]
     private static partial uint GetDpiForWindow(nint hwnd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetForegroundWindow(nint hWnd);
 
     [LibraryImport("comctl32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

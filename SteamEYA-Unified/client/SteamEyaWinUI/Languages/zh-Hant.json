@@ -511,6 +511,13 @@
     "Settings_Screenshot_Record": "錄製",
     "Settings_Screenshot_PressKeys": "請按下組合鍵…",
     "Settings_Screenshot_NeedModifier": "快速鍵必須包含 Ctrl、Alt、Shift 或 Win 中至少一個。",
-    "Settings_Screenshot_Saved_Format": "截圖快速鍵已設為 {0}"
+    "Settings_Screenshot_Saved_Format": "截圖快速鍵已設為 {0}",
+    "Close_Title": "關閉應用",
+    "Close_Tray": "隱藏到工作列系統匣",
+    "Close_Exit": "結束程式",
+    "Close_Remember": "不再提醒",
+    "Tray_Tip": "SteamEYA（點擊顯示主介面）",
+    "Tray_Show": "顯示主介面",
+    "Tray_Exit": "結束"
   }
 }

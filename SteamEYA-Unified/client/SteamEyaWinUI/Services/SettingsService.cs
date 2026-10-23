@@ -257,6 +257,12 @@ internal sealed class AppSettings
     /// <summary>自定义背景不透明度，范围 0.1～0.9。</summary>
     public double CustomBackgroundOpacity { get; set; } = DefaultCustomBackgroundOpacity;
 
+    /// <summary>点右上角关闭时的行为："tray"（隐藏到托盘，默认）或 "exit"（直接退出）。</summary>
+    public string CloseAction { get; set; } = "tray";
+
+    /// <summary>是否记住关闭选择、不再每次询问。</summary>
+    public bool RememberCloseAction { get; set; }
+
     /// <summary>截图全局热键的修饰键（Win32 MOD_* 位组合），默认 Alt。</summary>
     public uint ScreenshotHotkeyMods { get; set; } = 0x0001;
 

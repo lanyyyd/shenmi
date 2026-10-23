@@ -42,6 +42,8 @@ public sealed partial class ScreenshotWindow : Window
             presenter.IsResizable = false;
             presenter.IsMaximizable = false;
             presenter.IsMinimizable = false;
+            // 仅靠这个还不够：WPS/播放器等会把自己的置顶窗口再压上来，BringToFront 里还会补一次 Win32 置顶。
+            presenter.IsAlwaysOnTop = true;
         }
 
         AppWindow.MoveAndResize(new RectInt32(0, 0, frame.Width, frame.Height));
@@ -51,9 +53,41 @@ public sealed partial class ScreenshotWindow : Window
         HintText.Text = Loc.T("Screenshot_Hint");
     }
 
+    /// <summary>
+    /// 强制把自己拉到最前：OverlappedPresenter.IsAlwaysOnTop 只设置窗口风格，
+    /// 遇到 WPS 这类自带置顶窗口的前台程序仍会被盖住，这里用 Win32 再压一次并抢焦点。
+    /// </summary>
+    internal void BringToFront()
+    {
+        try
+        {
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            if (hwnd == 0)
+            {
+                return;
+            }
+
+            SetWindowPos(hwnd, HwndTopmost, 0, 0, 0, 0,
+                SwpNoMove | SwpNoSize | SwpShowWindow);
+
+            // 前台锁：SetForegroundWindow 对非前台进程可能被系统忽略，
+            // 先 BringWindowToTop 再 SetForegroundWindow，两个都失败时至少置顶生效。
+            BringWindowToTop(hwnd);
+            SetForegroundWindow(hwnd);
+            SetFocus(hwnd);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"截图窗口置顶失败：{ex.Message}");
+        }
+    }
+
     private async void OnRootLoaded(object sender, RoutedEventArgs e)
     {
         Root.Focus(FocusState.Programmatic);
+
+        // 二次置顶：窗口刚显示时前台应用可能还在抢焦点，延迟一帧再压一次。
+        _ = DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, BringToFront);
 
         try
         {
@@ -338,6 +372,26 @@ public sealed partial class ScreenshotWindow : Window
     }
 
     private void OnCancelClick(object sender, RoutedEventArgs e) => Close();
+
+    private const int HwndTopmost = -1;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpShowWindow = 0x0040;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(nint hWnd, int hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(nint hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool BringWindowToTop(nint hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint SetFocus(nint hWnd);
 
     /// <summary>按当前选区裁出像素并编码成 PNG；选区无效时返回 null。</summary>
     private async Task<byte[]?> BuildPngAsync()

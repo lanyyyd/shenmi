@@ -143,6 +143,7 @@ internal static class ScreenshotService
 
         var window = new SteamEyaWinUI.ScreenshotWindow(frame);
         window.Activate();
+        window.BringToFront();
     }
 
     /// <summary>抓取主显示器整屏。失败返回 null（例如 UAC 安全桌面、锁屏）。</summary>
