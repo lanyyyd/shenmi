@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.UI.Dispatching;
@@ -174,7 +175,7 @@ internal static partial class NotificationService
                 return false;
             }
 
-            if (!GetTokenInformation(token, TokenElevationClass, out var info, sizeof(TokenElevation), out _))
+            if (!GetTokenInformation(token, TokenElevationClass, out var info, Unsafe.SizeOf<TokenElevation>(), out _))
             {
                 return false;
             }

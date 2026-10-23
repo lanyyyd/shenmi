@@ -267,7 +267,8 @@ public sealed partial class ToastWindow : Window
 
     private void OnCloseClick(object sender, RoutedEventArgs e)
     {
-        e.Handled = true;   // 不要冒泡到卡片的 Tapped，否则会当成「点击通知」
+        // RoutedEventArgs 没有 Handled；Button 内部已把指针事件标记为已处理，
+        // 不会再冒泡成卡片的 Tapped，这里只做关闭。
         _lifeTimer.Stop();
         BeginFadeOut();
     }
