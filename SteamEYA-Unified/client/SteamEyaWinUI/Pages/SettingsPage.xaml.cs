@@ -13,7 +13,7 @@ using SteamEyaWinUI.Localization;
 using SteamEyaWinUI.Services;
 using Windows.Storage;
 using Windows.Storage.Pickers;
-using Windows.System;
+using VirtualKey = Windows.System.VirtualKey;
 using Windows.UI;
 using Windows.UI.Core;
 

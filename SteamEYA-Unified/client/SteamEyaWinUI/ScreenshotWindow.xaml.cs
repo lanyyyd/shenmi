@@ -28,7 +28,7 @@ public sealed partial class ScreenshotWindow : Window
     private bool _hasSelection;
     private bool _busy;
 
-    public ScreenshotWindow(ScreenshotFrame frame)
+    internal ScreenshotWindow(ScreenshotFrame frame)
     {
         _frame = frame;
         InitializeComponent();
