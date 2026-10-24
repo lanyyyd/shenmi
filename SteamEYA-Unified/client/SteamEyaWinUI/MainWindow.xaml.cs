@@ -449,6 +449,7 @@ public sealed partial class MainWindow : Window
         {
             "cloudGame" => typeof(CloudGamePage),
             "chat" => typeof(ChatPage),
+            "library" => typeof(LibraryPage),
             "toolbox" => typeof(ToolboxPage),
             "cachedAccounts" => typeof(CachedAccountsPage),
             "cloudSave" => typeof(CloudSavePage),
@@ -671,6 +672,7 @@ public sealed partial class MainWindow : Window
         LoginNavItem.Content = Loc.T("Nav_Login");
         CloudGameNavItem.Content = Loc.T("Nav_CloudGame");
         ChatNavItem.Content = Loc.T("Nav_Chat");
+        LibraryNavItem.Content = Loc.T("Nav_Library");
         ToolboxNavItem.Content = Loc.T("Nav_Toolbox");
         CachedAccountsNavItem.Content = Loc.T("Nav_CachedAccounts");
         CloudSaveNavItem.Content = Loc.T("Nav_CloudSave");

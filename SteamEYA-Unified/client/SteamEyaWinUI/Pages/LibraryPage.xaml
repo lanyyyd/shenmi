@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="SteamEyaWinUI.Pages.LibraryPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:models="using:SteamEyaWinUI.Models"
+    NavigationCacheMode="Required"
+    Loaded="OnPageLoaded"
+    Unloaded="OnPageUnloaded">
+
+    <Page.Resources>
+        <!-- 分类胶囊：复用全局玻璃按钮样式，只压扁高度；选中态换成主色实底。 -->
+        <Style x:Key="LibraryPillStyle" TargetType="Button" BasedOn="{StaticResource AuroraGlassButtonStyle}">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="FontWeight" Value="Normal" />
+        </Style>
+        <Style x:Key="LibraryPillSelectedStyle" TargetType="Button" BasedOn="{StaticResource LibraryPillStyle}">
+            <Setter Property="Background" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+            <Setter Property="Foreground" Value="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+    </Page.Resources>
+
+    <Grid Padding="32,24,32,12" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 标题 + 工具 -->
+        <Grid Grid.Row="0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" Spacing="4">
+                <TextBlock
+                    Text="{x:Bind Strings.Get('Lib_Title'), Mode=OneWay}"
+                    Style="{StaticResource PageTitleTextStyle}" />
+                <TextBlock
+                    x:Name="SyncText"
+                    Style="{StaticResource PageSubtitleTextStyle}" />
+            </StackPanel>
+
+            <StackPanel
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="8">
+                <Button x:Name="RefreshButton" Click="RefreshClick">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                        <TextBlock Text="{x:Bind Strings.Get('Lib_Refresh'), Mode=OneWay}" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="OpenSiteButton" Click="OpenSiteClick">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE774;" FontSize="14" />
+                        <TextBlock Text="{x:Bind Strings.Get('Lib_OpenSite'), Mode=OneWay}" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- 离线缓存 / 同步失败提示 -->
+        <InfoBar
+            x:Name="NoticeBar"
+            Grid.Row="1"
+            IsClosable="False"
+            IsOpen="False"
+            Severity="Warning" />
+
+        <!-- 搜索 + 分类 -->
+        <StackPanel Grid.Row="2" Spacing="10">
+            <TextBox
+                x:Name="SearchBox"
+                MaxWidth="420"
+                HorizontalAlignment="Left"
+                PlaceholderText="{x:Bind Strings.Get('Lib_Search_Placeholder'), Mode=OneWay}"
+                TextChanged="SearchTextChanged" />
+            <ScrollViewer
+                HorizontalScrollBarVisibility="Auto"
+                VerticalScrollBarVisibility="Disabled">
+                <StackPanel
+                    x:Name="CategoryPanel"
+                    Orientation="Horizontal"
+                    Spacing="8" />
+            </ScrollViewer>
+        </StackPanel>
+
+        <!-- 资源网格 -->
+        <Grid Grid.Row="3">
+            <ScrollViewer
+                x:Name="ListScroller"
+                Padding="0,0,0,12"
+                VerticalScrollBarVisibility="Auto">
+                <ItemsRepeater x:Name="ResourceRepeater" ItemsSource="{x:Bind VisibleItems, Mode=OneWay}">
+                    <ItemsRepeater.Layout>
+                        <UniformGridLayout
+                            ItemsStretch="Fill"
+                            MinColumnSpacing="10"
+                            MinItemHeight="96"
+                            MinItemWidth="280"
+                            MinRowSpacing="10" />
+                    </ItemsRepeater.Layout>
+                    <ItemsRepeater.ItemTemplate>
+                        <DataTemplate x:DataType="models:LibraryResourceItem">
+                            <Border Style="{StaticResource CardBorderStyle}">
+                                <Grid ColumnSpacing="12" RowSpacing="2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <Border
+                                        Grid.RowSpan="2"
+                                        Width="36"
+                                        Height="36"
+                                        VerticalAlignment="Top"
+                                        Background="{ThemeResource AuroraNavSelectedBrush}"
+                                        CornerRadius="10">
+                                        <FontIcon
+                                            FontSize="16"
+                                            Foreground="{ThemeResource AuroraTextHeadingBrush}"
+                                            Glyph="{x:Bind Glyph}" />
+                                    </Border>
+
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        MaxLines="2"
+                                        FontSize="13"
+                                        FontWeight="SemiBold"
+                                        Text="{x:Bind Title}"
+                                        TextTrimming="CharacterEllipsis"
+                                        TextWrapping="Wrap" />
+                                    <TextBlock
+                                        Grid.Row="1"
+                                        Grid.Column="1"
+                                        FontSize="11.5"
+                                        Foreground="{ThemeResource AuroraTextMutedBrush}"
+                                        Text="{x:Bind DetailText}"
+                                        TextTrimming="CharacterEllipsis" />
+
+                                    <Button
+                                        Grid.RowSpan="2"
+                                        Grid.Column="2"
+                                        VerticalAlignment="Center"
+                                        Click="OnActionClick"
+                                        Tag="{x:Bind}">
+                                        <TextBlock
+                                            FontSize="12"
+                                            Text="{x:Bind ActionText, Mode=OneWay}" />
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsRepeater.ItemTemplate>
+                </ItemsRepeater>
+            </ScrollViewer>
+
+            <!-- 空态 / 加载中 -->
+            <StackPanel
+                x:Name="EmptyPanel"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="12"
+                Visibility="Collapsed">
+                <FontIcon
+                    FontSize="30"
+                    Foreground="{ThemeResource AuroraTextMutedBrush}"
+                    Glyph="&#xE7BA;" />
+                <TextBlock
+                    x:Name="EmptyText"
+                    HorizontalAlignment="Center"
+                    MaxWidth="360"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap"
+                    Style="{StaticResource PageSubtitleTextStyle}" />
+                <Button
+                    x:Name="EmptyRetryButton"
+                    HorizontalAlignment="Center"
+                    Click="RefreshClick"
+                    Content="{x:Bind Strings.Get('Lib_Retry'), Mode=OneWay}" />
+            </StackPanel>
+
+            <ProgressRing
+                x:Name="LoadingRing"
+                Width="32"
+                Height="32"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                IsActive="False" />
+        </Grid>
+    </Grid>
+</Page>

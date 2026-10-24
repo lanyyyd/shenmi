@@ -108,6 +108,14 @@
                 </NavigationViewItem>
 
                 <NavigationViewItem
+                    x:Name="LibraryNavItem"
+                    Tag="library">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE8F1;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
+                <NavigationViewItem
                     x:Name="CachedAccountsNavItem"
                     Tag="cachedAccounts">
                     <NavigationViewItem.Icon>

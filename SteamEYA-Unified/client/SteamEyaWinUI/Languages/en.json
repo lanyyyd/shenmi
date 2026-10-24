@@ -542,6 +542,27 @@
     "Tip_Fallback_1": "Hope today goes smoothly for you.",
     "Tip_Fallback_2": "No rush — take a sip of tea first.",
     "Tip_Fallback_3": "Stuck on something? Drop by the chat room.",
-    "Tip_Fallback_4": "Keep the app open while downloading large files."
+    "Tip_Fallback_4": "Keep the app open while downloading large files.",
+    "Nav_Library": "Library",
+    "Lib_Title": "Library",
+    "Lib_Refresh": "Refresh",
+    "Lib_OpenSite": "Open in browser",
+    "Lib_Search_Placeholder": "Search by title or category…",
+    "Lib_Category_All": "All",
+    "Lib_Action_Download": "Download",
+    "Lib_Action_Queued": "In queue",
+    "Lib_Sync_Never": "Not synced yet",
+    "Lib_Sync_Format": "From t.teatt.top · {0} items · synced {1}",
+    "Lib_Sync_FromCache": "offline cache",
+    "Lib_Notice_Cached_Format": "The resource site is unreachable. Showing the cache synced at {0}.",
+    "Lib_Notice_Failed_Format": "Sync failed: {0}",
+    "Lib_Notice_Offline": "Offline mode — the library needs a network connection to sync.",
+    "Lib_Empty_NoData": "Nothing was loaded. Check your connection and try again.",
+    "Lib_Empty_NoMatch": "No matching resources. Try another keyword or category.",
+    "Lib_Retry": "Retry",
+    "Lib_Status_Added_Format": "Added to downloads: {0}",
+    "Lib_Status_AlreadyQueued_Format": "{0} is already in the download queue",
+    "Lib_Error_NoUrl": "This resource has no download link",
+    "Lib_Error_Download": "Failed to start the download. See the log for details."
   }
 }

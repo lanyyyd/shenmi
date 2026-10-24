@@ -542,6 +542,27 @@
     "Tip_Fallback_1": "今天也要顺顺利利。",
     "Tip_Fallback_2": "慢一点也没关系，先喝口水。",
     "Tip_Fallback_3": "卡住了就来聊天室喊一声。",
-    "Tip_Fallback_4": "下载大文件时记得别顺手关掉程序。"
+    "Tip_Fallback_4": "下载大文件时记得别顺手关掉程序。",
+    "Nav_Library": "资源库",
+    "Lib_Title": "资源库",
+    "Lib_Refresh": "刷新",
+    "Lib_OpenSite": "在浏览器打开",
+    "Lib_Search_Placeholder": "搜索标题或分类…",
+    "Lib_Category_All": "全部",
+    "Lib_Action_Download": "下载",
+    "Lib_Action_Queued": "已加入",
+    "Lib_Sync_Never": "还没有同步过",
+    "Lib_Sync_Format": "来自 t.teatt.top · 共 {0} 个 · {1} 同步",
+    "Lib_Sync_FromCache": "离线缓存",
+    "Lib_Notice_Cached_Format": "现在连不上资源站，下面是 {0} 同步的缓存。",
+    "Lib_Notice_Failed_Format": "同步失败：{0}",
+    "Lib_Notice_Offline": "当前离线模式，资源库需要联网才能同步。",
+    "Lib_Empty_NoData": "一条资源都没拉到，检查网络后重试。",
+    "Lib_Empty_NoMatch": "没有匹配的资源，换个关键词或分类试试。",
+    "Lib_Retry": "重试",
+    "Lib_Status_Added_Format": "已加入下载：{0}",
+    "Lib_Status_AlreadyQueued_Format": "{0} 已经在下载队列里了",
+    "Lib_Error_NoUrl": "这条资源没有下载地址",
+    "Lib_Error_Download": "发起下载失败，详情见日志"
   }
 }

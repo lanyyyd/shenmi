@@ -542,6 +542,27 @@
     "Tip_Fallback_1": "今天也要順順利利。",
     "Tip_Fallback_2": "慢一點也沒關係，先喝口水。",
     "Tip_Fallback_3": "卡住了就來聊天室喊一聲。",
-    "Tip_Fallback_4": "下載大檔案時記得別順手關掉程式。"
+    "Tip_Fallback_4": "下載大檔案時記得別順手關掉程式。",
+    "Nav_Library": "資源庫",
+    "Lib_Title": "資源庫",
+    "Lib_Refresh": "重新整理",
+    "Lib_OpenSite": "在瀏覽器開啟",
+    "Lib_Search_Placeholder": "搜尋標題或分類…",
+    "Lib_Category_All": "全部",
+    "Lib_Action_Download": "下載",
+    "Lib_Action_Queued": "已加入",
+    "Lib_Sync_Never": "還沒有同步過",
+    "Lib_Sync_Format": "來自 t.teatt.top · 共 {0} 個 · {1} 同步",
+    "Lib_Sync_FromCache": "離線快取",
+    "Lib_Notice_Cached_Format": "目前連不上資源站，以下是 {0} 同步的快取。",
+    "Lib_Notice_Failed_Format": "同步失敗：{0}",
+    "Lib_Notice_Offline": "目前為離線模式，資源庫需要連網才能同步。",
+    "Lib_Empty_NoData": "沒有取得任何資源，檢查網路後重試。",
+    "Lib_Empty_NoMatch": "沒有符合的資源，換個關鍵字或分類試試。",
+    "Lib_Retry": "重試",
+    "Lib_Status_Added_Format": "已加入下載：{0}",
+    "Lib_Status_AlreadyQueued_Format": "{0} 已經在下載佇列裡了",
+    "Lib_Error_NoUrl": "這筆資源沒有下載位址",
+    "Lib_Error_Download": "發起下載失敗，詳情請看日誌"
   }
 }
