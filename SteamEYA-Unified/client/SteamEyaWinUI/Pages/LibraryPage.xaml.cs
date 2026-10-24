@@ -130,6 +130,8 @@ public sealed partial class LibraryPage : Page, INotifyPropertyChanged
 
     private void RefreshClick(object sender, RoutedEventArgs e) => _ = LoadAsync(forceRefresh: true);
 
+    private void OpenDownloadsClick(object sender, RoutedEventArgs e) => MainWindow.Instance?.NavigateToToolbox();
+
     private void OpenSiteClick(object sender, RoutedEventArgs e)
     {
         try

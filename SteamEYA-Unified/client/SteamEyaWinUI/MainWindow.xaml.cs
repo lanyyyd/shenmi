@@ -443,6 +443,19 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>供其它页面跳转到百宝箱（资源库的「下载列表」按钮用）。</summary>
+    internal void NavigateToToolbox()
+    {
+        try
+        {
+            RootNavigationView.SelectedItem = ToolboxNavItem;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"跳转百宝箱失败：{ex.Message}");
+        }
+    }
+
     private void NavigateTo(string pageName)
     {
         var pageType = pageName switch

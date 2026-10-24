@@ -39,6 +39,12 @@ internal sealed class DownloadManager
 
     public static DownloadManager Instance { get; } = new();
 
+    /// <summary>
+    /// 有新任务入队（无论来自百宝箱页、资源库还是以后别的入口）。
+    /// 百宝箱页面靠它把外部入口发起的下载补进自己的列表，否则那些任务只存在于管理器队列里、界面上看不见。
+    /// </summary>
+    public event Action<DownloadTaskItem>? TaskEnqueued;
+
     public IReadOnlyList<DownloadTaskItem> Tasks
     {
         get
@@ -68,6 +74,7 @@ internal sealed class DownloadManager
 
         AppLog.Debug($"下载入队：{url} → {directory}（线程 {threads}）");
         Pump();
+        TaskEnqueued?.Invoke(task);
         return task;
     }
 

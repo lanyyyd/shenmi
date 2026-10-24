@@ -32,6 +32,9 @@ public sealed partial class ToolboxPage : Page, INotifyPropertyChanged
 
         TaskList.ItemsSource = _tasks;
 
+        // 其它入口（资源库等）直接调 DownloadManager.Enqueue，本页要跟着补进列表。
+        DownloadManager.Instance.TaskEnqueued += OnTaskEnqueued;
+
         _timer = _dispatcherQueue.CreateTimer();
         _timer.Interval = TimeSpan.FromMilliseconds(300);
         _timer.IsRepeating = true;
@@ -53,8 +56,38 @@ public sealed partial class ToolboxPage : Page, INotifyPropertyChanged
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // 页面首次打开时把管理器里已有的任务（可能是进页面前从资源库发起的）一次性补全。
+        foreach (var task in DownloadManager.Instance.Tasks)
+        {
+            AddTaskIfMissing(task);
+        }
+
         _timer.Start();
         Tick();
+    }
+
+    private void OnTaskEnqueued(DownloadTaskItem task)
+    {
+        if (_dispatcherQueue.HasThreadAccess)
+        {
+            AddTaskIfMissing(task);
+        }
+        else
+        {
+            _dispatcherQueue.TryEnqueue(() => AddTaskIfMissing(task));
+        }
+    }
+
+    /// <summary>去重后加入列表：页内入队时事件已经加过一次，这里必须跳过。</summary>
+    private void AddTaskIfMissing(DownloadTaskItem task)
+    {
+        if (_tasks.Contains(task))
+        {
+            return;
+        }
+
+        _tasks.Add(task);
+        UpdateEmptyHint();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -237,7 +270,7 @@ public sealed partial class ToolboxPage : Page, INotifyPropertyChanged
         }
 
         var task = DownloadManager.Instance.Enqueue(url, directory, ResolveRequestedThreads());
-        _tasks.Add(task);
+        AddTaskIfMissing(task);
 
         UrlBox.Text = string.Empty;
         _probe = null;

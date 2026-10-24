@@ -48,18 +48,33 @@
             <StackPanel
                 Grid.Column="1"
                 VerticalAlignment="Center"
-                Orientation="Horizontal"
-                Spacing="8">
-                <Button x:Name="RefreshButton" Click="RefreshClick">
+                Spacing="6">
+                <StackPanel
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <Button x:Name="RefreshButton" Click="RefreshClick">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                            <TextBlock Text="{x:Bind Strings.Get('Lib_Refresh'), Mode=OneWay}" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="OpenSiteButton" Click="OpenSiteClick">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE774;" FontSize="14" />
+                            <TextBlock Text="{x:Bind Strings.Get('Lib_OpenSite'), Mode=OneWay}" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+
+                <!-- 从资源库发起的下载会直接进百宝箱队列，这里给一个直达入口。 -->
+                <Button
+                    x:Name="OpenDownloadsButton"
+                    HorizontalAlignment="Stretch"
+                    Click="OpenDownloadsClick">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE72C;" FontSize="14" />
-                        <TextBlock Text="{x:Bind Strings.Get('Lib_Refresh'), Mode=OneWay}" />
-                    </StackPanel>
-                </Button>
-                <Button x:Name="OpenSiteButton" Click="OpenSiteClick">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE774;" FontSize="14" />
-                        <TextBlock Text="{x:Bind Strings.Get('Lib_OpenSite'), Mode=OneWay}" />
+                        <FontIcon Glyph="&#xE896;" FontSize="14" />
+                        <TextBlock Text="{x:Bind Strings.Get('Lib_OpenDownloads'), Mode=OneWay}" />
                     </StackPanel>
                 </Button>
             </StackPanel>
