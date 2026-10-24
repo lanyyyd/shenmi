@@ -25,15 +25,15 @@
 [Setup]
 ; 单个闭括号：{{ 转义成字面 {，末尾单 } 收尾，得到 {GUID}。AppId 一旦随首个安装包发布便不可再改。
 AppId={{9BB137D4-3413-4F62-8C75-471DCEBAF2E5}
-AppName=SteamEYA
+AppName=茶π·次元口袋
 AppVersion={#AppVersion}
 AppPublisher=lanyyyd
 DefaultDirName={localappdata}\SteamEYA
-DefaultGroupName=SteamEYA
+DefaultGroupName=茶π
 DisableDirPage=no
 DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
-OutputBaseFilename=SteamEYA-{#AppVersion}-win-x64-setup
+OutputBaseFilename=TeaTT-{#AppVersion}-win-x64-setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
@@ -62,8 +62,15 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\SteamEYA"; Filename: "{app}\SteamEyaWinUI.exe"
-Name: "{autodesktop}\SteamEYA"; Filename: "{app}\SteamEyaWinUI.exe"; Tasks: desktopicon
+; 快捷方式显示为「茶π」；开始菜单分组与安装向导标题用全名「茶π·次元口袋」。
+Name: "{autoprograms}\茶π"; Filename: "{app}\SteamEyaWinUI.exe"
+Name: "{autodesktop}\茶π"; Filename: "{app}\SteamEyaWinUI.exe"; Tasks: desktopicon
+
+[InstallDelete]
+; 旧版叫 SteamEYA：升级时清掉遗留入口，避免开始菜单/桌面出现两个图标。
+Type: files; Name: "{autoprograms}\SteamEYA"
+Type: files; Name: "{autodesktop}\SteamEYA"
+Type: dirifempty; Name: "{autoprograms}\SteamEYA"
 
 [Run]
 Filename: "{app}\SteamEyaWinUI.exe"; Description: "{cm:LaunchProgram,SteamEYA}"; Flags: nowait postinstall skipifsilent

@@ -235,7 +235,7 @@ internal static partial class NotificationService
                 return;
             }
 
-            key.SetValue("DisplayName", "SteamEYA");
+            key.SetValue("DisplayName", "茶π·次元口袋");
             key.SetValue("IconUri", exe);
             _aumidRegistered = true;
             AppLog.Debug($"AUMID 注册表已写入：{AppUserModelId} -> {exe}");
@@ -519,7 +519,7 @@ internal static partial class NotificationService
         Initialize();
         _lastChannelUsed = "无";
 
-        Show("SteamEYA 测试通知",
+        Show("茶π·次元口袋 测试通知",
              _systemRegistered
                  ? "如果你只看到这条浮窗、没看到系统横幅，说明系统通知被系统设置拦住了，可在设置里切到「仅应用内」。"
                  : "系统通知当前不可用，这条是应用内浮窗。具体原因见下方诊断信息。",

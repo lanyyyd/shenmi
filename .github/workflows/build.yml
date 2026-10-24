@@ -1,4 +1,4 @@
-name: Build SteamEYA (Windows x64)
+name: Build TeaTT (Windows x64)
 
 # 触发：推送到主分支、PR、或手动点 Run workflow
 on:
@@ -70,7 +70,12 @@ jobs:
       # Native AOT + Windows App SDK 自包含：产物零运行时依赖
       # 注入版本号：使程序集版本与安装包版本一致（客户端「检查更新」靠它比较新旧版本）
       - name: Publish (Native AOT / self-contained)
-        run: dotnet publish "$env:PROJECT" -c Release -r win-x64 -p:Platform=x64 -p:Version=0.1.${{ github.run_number }} -o publish
+        shell: pwsh
+        run: |
+          # 版本从 1.0.0 起：以构建序号偏移，run_number=64 时得到 1.0.0，之后逐次 +1。
+          $patch = [Math]::Max(0, ${{ github.run_number }} - 64)
+          Write-Host "版本 1.0.$patch"
+          dotnet publish "$env:PROJECT" -c Release -r win-x64 -p:Platform=x64 -p:Version=1.0.$patch -o publish
 
       - name: 清理符号文件（省安装包体积）
         shell: pwsh
@@ -188,7 +193,8 @@ jobs:
           }
           if (-not $iscc) { throw "ISCC.exe (Inno Setup) 未找到" }
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          $version = "0.1.${{ github.run_number }}"
+          $patch = [Math]::Max(0, ${{ github.run_number }} - 64)
+          $version = "1.0.$patch"
           & $iscc "/DAppVersion=$version" "/DPublishDir=$env:GITHUB_WORKSPACE\publish" "/DOutputDir=$env:GITHUB_WORKSPACE\artifacts" "/DLanguagesDir=$env:GITHUB_WORKSPACE\build\installer\languages" "$env:GITHUB_WORKSPACE\build\installer\SteamEYA.iss"
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
           Get-ChildItem artifacts
@@ -202,13 +208,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $tag = "v0.1.${{ github.run_number }}"
+          $patch = [Math]::Max(0, ${{ github.run_number }} - 64)
+          $tag = "v1.0.$patch"
           $exe = Get-ChildItem artifacts/*.exe | Select-Object -First 1
           if (-not $exe) { throw "安装包 exe 不存在" }
 
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --title "SteamEYA $tag" --notes "自动构建 ${{ github.sha }}"
+            gh release create $tag --title "茶π·次元口袋 $tag" --notes "自动构建 ${{ github.sha }}"
             if ($LASTEXITCODE -ne 0) { throw "创建 Release 失败" }
           }
           gh release upload $tag $exe.FullName --clobber
@@ -230,10 +237,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $tag = "v0.1.${{ github.run_number }}"
+          $patch = [Math]::Max(0, ${{ github.run_number }} - 64)
+          $tag = "v1.0.$patch"
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --title "SteamEYA $tag" --notes "自动构建 ${{ github.sha }}"
+            gh release create $tag --title "茶π·次元口袋 $tag" --notes "自动构建 ${{ github.sha }}"
             if ($LASTEXITCODE -ne 0) { throw "创建 Release 失败" }
           }
           gh release upload $tag artifacts/SteamEyaWinUI-win-x64-portable.zip --clobber

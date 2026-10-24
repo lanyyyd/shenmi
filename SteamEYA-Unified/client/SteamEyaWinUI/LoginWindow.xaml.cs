@@ -14,7 +14,7 @@ public sealed partial class LoginWindow : Window
     public LoginWindow()
     {
         InitializeComponent();
-        Title = "SteamEYA 登录";
+        Title = "茶π·次元口袋";
 
         // 登录窗口先于主窗口出现，这里也要按用户设置套一层主题，
         // 否则系统主题与所选主题不一致时，Aurora 文字/输入框会与底色对不上（白底白字）。

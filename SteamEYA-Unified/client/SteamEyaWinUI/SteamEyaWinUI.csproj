@@ -9,9 +9,9 @@
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
-    <!-- 版本号：本地默认 0.1.0；CI 用 -p:Version=0.1.<run_number> 注入，
+    <!-- 版本号：本地默认 1.0.0；CI 用 -p:Version=1.0.<构建序号> 注入，
          使程序集 InformationalVersion 与安装包版本一致，客户端才能正确比较新旧版本。 -->
-    <Version>0.1.0</Version>
+    <Version>1.0.0</Version>
     <InformationalVersion>v$(Version)</InformationalVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

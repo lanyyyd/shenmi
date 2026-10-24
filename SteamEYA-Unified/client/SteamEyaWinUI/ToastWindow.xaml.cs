@@ -53,7 +53,7 @@ public sealed partial class ToastWindow : Window
             IconGlyph.Glyph = glyph;
         }
 
-        Title = "SteamEYA";
+        Title = "茶π·次元口袋";
         Card.Opacity = 0;
 
         // 跟随用户在设置里选的主题：浮窗是独立 Window，不会自动继承主窗口的 RequestedTheme。

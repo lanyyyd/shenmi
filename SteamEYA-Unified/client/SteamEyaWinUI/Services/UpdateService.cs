@@ -15,7 +15,7 @@ internal sealed class UpdateService
 {
     private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(20) };
 
-    /// <summary>当前程序版本（取程序集 InformationalVersion，构建时由 CI 注入 0.1.x）。</summary>
+    /// <summary>当前程序版本（取程序集 InformationalVersion，构建时由 CI 注入 1.0.x）。</summary>
     public static string CurrentVersion { get; } = GetCurrentVersion();
 
     public async Task<AppUpdateInfo> CheckLatestAsync(CancellationToken cancellationToken = default)

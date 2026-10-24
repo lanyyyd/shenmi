@@ -22,7 +22,7 @@
                 </Border>
 
                 <StackPanel Spacing="4" VerticalAlignment="Center">
-                    <TextBlock Text="SteamEYA" Style="{StaticResource PageTitleTextStyle}" />
+                    <TextBlock Text="茶π·次元口袋" Style="{StaticResource PageTitleTextStyle}" />
                     <TextBlock
                         x:Name="AboutVersionText"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
