@@ -158,6 +158,9 @@ public sealed partial class LoginPage : Page, INotifyPropertyChanged
             CredPasswordBox.Password = string.Empty;
             UpdateAccountInfo(result.AccountName, token);
 
+            // 不 await：抓资料最长要几秒，别把「已获取令牌」的提示压到后面才出现。
+            _ = ApplyAccountProfileAsync(token, result.AccountName);
+
             ShowStatus(Loc.Tf("Creds_Status_Saved_Format", result.AccountName), InfoBarSeverity.Success);
         }
         catch (OperationCanceledException)
