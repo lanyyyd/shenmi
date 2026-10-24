@@ -161,47 +161,25 @@
                 </NavigationViewItem>
             </NavigationView.FooterMenuItems>
 
-            <!-- 导航底部的一句话气泡：文案来自后台（手动条目 / 一言 API），每 60 秒自动换一条，
-                 点击也能立刻换下一条。折叠导航栏时隐藏，避免被挤成 48px 的碎片。 -->
+            <!-- 导航底部的一句话文案：直接平铺，不做气泡/卡片外观，避免抢导航项的视觉；
+                 点击这块区域就能换下一条，每 60 秒也会自动换。折叠导航栏时隐藏。 -->
             <NavigationView.PaneFooter>
                 <Grid
                     x:Name="TipBubbleHost"
                     Height="116"
-                    Margin="8,6,8,10"
+                    Margin="14,8,10,10"
                     Tapped="TipBubble_Tapped"
                     Background="Transparent">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="9" />
-                    </Grid.RowDefinitions>
-
-                    <Border
-                        Grid.Row="0"
-                        Padding="12,10"
-                        Background="{ThemeResource AuroraNavSelectedBrush}"
-                        BorderBrush="{ThemeResource AuroraGlassBorderBrush}"
-                        BorderThickness="1"
-                        CornerRadius="12">
-                        <TextBlock
-                            x:Name="TipTextBlock"
-                            VerticalAlignment="Center"
-                            FontSize="12"
-                            LineHeight="18"
-                            MaxLines="4"
-                            TextTrimming="CharacterEllipsis"
-                            TextWrapping="Wrap"
-                            Foreground="{ThemeResource AuroraTextBodyBrush}"
-                            Text="…" />
-                    </Border>
-
-                    <!-- 气泡尾巴：朝下的小三角，底色与气泡一致 -->
-                    <Path
-                        Grid.Row="1"
-                        Margin="20,0,0,0"
-                        HorizontalAlignment="Left"
-                        VerticalAlignment="Top"
-                        Fill="{ThemeResource AuroraNavSelectedBrush}"
-                        Data="M0,0 L9,9 L18,0 Z" />
+                    <TextBlock
+                        x:Name="TipTextBlock"
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        LineHeight="18"
+                        MaxLines="5"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="Wrap"
+                        Foreground="{ThemeResource AuroraTextMutedBrush}"
+                        Text="…" />
                 </Grid>
             </NavigationView.PaneFooter>
 
