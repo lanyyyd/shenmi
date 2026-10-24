@@ -537,6 +537,11 @@
     "Dl_Notify_Completed_Body_Format": "{0} 已儲存",
     "Dl_Notify_Failed_Title": "下載失敗",
     "Dl_Notify_Failed_Body_Format": "{0} 未能下載完成",
-    "Dl_Notify_Failed_Body_Reason_Format": "{0} 失敗：{1}"
+    "Dl_Notify_Failed_Body_Reason_Format": "{0} 失敗：{1}",
+    "Tip_Tap_Hint": "點擊換一條",
+    "Tip_Fallback_1": "今天也要順順利利。",
+    "Tip_Fallback_2": "慢一點也沒關係，先喝口水。",
+    "Tip_Fallback_3": "卡住了就來聊天室喊一聲。",
+    "Tip_Fallback_4": "下載大檔案時記得別順手關掉程式。"
   }
 }

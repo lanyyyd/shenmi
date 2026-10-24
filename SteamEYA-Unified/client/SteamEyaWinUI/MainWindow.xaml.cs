@@ -6,6 +6,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -75,12 +76,15 @@ public sealed partial class MainWindow : Window
         // 结束本机拉起的网关 / 云游戏引擎（含 PyInstaller onefile 派生的子进程与浏览器驱动），避免残留。
         Closed += (_, _) =>
         {
+            _tipTimer?.Stop();
             StopBackgroundVideo();
             ChatHub.Shutdown();
             EngineLauncher.Stop();
             GatewayLauncher.Stop();
             JiYuService.Stop();
         };
+
+        StartTipBubble();
 
         // 背景层按系统能力挑：Windows 11 用 Mica；Windows 10 没有 Mica（设了会让边框/内容缝隙透出黑色，
         // 表现为四周黑边），退一档到桌面亚克力；都不可用就不设背景层，由根 Grid 的渐变兜底。
@@ -674,7 +678,76 @@ public sealed partial class MainWindow : Window
         ToolsNavItem.Content = Loc.T("Nav_Tools");
         SettingsNavItem.Content = Loc.T("Nav_Settings");
         AboutNavItem.Content = Loc.T("Nav_About");
+
+        // 气泡的悬停提示也是本地化文案。
+        if (TipBubbleHost is not null)
+        {
+            ToolTipService.SetToolTip(TipBubbleHost, Loc.T("Tip_Tap_Hint"));
+        }
     }
+
+    // ---------------- 导航栏 tips 气泡 ----------------
+
+    private DispatcherQueueTimer? _tipTimer;
+
+    /// <summary>首次立即取一条，之后每 60 秒自动换一条。</summary>
+    private void StartTipBubble()
+    {
+        UpdateTipBubbleVisibility();
+        _ = RefreshTipAsync();
+
+        _tipTimer = DispatcherQueue.CreateTimer();
+        _tipTimer.Interval = TimeSpan.FromSeconds(60);
+        _tipTimer.Tick += (_, _) => _ = RefreshTipAsync();
+        _tipTimer.Start();
+    }
+
+    /// <summary>取一条新文案；失败时 TipService 自己回退本地短句，这里只兜住异常。</summary>
+    private async Task RefreshTipAsync()
+    {
+        if (TipTextBlock is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var text = await TipService.FetchAsync();
+            if (TipTextBlock is not null && !string.IsNullOrWhiteSpace(text))
+            {
+                TipTextBlock.Text = text;
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Debug($"刷新 tips 失败：{ex.Message}");
+        }
+    }
+
+    private void TipBubble_Tapped(object sender, TappedRoutedEventArgs e)
+    {
+        e.Handled = true;
+        _ = RefreshTipAsync();
+
+        // 手动换过之后重新计时，避免刚点完一秒又自动跳走。
+        _tipTimer?.Stop();
+        _tipTimer?.Start();
+    }
+
+    private void UpdateTipBubbleVisibility()
+    {
+        if (TipBubbleHost is null)
+        {
+            return;
+        }
+
+        // 折叠状态下导航栏只有 48px 宽，气泡会被压成一条竖线，直接藏起来。
+        TipBubbleHost.Visibility = RootNavigationView.IsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void RootNavigationView_PaneOpened(NavigationView sender, object args) => UpdateTipBubbleVisibility();
+
+    private void RootNavigationView_PaneClosed(NavigationView sender, object args) => UpdateTipBubbleVisibility();
 
     private void SetWindowIcon()
     {

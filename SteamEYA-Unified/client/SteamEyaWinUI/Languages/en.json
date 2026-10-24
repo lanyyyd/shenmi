@@ -537,6 +537,11 @@
     "Dl_Notify_Completed_Body_Format": "{0} saved",
     "Dl_Notify_Failed_Title": "Download failed",
     "Dl_Notify_Failed_Body_Format": "{0} could not be downloaded",
-    "Dl_Notify_Failed_Body_Reason_Format": "{0} failed: {1}"
+    "Dl_Notify_Failed_Body_Reason_Format": "{0} failed: {1}",
+    "Tip_Tap_Hint": "Click for another one",
+    "Tip_Fallback_1": "Hope today goes smoothly for you.",
+    "Tip_Fallback_2": "No rush — take a sip of tea first.",
+    "Tip_Fallback_3": "Stuck on something? Drop by the chat room.",
+    "Tip_Fallback_4": "Keep the app open while downloading large files."
   }
 }
