@@ -65,6 +65,14 @@ html[data-theme="light"] .acts button{background:#F7F8FA}
   .tbl td{display:flex;justify-content:space-between;gap:10px;border:none;padding:5px 12px}
   .tbl td::before{content:attr(data-l);color:var(--hint);font-size:11.5px;font-weight:700;flex-shrink:0}
 }
+/* 平台分类（电脑端 / 手机端） */
+.seg{display:inline-flex;gap:4px;padding:4px;border-radius:12px;margin-bottom:18px;
+  background:var(--panel-soft);border:1px solid var(--line)}
+html[data-theme="light"] .seg{background:#F4F5F7}
+.seg-btn{padding:8px 20px;border-radius:9px;font-size:13.5px;font-weight:600;color:var(--muted);transition:.18s}
+.seg-btn:hover{color:var(--text)}
+.seg-btn.on{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff}
+.seg-btn.on:hover{color:#fff}
 </style>
 </head>
 <body>
@@ -88,13 +96,19 @@ html[data-theme="light"] .acts button{background:#F7F8FA}
   </div>
 
   <div id="main" class="hidden">
+    <!-- 平台分类：两个平台各自独立维护一条「当前下发版本」 -->
+    <div class="seg">
+      <button class="seg-btn on" data-p="windows" onclick="switchPlatform('windows')">💻 电脑端</button>
+      <button class="seg-btn" data-p="android" onclick="switchPlatform('android')">📱 手机端</button>
+    </div>
+
     <!-- 上传新版本 -->
     <div class="card">
-      <div class="card-h"><h2>上传新版本</h2></div>
+      <div class="card-h"><h2>上传新版本</h2><span class="chip" id="platChip">电脑端</span></div>
       <div class="form">
         <div class="fld"><label>安装包文件</label>
           <input type="file" id="upFile" accept=".exe">
-          <div class="hint">仅支持 .exe 安装包；上传后该版本默认作为「历史版本」，可在下方设为当前下发版本。</div>
+          <div class="hint" id="upHint">仅支持 .exe 安装包；上传后该版本默认作为「历史版本」，可在下方设为当前下发版本。</div>
         </div>
         <div class="fld"><label>版本号</label>
           <input id="upVersion" placeholder="例如 0.1.42" maxlength="60">
@@ -113,6 +127,7 @@ html[data-theme="light"] .acts button{background:#F7F8FA}
     <div class="card" style="margin-top:20px">
       <div class="card-h">
         <h2>版本列表</h2>
+        <span class="chip gray" id="listChip">电脑端</span>
         <div class="spacer"></div>
         <button class="btn" onclick="loadReleases()">刷新</button>
       </div>
@@ -131,6 +146,9 @@ html[data-theme="light"] .acts button{background:#F7F8FA}
 <div id="toast"></div>
 <script>
 let RELEASES = [];
+let PLATFORM = 'windows';
+const PLAT_NAME = { windows: '电脑端', android: '手机端' };
+const PLAT_EXT = { windows: '.exe', android: '.apk' };
 const $ = (id) => document.getElementById(id);
 let tTimer; function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(tTimer); tTimer=setTimeout(()=>t.classList.remove('on'),2200); }
 function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -154,8 +172,23 @@ function cycleTheme(){ const o=['auto','light','dark']; const cur=document.docum
 (function(){ let s='auto'; try{s=localStorage.getItem('chat_theme_mode')||'auto'}catch(e){} applyTheme(s); })();
 
 /* 数据 */
+function switchPlatform(p){
+  PLATFORM = p;
+  document.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('on', b.dataset.p === p));
+  const name = PLAT_NAME[p];
+  if($('platChip')) $('platChip').textContent = name;
+  if($('listChip')) $('listChip').textContent = name;
+  if($('upFile')) $('upFile').accept = PLAT_EXT[p];
+  if($('upHint')) $('upHint').textContent =
+    `仅支持 ${PLAT_EXT[p]} 安装包；上传后该版本默认作为「历史版本」，可在下方设为当前下发版本。`;
+  upStatus('');
+  RELEASES = [];
+  $('tbody').innerHTML = '<tr><td colspan="6" class="empty">加载中…</td></tr>';
+  loadReleases();
+}
 async function loadReleases(){
-  const r = await fetch('/api/admin/releases'); const d = await r.json().catch(()=>({}));
+  const r = await fetch('/api/admin/releases?platform=' + encodeURIComponent(PLATFORM));
+  const d = await r.json().catch(()=>({}));
   if(!d.ok){ toast(d.error||'加载失败'); return; }
   RELEASES = d.releases || [];
   renderReleases();
@@ -182,6 +215,10 @@ function upStatus(t, err){ const el=$('upStatus'); if(!el) return;
 async function uploadRelease(){
   const f = $('upFile').files[0];
   if(!f) return upStatus('请选择安装包文件', true);
+  const ext = PLAT_EXT[PLATFORM];
+  if(!f.name.toLowerCase().endsWith(ext)){
+    return upStatus(`当前是「${PLAT_NAME[PLATFORM]}」分类，只能上传 ${ext} 文件`, true);
+  }
   const version = $('upVersion').value.trim();
   if(!version) return upStatus('请填写版本号', true);
   const notes = $('upNotes').value.trim();
@@ -191,12 +228,13 @@ async function uploadRelease(){
   fd.append('file', f);
   fd.append('version', version);
   fd.append('notes', notes);
+  fd.append('platform', PLATFORM);
   try {
     const r = await fetch('/api/admin/releases', { method:'POST', body: fd });
     const d = await r.json().catch(()=>({}));
     if(!r.ok || !d.ok){ upStatus('上传失败：' + (d.detail || d.error || '未知错误'), true); toast('上传失败'); return; }
     upStatus('✅ 上传成功');
-    toast('已上传 ' + version);
+    toast(`已上传${PLAT_NAME[PLATFORM]} ${version}`);
     $('upFile').value = ''; $('upVersion').value = ''; $('upNotes').value = '';
     loadReleases();
   } catch(e){
@@ -226,7 +264,7 @@ async function logout(){ await fetch('/api/logout',{method:'POST'}); location.hr
   if(!d.ok || !d.user || !d.user.isAdmin){ $('deny').classList.remove('hidden'); return; }
   $('whoami').textContent = '@' + d.user.username;
   $('main').classList.remove('hidden');
-  loadReleases();
+  switchPlatform('windows');
 })();
 </script>
 </body>

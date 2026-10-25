@@ -9,6 +9,7 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -173,6 +174,17 @@ fun WebPane(
                                 view.context.startActivity(Intent(Intent.ACTION_VIEW, target))
                             }
                             return true
+                        }
+
+                        // 图片/字体走本地磁盘缓存，避免每次进「吃什么」都把整页菜图重下一遍
+                        override fun shouldInterceptRequest(
+                            view: WebView,
+                            request: WebResourceRequest
+                        ): WebResourceResponse? {
+                            val url = request.url.toString()
+                            if (request.method != "GET" || url.isEmpty()) return null
+                            if (!WebAssetCache.isCacheable(url)) return null
+                            return WebAssetCache.fetch(url)
                         }
                     }
 

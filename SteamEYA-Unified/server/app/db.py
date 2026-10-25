@@ -244,6 +244,7 @@ CREATE TABLE IF NOT EXISTS app_releases (
     file_name      TEXT DEFAULT '',
     file_size      INTEGER DEFAULT 0,
     sha256         TEXT DEFAULT '',
+    platform       TEXT DEFAULT 'windows',    -- windows / android（同一时刻各自只有一个 active）
     active         INTEGER DEFAULT 1,
     download_count INTEGER DEFAULT 0,
     created_at     INTEGER NOT NULL
@@ -384,6 +385,10 @@ def _migrate() -> None:
             ("media_path", "TEXT DEFAULT ''"),
             ("media_type", "TEXT DEFAULT ''"),
             ("issued_at", "INTEGER"),
+        ],
+        # 更新管理拆电脑端/手机端：老库里的版本全部视为 Windows 包
+        "app_releases": [
+            ("platform", "TEXT DEFAULT 'windows'"),
         ],
     }
     with cursor() as cur:

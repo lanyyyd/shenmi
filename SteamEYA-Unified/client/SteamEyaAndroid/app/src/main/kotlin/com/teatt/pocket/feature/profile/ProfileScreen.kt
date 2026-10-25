@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -53,9 +54,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.teatt.pocket.core.ApiException
+import com.teatt.pocket.core.AppVersion
 import com.teatt.pocket.core.Session
 import com.teatt.pocket.core.SessionState
 import com.teatt.pocket.data.ProfileApi
+import com.teatt.pocket.feature.update.UpdateCenter
 import com.teatt.pocket.ui.BrandPink
 import com.teatt.pocket.ui.BrandViolet
 import com.teatt.pocket.ui.LocalBarInset
@@ -203,6 +206,15 @@ fun ProfileScreen(
                     }
                     SettingRow(Icons.Filled.Person, "修改密码", "至少 6 位") {
                         dialog = ProfileDialog.Password
+                    }
+                    SettingRow(
+                        Icons.Filled.SystemUpdate,
+                        "检查更新",
+                        if (UpdateCenter.checking) "检查中…" else "当前 ${AppVersion.current}"
+                    ) {
+                        if (!UpdateCenter.checking) {
+                            scope.launch { UpdateCenter.check(Session.token(), manual = true) }
+                        }
                     }
                     SettingRow(
                         Icons.Filled.Logout,

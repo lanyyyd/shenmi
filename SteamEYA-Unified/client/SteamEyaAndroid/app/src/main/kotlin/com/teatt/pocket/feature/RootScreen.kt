@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -36,6 +37,8 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.teatt.pocket.core.Session
 import com.teatt.pocket.feature.cloud.CloudScreen
 import com.teatt.pocket.feature.profile.ProfileScreen
+import com.teatt.pocket.feature.update.UpdateCenter
+import com.teatt.pocket.feature.update.UpdateDialogHost
 import com.teatt.pocket.ui.LiquidBottomBar
 import com.teatt.pocket.ui.LocalBarInset
 import com.teatt.pocket.ui.LocalOverlayHost
@@ -69,6 +72,12 @@ fun RootScreen(
     val state by Session.state.collectAsState()
     val backdrop = rememberLayerBackdrop()
     var tab by remember { mutableIntStateOf(0) }
+
+    // 每次进入主界面（冷启动 / 登录成功）自动查一次更新，有新版本才弹窗。
+    // 只在这里挂一次：切 tab 不会重复请求。
+    LaunchedEffect(state.token) {
+        if (state.token.isNotBlank()) UpdateCenter.check(state.token, manual = false)
+    }
 
     // 只记住"访问过的 tab"，没点过的 WebView 不创建：一进主界面就同时拉起两个 WebView
     // 既吃内存也抢 GPU，是闪屏的放大器。
@@ -170,6 +179,9 @@ fun RootScreen(
                 }
             }
         }
+
+        // 更新弹窗（独立 Window，不受层级影响）
+        UpdateDialogHost(UpdateCenter.dialog) { UpdateCenter.dismiss() }
     }
 }
 
