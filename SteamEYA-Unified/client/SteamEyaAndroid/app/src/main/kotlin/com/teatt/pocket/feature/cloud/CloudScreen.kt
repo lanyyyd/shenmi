@@ -36,11 +36,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +57,8 @@ import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CookieDto
 import com.teatt.pocket.data.CloudApi
 import com.teatt.pocket.ui.BrandPink
+import com.teatt.pocket.ui.LocalBarInset
+import com.teatt.pocket.ui.LocalOverlayHost
 import kotlinx.coroutines.launch
 
 @Composable
@@ -109,23 +113,40 @@ fun CloudScreen(
         }
     }
 
-    // 抓取页全屏覆盖（WebView 需要完整空间）
-    captureTarget?.let { target ->
-        CaptureView(
-            game = target,
-            onCancel = { captureTarget = null },
-            onHarvest = { cookies ->
-                captureTarget = null
-                upload(target, cookies)
-            }
-        )
-        return
+    // 抓取页走 RootScreen 级浮层：它必须盖在底部玻璃栏之上，
+    // 放在页面内部（哪怕 return 提前返回）都会被栏压住底部按钮。
+    val host = LocalOverlayHost.current
+    // 浮层里的 lambda 只投递一次，用最新引用兜住 token 变化后的上传逻辑
+    val latestUpload = rememberUpdatedState<(CloudGameDto, List<CookieDto>) -> Unit> { g, c ->
+        upload(g, c)
     }
+    LaunchedEffect(captureTarget) {
+        val target = captureTarget
+        if (target == null) {
+            host?.clear()
+        } else {
+            host?.show {
+                CaptureView(
+                    game = target,
+                    onCancel = { captureTarget = null },
+                    onHarvest = { cookies ->
+                        captureTarget = null
+                        latestUpload.value(target, cookies)
+                    }
+                )
+            }
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose { host?.clear() }
+    }
+
+    val bottomInset = LocalBarInset.current + 24.dp
 
     Box(modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 0.dp, bottom = 110.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 0.dp, bottom = bottomInset),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {

@@ -74,9 +74,9 @@ fun LiquidBottomBar(
         modifier
             .padding(horizontal = 18.dp)
             .navigationBarsPadding()
-            .padding(bottom = 14.dp)
+            .padding(bottom = BarBottomGap)
             .fillMaxWidth()
-            .height(66.dp)
+            .height(BarCoreHeight)
             .drawBackdrop(
                 backdrop = backdrop,
                 shape = { Capsule() },

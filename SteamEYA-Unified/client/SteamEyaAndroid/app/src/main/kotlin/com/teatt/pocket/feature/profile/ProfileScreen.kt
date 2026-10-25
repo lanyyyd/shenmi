@@ -58,6 +58,7 @@ import com.teatt.pocket.core.SessionState
 import com.teatt.pocket.data.ProfileApi
 import com.teatt.pocket.ui.BrandPink
 import com.teatt.pocket.ui.BrandViolet
+import com.teatt.pocket.ui.LocalBarInset
 import kotlinx.coroutines.launch
 
 @Composable
@@ -107,7 +108,12 @@ fun ProfileScreen(
 
     LazyColumn(
         modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 0.dp, bottom = 110.dp),
+        contentPadding = PaddingValues(
+            start = 20.dp,
+            end = 20.dp,
+            top = 0.dp,
+            bottom = LocalBarInset.current + 24.dp
+        ),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
