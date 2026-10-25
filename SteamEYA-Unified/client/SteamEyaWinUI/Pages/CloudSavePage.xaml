@@ -24,6 +24,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <TextBlock
@@ -31,18 +32,27 @@
                 Text="云存档"
                 Style="{StaticResource TitleTextBlockStyle}"
                 VerticalAlignment="Center" />
+            <!-- 列表由 BuildGameCombo 动态构建：内置 3 个 + 用户自己添加的 -->
             <ComboBox
                 x:Name="GameCombo"
                 Grid.Column="1"
                 Width="176"
                 VerticalAlignment="Center"
-                SelectionChanged="OnGameChanged">
-                <ComboBoxItem Content="植物大战僵尸" Tag="pvz" />
-                <ComboBoxItem Content="植物大战僵尸杂交版新版" Tag="pvzhybrid" />
-                <ComboBoxItem Content="我的世界" Tag="minecraft" />
-            </ComboBox>
-            <TextBlock
+                SelectionChanged="OnGameChanged" />
+            <Button
+                x:Name="AddGameBtn"
                 Grid.Column="2"
+                Margin="8,0,0,0"
+                VerticalAlignment="Center"
+                Click="OnAddGameClick"
+                ToolTipService.ToolTip="添加自定义游戏：填名字 + 本机存档目录">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="14" Glyph="&#xE710;" />
+                    <TextBlock Text="添加游戏" />
+                </StackPanel>
+            </Button>
+            <TextBlock
+                Grid.Column="3"
                 Margin="12,0,0,0"
                 VerticalAlignment="Center"
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"

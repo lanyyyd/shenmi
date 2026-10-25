@@ -91,6 +91,28 @@ internal sealed class CloudSaveDeleteRequest
     public int[] Ids { get; set; } = [];
 }
 
+internal sealed class CloudSaveGameDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public bool Builtin { get; set; }
+}
+
+internal sealed class CloudSaveGamesDto
+{
+    public bool Ok { get; set; }
+    public List<CloudSaveGameDto>? Games { get; set; }
+}
+
+internal sealed class CloudSaveRegisterDto
+{
+    public bool Ok { get; set; }
+    public string? Key { get; set; }
+    public string? Name { get; set; }
+    public bool Existing { get; set; }
+    public string? Msg { get; set; }
+}
+
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
 [JsonSerializable(typeof(CloudSaveListDto))]
 [JsonSerializable(typeof(CloudSaveUploadDto))]
@@ -98,4 +120,6 @@ internal sealed class CloudSaveDeleteRequest
 [JsonSerializable(typeof(CloudSaveShareRequest))]
 [JsonSerializable(typeof(CloudSaveRemarkRequest))]
 [JsonSerializable(typeof(CloudSaveDeleteRequest))]
+[JsonSerializable(typeof(CloudSaveGamesDto))]
+[JsonSerializable(typeof(CloudSaveRegisterDto))]
 internal sealed partial class CloudSaveJsonContext : JsonSerializerContext;

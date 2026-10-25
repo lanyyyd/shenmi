@@ -65,11 +65,25 @@ public sealed partial class LoginWindow : Window
         ApplyTabStyle(TabRegisterButton, _isRegister);
     }
 
+    /// <summary>取主题强调色画刷；资源缺失时退回注册表同款的粉色兜底。</summary>
+    private static Brush AccentBrush()
+    {
+        if (Application.Current.Resources.TryGetValue("AccentFillColorDefaultBrush", out var value) &&
+            value is Brush brush)
+        {
+            return brush;
+        }
+
+        return new SolidColorBrush(Windows.UI.Color.FromArgb(255, 236, 72, 153));
+    }
+
     private static void ApplyTabStyle(Button button, bool selected)
     {
         if (selected)
         {
-            button.Background = (Brush)Application.Current.Resources["AuroraAccentGradientBrush"];
+            // 与「获取账号并一键上号」同一个画刷（AccentButtonStyle 用的就是它），
+            // 之前用 AuroraAccentGradientBrush 是粉→紫渐变，和主界面的纯色按钮对不上。
+            button.Background = AccentBrush();
             button.Foreground = new SolidColorBrush(Colors.White);
             button.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
             return;

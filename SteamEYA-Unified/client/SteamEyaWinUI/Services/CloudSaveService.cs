@@ -56,6 +56,23 @@ internal sealed class CloudSaveService
         return await SendJsonAsync(req, CloudSaveJsonContext.Default.CloudSaveListDto, ct);
     }
 
+    /// <summary>服务端已登记的游戏（内置 + 其他人加过的自定义游戏）。</summary>
+    public async Task<CloudSaveGamesDto> GamesAsync(CancellationToken ct = default)
+    {
+        using var req = NewRequest(HttpMethod.Get, "/api/save/games");
+        return await SendJsonAsync(req, CloudSaveJsonContext.Default.CloudSaveGamesDto, ct);
+    }
+
+    /// <summary>登记自定义游戏名；同名会返回已有 key（含内置游戏名）。</summary>
+    public async Task<CloudSaveRegisterDto> RegisterGameAsync(string name, CancellationToken ct = default)
+    {
+        using var req = NewRequest(HttpMethod.Post, "/api/save/games");
+        // 用 JsonObject 手拼，避免为匿名对象新增源生成声明（AOT 下反射式序列化被禁用）。
+        var payload = new System.Text.Json.Nodes.JsonObject { ["name"] = name }.ToJsonString();
+        req.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+        return await SendJsonAsync(req, CloudSaveJsonContext.Default.CloudSaveRegisterDto, ct);
+    }
+
     public async Task<CloudSaveUploadDto> UploadAsync(
         string game, string zipPath, string? name, string? remark, string source, CancellationToken ct = default)
     {

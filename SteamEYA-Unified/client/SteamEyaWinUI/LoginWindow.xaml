@@ -80,7 +80,7 @@
                 x:Name="AuthButton"
                 Height="46"
                 HorizontalAlignment="Stretch"
-                Background="{ThemeResource AuroraAccentGradientBrush}"
+                Background="{ThemeResource AccentFillColorDefaultBrush}"
                 BorderThickness="0"
                 Click="OnAuthClick"
                 Content="登 录"

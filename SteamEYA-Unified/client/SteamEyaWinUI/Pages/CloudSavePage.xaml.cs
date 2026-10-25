@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
+using Windows.Storage.Pickers;
 using SteamEyaWinUI.Models;
 using SteamEyaWinUI.Services;
 
@@ -26,33 +27,113 @@ public sealed partial class CloudSavePage : Page
     private readonly ObservableCollection<CloudSaveItem> _mySaves = [];
     private readonly ObservableCollection<CloudSaveItem> _sharedSaves = [];
 
+    private static readonly (string Key, string Name)[] BuiltinGames =
+    [
+        ("pvz", "植物大战僵尸"),
+        ("pvzhybrid", "植物大战僵尸杂交版新版"),
+        ("minecraft", "我的世界")
+    ];
+
     private string _game = "pvz";
+
+    /// <summary>用户自定义的游戏（名字来自服务端目录，存档目录只存本机）。</summary>
+    private List<CustomSaveGame> _customGames = [];
+
+    /// <summary>重建下拉框期间屏蔽 SelectionChanged，避免清空时触发一次无用加载。</summary>
+    private bool _rebuildingGames;
 
     public CloudSavePage()
     {
         InitializeComponent();
         MyList.ItemsSource = _mySaves;
         SharedList.ItemsSource = _sharedSaves;
-        GameCombo.SelectedIndex = 0;
+        BuildGameCombo();
         UpdateAutoBackupState();
 
         Loaded += async (_, _) => await ReloadAsync();
     }
 
-    private static string GameName(string game) => game switch
+    /// <summary>重建游戏下拉框：内置 3 个在前，自定义在后；尽量保持当前选中项。</summary>
+    private void BuildGameCombo(string? selectKey = null)
     {
-        "minecraft" => "我的世界",
-        "pvzhybrid" => "植物大战僵尸杂交版新版",
-        _ => "植物大战僵尸"
-    };
+        _customGames = CustomSaveStore.Load().ToList();
+        var target = selectKey ?? _game;
 
-    /// <summary>该游戏的固定本地存档目录（可自动备份 / 自动还原）；我的世界没有固定目录，返回 null。</summary>
-    private static string? FixedSaveDir(string game) => game switch
+        _rebuildingGames = true;
+        try
+        {
+            GameCombo.Items.Clear();
+
+            foreach (var (key, name) in BuiltinGames)
+            {
+                GameCombo.Items.Add(new ComboBoxItem { Content = name, Tag = key });
+            }
+
+            foreach (var custom in _customGames)
+            {
+                GameCombo.Items.Add(new ComboBoxItem { Content = custom.Name, Tag = custom.Key });
+            }
+
+            var index = 0;
+            for (var i = 0; i < GameCombo.Items.Count; i++)
+            {
+                if (GameCombo.Items[i] is ComboBoxItem { Tag: string tag } &&
+                    string.Equals(tag, target, StringComparison.Ordinal))
+                {
+                    index = i;
+                    break;
+                }
+            }
+
+            GameCombo.SelectedIndex = index;
+        }
+        finally
+        {
+            _rebuildingGames = false;
+        }
+
+        if (GameCombo.SelectedItem is ComboBoxItem { Tag: string selected })
+        {
+            _game = selected;
+        }
+    }
+
+    private string GameName(string game)
     {
-        "pvz" => PvzSaveDir,
-        "pvzhybrid" => PvzHybridSaveDir,
-        _ => null
-    };
+        if (CustomSaveStore.Find(game) is { } custom)
+        {
+            return custom.Name;
+        }
+
+        foreach (var (key, name) in BuiltinGames)
+        {
+            if (string.Equals(key, game, StringComparison.Ordinal))
+            {
+                return name;
+            }
+        }
+
+        return game;
+    }
+
+    /// <summary>
+    /// 该游戏的本地存档目录（可自动备份 / 自动还原）。
+    /// 自定义游戏用用户填的路径；我的世界这类没有固定目录的返回 null。
+    /// </summary>
+    private string? FixedSaveDir(string game)
+    {
+        if (CustomSaveStore.Find(game) is { } custom)
+        {
+            return string.IsNullOrWhiteSpace(custom.SaveDir) ? null : custom.SaveDir;
+        }
+
+        return game switch
+        {
+            "pvz" => PvzSaveDir,
+            "pvzhybrid" => PvzHybridSaveDir,
+            _ => null
+        };
+    }
 
     // ---------------- 数据加载 ----------------
     private async Task ReloadAsync()
@@ -92,6 +173,11 @@ public sealed partial class CloudSavePage : Page
 
     private void OnGameChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_rebuildingGames)
+        {
+            return;
+        }
+
         if (GameCombo.SelectedItem is ComboBoxItem { Tag: string tag })
         {
             _game = tag;
@@ -116,6 +202,229 @@ public sealed partial class CloudSavePage : Page
     }
 
     private void OnMySelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateSelectionButtons();
+
+    // ---------------- 自定义游戏 ----------------
+
+    /// <summary>次要文字画刷；取不到就退回灰色，别让一个资源键把弹窗打断。</summary>
+    private static Microsoft.UI.Xaml.Media.Brush SecondaryTextBrush()
+    {
+        if (Application.Current.Resources.TryGetValue("TextFillColorSecondaryBrush", out var value) &&
+            value is Microsoft.UI.Xaml.Media.Brush brush)
+        {
+            return brush;
+        }
+
+        return new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 128, 128, 128));
+    }
+
+    /// <summary>
+    /// 添加自定义游戏：填名字 + 本机存档目录。名字会登记到服务端（同名直接复用），
+    /// 目录只保存在本机，用于「自动备份 / 还原」。
+    /// </summary>
+    private async void OnAddGameClick(object sender, RoutedEventArgs e)
+    {
+        var nameBox = new TextBox
+        {
+            Header = "游戏名",
+            PlaceholderText = "例如：泰拉瑞亚"
+        };
+
+        var dirBox = new TextBox
+        {
+            Header = "存档目录",
+            PlaceholderText = @"C:\Users\你的名字\Documents\My Games\Terraria"
+        };
+
+        var browseBtn = new Button
+        {
+            Content = "浏览…",
+            VerticalAlignment = VerticalAlignment.Bottom
+        };
+        browseBtn.Click += async (_, _) =>
+        {
+            try
+            {
+                var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
+                picker.FileTypeFilter.Add("*");
+                // 无打包 WinUI：选择器必须显式绑定窗口句柄。
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, MainWindow.Hwnd);
+
+                var folder = await picker.PickSingleFolderAsync();
+                if (folder is not null)
+                {
+                    dirBox.Text = folder.Path;
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLog.Warn($"选择存档目录失败：{ex.Message}");
+            }
+        };
+
+        var dirRow = new Grid { ColumnSpacing = 8 };
+        dirRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        dirRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        dirRow.Children.Add(dirBox);
+        Grid.SetColumn(browseBtn, 1);
+        dirRow.Children.Add(browseBtn);
+
+        var tip = new TextBlock
+        {
+            Text = "存档目录只保存在本机，用于「自动备份」。游戏名会同步到云端，其他人也能看到这款游戏的共享存档。",
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = SecondaryTextBrush()
+        };
+
+        var panel = new StackPanel { Spacing = 12, MinWidth = 400 };
+        panel.Children.Add(nameBox);
+        panel.Children.Add(dirRow);
+        panel.Children.Add(tip);
+
+        var listHost = new StackPanel { Spacing = 6 };
+        var listTitle = new TextBlock
+        {
+            Text = "已添加的自定义游戏",
+            Margin = new Thickness(0, 6, 0, 0),
+            FontSize = 12,
+            Foreground = SecondaryTextBrush()
+        };
+
+        // 删除按钮直接改本地清单，列表与下拉框同步重建。
+        void RenderCustomList()
+        {
+            listHost.Children.Clear();
+
+            var customs = CustomSaveStore.Load().ToList();
+            listTitle.Visibility = customs.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+
+            foreach (var custom in customs)
+            {
+                var row = new Grid { ColumnSpacing = 8 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var text = new TextBlock
+                {
+                    Text = $"{custom.Name} · {custom.SaveDir}",
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    FontSize = 12
+                };
+                row.Children.Add(text);
+
+                var removeBtn = new Button { Content = "删除", FontSize = 12 };
+                removeBtn.Click += (_, _) =>
+                {
+                    CustomSaveStore.Remove(custom.Key);
+                    RenderCustomList();
+
+                    // BuildGameCombo 屏蔽了 SelectionChanged，这里要自己补一次加载。
+                    BuildGameCombo();
+                    UpdateAutoBackupState();
+                    _ = ReloadAsync();
+                };
+                Grid.SetColumn(removeBtn, 1);
+                row.Children.Add(removeBtn);
+
+                listHost.Children.Add(row);
+            }
+        }
+
+        panel.Children.Add(listTitle);
+        panel.Children.Add(listHost);
+        RenderCustomList();
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "添加自定义游戏",
+            Content = panel,
+            PrimaryButtonText = "确定",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        var name = nameBox.Text.Trim();
+        var dir = dirBox.Text.Trim().Trim('"');
+
+        if (name.Length == 0 || dir.Length == 0)
+        {
+            ShowInfo("请填写游戏名和存档目录", InfoBarSeverity.Warning);
+            return;
+        }
+
+        // 目录不存在不阻断：用户可能还没装游戏，路径先存着，备份时会提示。
+        if (!Directory.Exists(dir))
+        {
+            ShowInfo($"目录不存在，已按原样保存：{dir}", InfoBarSeverity.Warning);
+        }
+
+        AddGameBtn.IsEnabled = false;
+        try
+        {
+            var existing = CustomSaveStore.FindByName(name);
+            var key = existing?.Key ?? string.Empty;
+            var localOnly = existing?.LocalOnly ?? false;
+
+            if (string.IsNullOrWhiteSpace(key) || localOnly)
+            {
+                // 先问服务端要 key：同名会复用同一条，避免同一款游戏被拆成多个 key。
+                try
+                {
+                    var reg = await _service.RegisterGameAsync(name);
+                    if (reg.Ok && !string.IsNullOrWhiteSpace(reg.Key))
+                    {
+                        key = reg.Key;
+                        localOnly = false;
+                    }
+                    else
+                    {
+                        key = $"local_{Guid.NewGuid():N}"[..14];
+                        localOnly = true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Warn($"注册自定义游戏失败：{ex.Message}");
+                    key = $"local_{Guid.NewGuid():N}"[..14];
+                    localOnly = true;
+                }
+            }
+
+            CustomSaveStore.Upsert(new CustomSaveGame
+            {
+                Key = key,
+                Name = name,
+                SaveDir = dir,
+                LocalOnly = localOnly
+            });
+
+            BuildGameCombo(key);
+            UpdateAutoBackupState();
+            await ReloadAsync();
+
+            ShowInfo(
+                localOnly
+                    ? $"已添加「{name}」（仅本机可用，云端暂未同步）"
+                    : $"已添加「{name}」",
+                localOnly ? InfoBarSeverity.Warning : InfoBarSeverity.Success);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("添加自定义云存档游戏失败。", ex);
+            ShowInfo($"添加失败：{ex.Message}", InfoBarSeverity.Error);
+        }
+        finally
+        {
+            AddGameBtn.IsEnabled = true;
+        }
+    }
 
     private void UpdateSelectionButtons()
     {
