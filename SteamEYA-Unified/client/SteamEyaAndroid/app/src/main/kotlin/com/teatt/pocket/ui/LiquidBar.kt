@@ -158,7 +158,7 @@ fun LiquidBottomBar(
                             text = tab.label,
                             fontSize = 10.sp,
                             maxLines = 1,
-                            alpha = labelAlpha,
+                            modifier = Modifier.alpha(labelAlpha),
                             color = if (active) activeColor else idleColor,
                             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal
                         )

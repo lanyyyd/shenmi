@@ -114,6 +114,7 @@ fun CaptureView(
             modifier = Modifier.weight(1f),
             factory = { ctx ->
                 WebView(ctx).apply {
+                val web = this
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
@@ -138,7 +139,7 @@ fun CaptureView(
 
                     CookieManager.getInstance().apply {
                         setAcceptCookie(true)
-                        setAcceptThirdPartyCookies(this@apply, true)
+                        setAcceptThirdPartyCookies(web, true)
                     }
 
                     webChromeClient = object : WebChromeClient() {

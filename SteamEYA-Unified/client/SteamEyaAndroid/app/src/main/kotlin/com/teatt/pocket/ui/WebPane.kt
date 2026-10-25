@@ -47,6 +47,7 @@ fun WebPane(
         modifier = modifier,
         factory = { ctx ->
             WebView(ctx).apply {
+                val web = this
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
@@ -69,7 +70,7 @@ fun WebPane(
 
                 CookieManager.getInstance().apply {
                     setAcceptCookie(true)
-                    setAcceptThirdPartyCookies(this@apply, true)
+                    setAcceptThirdPartyCookies(web, true)
                 }
 
                 webChromeClient = WebChromeClient()
