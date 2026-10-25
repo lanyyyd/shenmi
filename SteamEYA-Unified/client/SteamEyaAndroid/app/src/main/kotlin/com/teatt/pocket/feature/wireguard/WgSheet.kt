@@ -122,15 +122,70 @@ fun WgSheet(
         }
     }
 
-    // 面板打开时拉一次用户信息（配额 / 已用流量）
-    LaunchedEffect(Unit) {
-        val token = WgSession.token()
-        if (token.isNotBlank()) {
-            profile = WgApi.profile(token)
+    val connected = tunnelState == Tunnel.State.UP
+
+    /**
+     * 加载配置：**缓存优先 + 后台刷新**（对齐原「神秘WiFi」项目的 loadConfigWithCache）。
+     *
+     * 首次联网时服务端下发配置 → 存到本地（WgConfigCache）。
+     * 之后无论有没有网，打开面板先用本地缓存，连接直接用它；
+     * 同时后台悄悄向服务端拉一次最新配置，拿到就更新缓存（失败不影响连接）。
+     *
+     * 所以：第一次之后，**完全断网也能打开小工具并连上**。
+     */
+    fun loadConfigCacheFirst() {
+        // 1) 先用缓存（同步返回，UI 立刻可用）
+        val cached = WgConfigCache.load(context)
+        if (!cached.isNullOrEmpty()) {
+            configText = cached
+            statusText = "就绪"
+            // 离线时也把配额显示出来（用上次成功的快照）
+            val (used, limit) = WgConfigCache.loadTraffic(context)
+            if (limit > 0) {
+                profile = WgApi.UserProfile(
+                    trafficUsed = used,
+                    trafficLimit = limit
+                )
+            }
+        } else {
+            statusText = "正在获取配置…"
+        }
+
+        // 2) 后台刷新（拿不到就算了，缓存还在）
+        scope.launch {
+            val token = WgSession.token()
+            if (token.isBlank()) return@launch
+            try {
+                // 配额信息
+                val p = WgApi.profile(token)
+                if (p.success) {
+                    profile = p
+                    WgConfigCache.saveTraffic(context, p.trafficUsed, p.trafficLimit)
+                }
+                // 最新配置
+                val cfg = WgApi.vpnConfig(token)
+                if (cfg.success && !cfg.config.isNullOrEmpty()) {
+                    configText = cfg.config
+                    WgConfigCache.save(context, cfg.config)
+                    if (statusText == "正在获取配置…") statusText = "就绪"
+                } else if (cached.isNullOrEmpty()) {
+                    // 首次使用且没网 —— 明确告诉用户
+                    statusText = "无法获取配置"
+                    error = cfg.error ?: "请确保网络可用后重试"
+                }
+            } catch (e: Exception) {
+                // 无网络等异常：缓存存在就静默忽略，不打扰用户
+                if (cached.isNullOrEmpty()) {
+                    statusText = "无法获取配置"
+                    error = "网络不可用，且本地没有缓存配置"
+                }
+            }
         }
     }
 
-    val connected = tunnelState == Tunnel.State.UP
+    LaunchedEffect(Unit) {
+        loadConfigCacheFirst()
+    }
 
     fun connect() {
         if (busy) return
@@ -141,30 +196,37 @@ fun WgSheet(
         WgService.clearUserDisconnect(context)
         scope.launch {
             try {
-                val token = WgSession.token()
-                if (token.isBlank()) {
-                    error = "请先登录"
-                    busy = false
-                    return@launch
+                // ★ 优先用本地配置（离线也能连）。
+                // 只有本地完全没有配置时，才需要联网去取。
+                var cfg = configText.ifBlank { null } ?: WgConfigCache.load(context)
+
+                if (cfg.isNullOrEmpty()) {
+                    val token = WgSession.token()
+                    if (token.isBlank()) {
+                        error = "请先登录"
+                        busy = false
+                        return@launch
+                    }
+                    val fetched = WgApi.vpnConfig(token)
+                    if (!fetched.success || fetched.config.isNullOrEmpty()) {
+                        error = fetched.error ?: "获取配置失败"
+                        busy = false
+                        return@launch
+                    }
+                    cfg = fetched.config
+                    configText = fetched.config
+                    WgConfigCache.save(context, fetched.config)
                 }
-                val cfg = WgApi.vpnConfig(token)
-                if (!cfg.success || cfg.config.isNullOrEmpty()) {
-                    error = cfg.error ?: "获取配置失败"
-                    busy = false
-                    return@launch
-                }
-                configText = cfg.config
-                WgConfigCache.save(context, cfg.config)
 
                 // VPN 授权：必须先 prepare，用户同意后再连
                 val prepare = com.wireguard.android.backend.GoBackend.VpnService.prepare(context)
                 if (prepare != null) {
-                    pendingConfig = cfg.config
+                    pendingConfig = cfg
                     busy = false
                     vpnAuthLauncher.launch(prepare)
                     return@launch
                 }
-                val ok = WgManager.getInstance(context).connect(cfg.config)
+                val ok = WgManager.getInstance(context).connect(cfg)
                 if (ok) {
                     statusText = "已连接"
                     WgService.start(context)
@@ -184,7 +246,8 @@ fun WgSheet(
         scope.launch {
             WgService.markUserDisconnect(context)
             wgManager.disconnect()
-            WgConfigCache.clear(context)
+            // 注意：断开连接不清配置缓存 ——
+            // 配置留在本地，下次打开（哪怕没网）还能直接连。
             WgService.stop(context)
             busy = false
             statusText = "已断开"
@@ -264,6 +327,9 @@ fun WgSheet(
                     when {
                         connected -> "已连接"
                         busy -> statusText.ifBlank { "连接中…" }
+                        // 有本地配置 = 可用（哪怕当前没网）
+                        configText.isNotBlank() -> "就绪"
+                        statusText.isNotBlank() -> statusText
                         else -> "未连接"
                     },
                     fontSize = 20.sp,

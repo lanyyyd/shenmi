@@ -108,10 +108,14 @@ class WgService : Service() {
             }
         }
 
-        /** 断开并清理本地状态（用户主动断开时调用）。 */
+        /**
+         * 断开并清理本地状态（用户主动断开时调用）。
+         *
+         * 只清「主动断开」标记，**不清配置缓存** ——
+         * 断开连接不代表配置失效，留着才能下次离线直接连上。
+         */
         fun disconnectAndClean(context: Context) {
             markUserDisconnect(context)
-            WgConfigCache.clear(context)
         }
 
         /** 自动重连开关（默认开）。 */
@@ -174,7 +178,7 @@ class WgService : Service() {
                 scope.launch {
                     markUserDisconnect(this@WgService)
                     WgManager.getInstance(this@WgService).disconnect()
-                    WgConfigCache.clear(this@WgService)
+                    // 不清配置缓存：断开后离线仍要能重新连上
                 }
             }
             else -> {
