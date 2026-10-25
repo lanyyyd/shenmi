@@ -1,4 +1,6 @@
 using Microsoft.UI.Xaml;
+using Windows.UI;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Controls;
 using SteamEyaWinUI.Services;
 
@@ -15,6 +17,7 @@ public sealed partial class LoginWindow : Window
     {
         InitializeComponent();
         Title = "茶π·次元口袋";
+        UpdateTabVisuals();
 
         // 登录窗口先于主窗口出现，这里也要按用户设置套一层主题，
         // 否则系统主题与所选主题不一致时，Aurora 文字/输入框会与底色对不上（白底白字）。
@@ -55,13 +58,42 @@ public sealed partial class LoginWindow : Window
         }
     }
 
-    private async void OnTabChanged(object sender, RoutedEventArgs e)
+    /// <summary>选中项实色圆角、未选中透明，做成分段控件的样子。</summary>
+    private void UpdateTabVisuals()
+    {
+        ApplyTabStyle(TabLoginButton, !_isRegister);
+        ApplyTabStyle(TabRegisterButton, _isRegister);
+    }
+
+    private static void ApplyTabStyle(Button button, bool selected)
+    {
+        if (selected)
+        {
+            button.Background = (Brush)Application.Current.Resources["AuroraAccentGradientBrush"];
+            button.Foreground = new SolidColorBrush(Colors.White);
+            button.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+            return;
+        }
+
+        button.Background = new SolidColorBrush(Colors.Transparent);
+        button.Foreground = (Brush)Application.Current.Resources["AuroraTextMutedBrush"];
+        button.FontWeight = Microsoft.UI.Text.FontWeights.Normal;
+    }
+
+    /// <summary>当前是否处于「注册」页签。用按钮替代原来的 RadioButton，外观才能做成胶囊分段。</summary>
+    private bool _isRegister;
+
+    private async void OnTabClick(object sender, RoutedEventArgs e)
     {
         if (NickBox is null)
         {
             return;
         }
-        var register = TabRegister.IsChecked == true;
+
+        var register = ReferenceEquals(sender, TabRegisterButton);
+        _isRegister = register;
+        UpdateTabVisuals();
+
         NickBox.Visibility = register ? Visibility.Visible : Visibility.Collapsed;
         RememberBox.Visibility = register ? Visibility.Collapsed : Visibility.Visible;
         AuthButton.Content = register ? "注 册" : "登 录";
@@ -98,7 +130,7 @@ public sealed partial class LoginWindow : Window
         AuthButton.IsEnabled = false;
         try
         {
-            var register = TabRegister.IsChecked == true;
+            var register = _isRegister;
             var (ok, result, error) = register
                 ? await _auth.RegisterAsync(username, password, NickBox.Text.Trim(), InviteBox.Text)
                 : await _auth.LoginAsync(username, password);

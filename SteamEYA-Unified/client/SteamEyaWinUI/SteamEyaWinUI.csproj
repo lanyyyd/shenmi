@@ -41,6 +41,8 @@
   <ItemGroup>
     <Content Include="Assets\AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\Logo.png" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 登录页品牌标志（神秘の魔法武器书法 logo，透明底）。 -->
+    <Content Include="Assets\LoginLogo.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

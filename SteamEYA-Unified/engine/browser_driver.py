@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import time
+from urllib.parse import urlparse
 from typing import Optional
 
 import requests
@@ -269,10 +270,10 @@ def launch_browser(
     return driver
 
 
-def inject_cookies(driver: webdriver.Remote, cookies: list, game: str = "genshin") -> None:
+def inject_cookies(driver: webdriver.Remote, cookies: list, game: str = "genshin", url: str | None = None) -> None:
     """向浏览器注入 Cookie（必须先访问目标域名一次）"""
-    cfg = GAMES.get(game, GAMES["genshin"])
-    driver.get(cfg.get("home", MIHOYO_HOME))
+    cfg = _resolve_cfg(game, url)
+    driver.get(cfg.get("home") or url or MIHOYO_HOME)
     time.sleep(1)
 
     for cookie in cookies:
@@ -296,10 +297,33 @@ def inject_cookies(driver: webdriver.Remote, cookies: list, game: str = "genshin
             logger.debug(f"跳过 Cookie {cookie['name']}: {e}")
 
 
-def navigate_to_game(driver: webdriver.Remote, game: str = "genshin") -> None:
-    """跳转到指定云游戏页面"""
-    url = GAMES.get(game, GAMES["genshin"])["url"]
-    driver.get(url)
+def _resolve_cfg(game: str, url: str | None = None) -> dict:
+    """取游戏配置：内置查表，自定义按传入地址推导（域名用于 Cookie 过滤）。"""
+    cfg = GAMES.get(game)
+    if cfg:
+        return cfg
+
+    host = ""
+    if url:
+        try:
+            host = (urlparse(url).netloc or "").lower()
+        except Exception:
+            host = ""
+    return {
+        "name": game,
+        "url": url or "",
+        "vendor": "custom",
+        "home": url or "",
+        "biz": "",
+        "cookie_domains": (host,) if host else (),
+    }
+
+
+def navigate_to_game(driver: webdriver.Remote, game: str = "genshin", url: str | None = None) -> None:
+    """跳转到指定游戏页面；自定义游戏直接用它自己的地址。"""
+    cfg = _resolve_cfg(game, url)
+    target = url or cfg.get("url") or GAMES["genshin"]["url"]
+    driver.get(target)
 
 
 def navigate_to_cloud_genshin(driver: webdriver.Remote) -> None:
@@ -316,7 +340,7 @@ def refresh_cookies(cookies: list, game: str = "genshin") -> dict:
 
     返回 {"ok": bool, "cookies": [...], "msg": str, "updated": [字段名]}
     """
-    cfg = GAMES.get(game, GAMES["genshin"])
+    cfg = _resolve_cfg(game)
     if cfg.get("vendor") != "mihoyo":
         return {"ok": False, "msg": f"{cfg['name']} 使用会话 Cookie，不支持 login_ticket 续期",
                 "cookies": cookies, "updated": []}
@@ -572,12 +596,18 @@ def _check_bilibili_valid(cmap: dict) -> dict:
     return {"valid": False, "msg": f"{data.get('message', '验证失败')}（code={code}）"}
 
 
-def capture_cookies(driver: webdriver.Remote, game: str = "genshin") -> list:
-    """抓取浏览器中该游戏对应厂商域名下的 Cookie"""
-    cfg = GAMES.get(game, GAMES["genshin"])
-    kws = cfg.get("cookie_domains", COOKIE_DOMAIN_KEYWORDS)
-    return [c for c in driver.get_cookies()
-            if any(kw in c.get("domain", "") for kw in kws)]
+def capture_cookies(driver: webdriver.Remote, game: str = "genshin", url: str | None = None) -> list:
+    """抓取浏览器中该游戏对应域名下的 Cookie。
+
+    自定义游戏用地址里的域名过滤；地址也没给（理论上不会）才退回全量，
+    否则用户辛苦登录后的 Cookie 会被过滤成空数组。
+    """
+    cfg = _resolve_cfg(game, url)
+    kws = cfg.get("cookie_domains") or ()
+    all_cookies = driver.get_cookies()
+    if not kws:
+        return all_cookies
+    return [c for c in all_cookies if any(kw in (c.get("domain") or "") for kw in kws)]
 
 
 def capture_mihoyo_cookies(driver: webdriver.Remote) -> list:

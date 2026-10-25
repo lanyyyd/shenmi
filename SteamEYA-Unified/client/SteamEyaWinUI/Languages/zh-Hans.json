@@ -564,6 +564,7 @@
     "Lib_Status_AlreadyQueued_Format": "{0} 已经在下载队列里了",
     "Lib_Error_NoUrl": "这条资源没有下载地址",
     "Lib_Error_Download": "发起下载失败，详情见日志",
-    "Lib_OpenDownloads": "下载列表"
+    "Lib_OpenDownloads": "下载列表",
+    "Tools_Panic_Button_Confirm": "确认保队友"
   }
 }

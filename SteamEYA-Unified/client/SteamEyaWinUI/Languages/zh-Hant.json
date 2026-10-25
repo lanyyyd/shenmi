@@ -564,6 +564,7 @@
     "Lib_Status_AlreadyQueued_Format": "{0} 已經在下載佇列裡了",
     "Lib_Error_NoUrl": "這筆資源沒有下載位址",
     "Lib_Error_Download": "發起下載失敗，詳情請看日誌",
-    "Lib_OpenDownloads": "下載清單"
+    "Lib_OpenDownloads": "下載清單",
+    "Tools_Panic_Button_Confirm": "確認保隊友"
   }
 }

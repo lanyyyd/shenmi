@@ -98,12 +98,13 @@ def _get_login_driver(game: str, browser: str):
 def browser_open(payload: dict = Body(...)):
     game = payload.get("game") or "genshin"
     browser = payload.get("browser") or "edge"
+    url = (payload.get("url") or "").strip() or None
     with _driver_lock:
         try:
             drv = _drv()
             driver, reused = _get_capture_driver(game, browser)
             if not reused:
-                drv.navigate_to_game(driver, game)
+                drv.navigate_to_game(driver, game, url)
             return {"ok": True, "reused": reused, "name": drv.GAMES.get(game, {}).get("name", game)}
         except Exception as e:
             return {"ok": False, "msg": str(e)}
@@ -112,13 +113,14 @@ def browser_open(payload: dict = Body(...)):
 @app.post("/engine/capture")
 def capture(payload: dict = Body(...)):
     game = payload.get("game") or "genshin"
+    url = (payload.get("url") or "").strip() or None
     with _driver_lock:
         drv = _drv()
         driver = _capture_drivers.get(game)
         if driver is None:
             return {"ok": False, "msg": f"请先为「{drv.GAMES.get(game, {}).get('name', game)}」打开浏览器"}
         try:
-            cookies = drv.capture_cookies(driver, game)
+            cookies = drv.capture_cookies(driver, game, url)
             combo = ""
             if drv.GAMES.get(game, {}).get("vendor") == "mihoyo":
                 combo = drv.capture_combo_token(driver, timeout=30) or ""
@@ -132,14 +134,15 @@ def login(payload: dict = Body(...)):
     game = payload.get("game") or "genshin"
     browser = payload.get("browser") or "edge"
     cookies = payload.get("cookies") or []
+    url = (payload.get("url") or "").strip() or None
     if not cookies:
         return {"ok": False, "msg": "缺少 Cookie"}
     with _driver_lock:
         try:
             drv = _drv()
             driver, reused = _get_login_driver(game, browser)
-            drv.inject_cookies(driver, cookies, game)
-            drv.navigate_to_game(driver, game)
+            drv.inject_cookies(driver, cookies, game, url)
+            drv.navigate_to_game(driver, game, url)
             import time
             time.sleep(3)
             ok = drv.check_login_status(driver, timeout=15, game=game)

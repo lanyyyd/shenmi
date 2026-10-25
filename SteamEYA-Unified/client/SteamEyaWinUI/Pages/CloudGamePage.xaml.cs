@@ -11,6 +11,9 @@ namespace SteamEyaWinUI.Pages;
 public sealed partial class CloudGamePage : Page
 {
     private readonly CloudGameService _cloud = new();
+
+    /// <summary>game key → 打开地址。自定义游戏靠它导航，内置游戏留空走引擎查表。</summary>
+    private readonly Dictionary<string, string> _gameUrls = new(StringComparer.Ordinal);
     private readonly ObservableCollection<CloudGameItem> _status = [];
 
     public CloudGamePage()
@@ -26,6 +29,7 @@ public sealed partial class CloudGamePage : Page
 
         Loaded += async (_, _) =>
         {
+            await LoadGamesAsync();
             await EnsureEngineAsync();
             await RefreshStatusAsync();
             await AutoCheckAsync();
@@ -64,9 +68,126 @@ public sealed partial class CloudGamePage : Page
         }
     }
 
+    // ---------------- 游戏列表 ----------------
+
+    /// <summary>从服务端拉可见游戏（内置 + 别人共享的自定义游戏 + 自己的）。失败就保留内置兜底。</summary>
+    private async Task LoadGamesAsync(string? selectKey = null)
+    {
+        try
+        {
+            var dto = await _cloud.GamesAsync();
+            if (!dto.Ok || dto.Games is not { Count: > 0 } games)
+            {
+                return;
+            }
+
+            var target = selectKey ?? CurrentGame;
+            GameCombo.Items.Clear();
+            _gameUrls.Clear();
+            foreach (var game in games)
+            {
+                GameCombo.Items.Add(new ComboBoxItem { Content = game.Name, Tag = game.Key });
+                if (!game.Builtin && !string.IsNullOrWhiteSpace(game.Url))
+                {
+                    _gameUrls[game.Key] = game.Url;
+                }
+            }
+
+            var match = GameCombo.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => string.Equals(item.Tag as string, target, StringComparison.Ordinal));
+
+            GameCombo.SelectedItem = match ?? GameCombo.Items[0];
+        }
+        catch (Exception ex)
+        {
+            AppLog.Debug($"拉取云游戏列表失败，保留内置列表：{ex.Message}");
+        }
+    }
+
+    /// <summary>添加自定义游戏：填名称 + 默认地址，地址不写协议由服务端补 https://。</summary>
+    private async void OnAddGameClick(object sender, RoutedEventArgs e)
+    {
+        var nameBox = new TextBox
+        {
+            Header = "游戏名",
+            PlaceholderText = "例如：抖音"
+        };
+        var urlBox = new TextBox
+        {
+            Header = "默认打开地址",
+            PlaceholderText = "douyin.com（不用写 https://）"
+        };
+        var tip = new TextBlock
+        {
+            Text = "保存后只有你能看到；成功抓取一次 Cookie 后，所有用户都能在游戏列表里选到它。",
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+        };
+
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(nameBox);
+        panel.Children.Add(urlBox);
+        panel.Children.Add(tip);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "添加自定义游戏",
+            Content = panel,
+            PrimaryButtonText = "添加",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        var name = nameBox.Text.Trim();
+        var url = urlBox.Text.Trim();
+        if (name.Length == 0 || url.Length == 0)
+        {
+            ShowInfo("请填写游戏名和打开地址", InfoBarSeverity.Warning);
+            return;
+        }
+
+        AddGameButton.IsEnabled = false;
+        try
+        {
+            var result = await _cloud.CreateGameAsync(name, url);
+            if (result is null || !result.Ok || string.IsNullOrWhiteSpace(result.Key))
+            {
+                ShowInfo("添加失败，请稍后重试", InfoBarSeverity.Error);
+                return;
+            }
+
+            await LoadGamesAsync(result.Key);
+            ShowInfo(
+                result.Existing
+                    ? $"「{name}」已经在列表里了"
+                    : $"已添加「{name}」；抓取一次 Cookie 后所有人都能看到",
+                InfoBarSeverity.Success);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("添加自定义云游戏失败。", ex);
+            ShowInfo($"添加失败：{ex.Message}", InfoBarSeverity.Error);
+        }
+        finally
+        {
+            AddGameButton.IsEnabled = true;
+        }
+    }
+
     private string CurrentGame => (GameCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? "genshin";
 
     private string CurrentBrowser => (BrowserCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? "edge";
+
+    /// <summary>当前游戏的打开地址；内置游戏返回 null。</summary>
+    private string? CurrentGameUrl => _gameUrls.GetValueOrDefault(CurrentGame);
 
     private async Task RefreshStatusAsync()
     {
@@ -102,7 +223,7 @@ public sealed partial class CloudGamePage : Page
                 return;
             }
 
-            var (ok, body, error) = await _cloud.EngineLoginAsync(game, CurrentBrowser, cookies, data.ComboToken ?? "");
+            var (ok, body, error) = await _cloud.EngineLoginAsync(game, CurrentBrowser, cookies, data.ComboToken ?? "", CurrentGameUrl);
             if (!ok)
             {
                 ShowInfo($"调用本地引擎失败：{error}（请确认引擎服务已启动）", InfoBarSeverity.Error);
@@ -122,7 +243,7 @@ public sealed partial class CloudGamePage : Page
 
     private async void OnOpenBrowser(object sender, RoutedEventArgs e)
     {
-        var (ok, _, error) = await _cloud.EngineOpenAsync(CurrentGame, CurrentBrowser);
+        var (ok, _, error) = await _cloud.EngineOpenAsync(CurrentGame, CurrentBrowser, CurrentGameUrl);
         ShowInfo(ok ? "已打开浏览器，请登录后点「抓取并上传」" : $"打开浏览器失败：{error}",
             ok ? InfoBarSeverity.Informational : InfoBarSeverity.Error);
     }
@@ -130,7 +251,7 @@ public sealed partial class CloudGamePage : Page
     private async void OnCaptureUpload(object sender, RoutedEventArgs e)
     {
         var game = CurrentGame;
-        var (ok, body, error) = await _cloud.EngineCaptureAsync(game);
+        var (ok, body, error) = await _cloud.EngineCaptureAsync(game, CurrentGameUrl);
         if (!ok)
         {
             ShowInfo($"抓取失败：{error}", InfoBarSeverity.Error);

@@ -41,6 +41,22 @@ internal sealed class CloudGameService
         return await JsonSerializer.DeserializeAsync(stream, typeInfo, ct);
     }
 
+    // ---------------- 游戏列表 ----------------
+
+    /// <summary>拉取可见游戏：内置 + 其他人已公开的自定义游戏 + 自己创建的。</summary>
+    public async Task<CloudGamesDto> GamesAsync(CancellationToken ct = default)
+        => await SendAsync(Auth(HttpMethod.Get, "/api/cloud/games"),
+               CloudApiJsonContext.Default.CloudGamesDto, ct) ?? new CloudGamesDto();
+
+    /// <summary>新增自定义游戏（地址由服务端补全 https://）。</summary>
+    public async Task<CloudCreateGameDto?> CreateGameAsync(string name, string url, CancellationToken ct = default)
+    {
+        var json = new JsonObject { ["name"] = name, ["url"] = url }.ToJsonString();
+        var req = Auth(HttpMethod.Post, "/api/cloud/games");
+        req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+        return await SendAsync(req, CloudApiJsonContext.Default.CloudCreateGameDto, ct);
+    }
+
     // ---------------- 云端 Cookie ----------------
     public async Task<CloudMyDto> MyAsync(CancellationToken ct = default)
         => await SendAsync(Auth(HttpMethod.Get, "/api/cloud/my"), CloudApiJsonContext.Default.CloudMyDto, ct)
@@ -87,21 +103,34 @@ internal sealed class CloudGameService
     }
 
     // ---------------- 本地引擎（Selenium 服务） ----------------
-    public async Task<(bool ok, string body, string? error)> EngineOpenAsync(string game, string browser, CancellationToken ct = default)
-        => await EnginePostAsync("/engine/browser/open",
-            new JsonObject { ["game"] = game, ["browser"] = browser }, ct);
+    /// <param name="url">自定义游戏的打开地址；内置游戏传 null 由引擎查表。</param>
+    public async Task<(bool ok, string body, string? error)> EngineOpenAsync(string game, string browser, string? url = null, CancellationToken ct = default)
+        => await EnginePostAsync("/engine/browser/open", WithUrl(
+            new JsonObject { ["game"] = game, ["browser"] = browser }, url), ct);
 
-    public async Task<(bool ok, string body, string? error)> EngineCaptureAsync(string game, CancellationToken ct = default)
-        => await EnginePostAsync("/engine/capture", new JsonObject { ["game"] = game }, ct);
+    public async Task<(bool ok, string body, string? error)> EngineCaptureAsync(string game, string? url = null, CancellationToken ct = default)
+        => await EnginePostAsync("/engine/capture", WithUrl(new JsonObject { ["game"] = game }, url), ct);
 
-    public async Task<(bool ok, string body, string? error)> EngineLoginAsync(string game, string browser, JsonElement cookies, string comboToken, CancellationToken ct = default)
-        => await EnginePostAsync("/engine/login", new JsonObject
+    public async Task<(bool ok, string body, string? error)> EngineLoginAsync(
+        string game, string browser, JsonElement cookies, string comboToken, string? url = null, CancellationToken ct = default)
+        => await EnginePostAsync("/engine/login", WithUrl(new JsonObject
         {
             ["game"] = game,
             ["browser"] = browser,
             ["combo_token"] = comboToken,
             ["cookies"] = JsonNode.Parse(cookies.GetRawText())
-        }, ct);
+        }, url), ct);
+
+    /// <summary>自定义游戏才带 url，内置的保持原请求体不变（引擎查表更可靠）。</summary>
+    private static JsonObject WithUrl(JsonObject body, string? url)
+    {
+        if (!string.IsNullOrWhiteSpace(url))
+        {
+            body["url"] = url;
+        }
+
+        return body;
+    }
 
     public async Task<(bool ok, string body, string? error)> EngineRefreshAsync(string game, JsonElement cookies, CancellationToken ct = default)
         => await EnginePostAsync("/engine/refresh", new JsonObject

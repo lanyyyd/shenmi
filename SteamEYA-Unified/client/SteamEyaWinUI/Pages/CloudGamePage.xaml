@@ -14,7 +14,25 @@
         <!-- 左：操作区 -->
         <StackPanel Grid.Column="0" Spacing="10">
             <TextBlock Text="云游戏上号" Style="{StaticResource TitleTextBlockStyle}" />
-            <ComboBox x:Name="GameCombo" Header="游戏" HorizontalAlignment="Stretch" SelectionChanged="OnGameChanged" />
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ComboBox
+                    x:Name="GameCombo"
+                    Grid.Column="0"
+                    Header="游戏"
+                    HorizontalAlignment="Stretch"
+                    SelectionChanged="OnGameChanged" />
+                <Button
+                    x:Name="AddGameButton"
+                    Grid.Column="1"
+                    VerticalAlignment="Bottom"
+                    Click="OnAddGameClick"
+                    Content="添加"
+                    ToolTipService.ToolTip="添加自定义游戏（填写名称和默认打开地址）" />
+            </Grid>
             <ComboBox x:Name="BrowserCombo" Header="浏览器" HorizontalAlignment="Stretch" SelectedIndex="0">
                 <ComboBoxItem Content="Edge（推荐）" Tag="edge" />
                 <ComboBoxItem Content="Chrome" Tag="chrome" />

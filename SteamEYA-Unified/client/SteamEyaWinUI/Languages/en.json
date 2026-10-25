@@ -564,6 +564,7 @@
     "Lib_Status_AlreadyQueued_Format": "{0} is already in the download queue",
     "Lib_Error_NoUrl": "This resource has no download link",
     "Lib_Error_Download": "Failed to start the download. See the log for details.",
-    "Lib_OpenDownloads": "Download list"
+    "Lib_OpenDownloads": "Download list",
+    "Tools_Panic_Button_Confirm": "Confirm panic"
   }
 }

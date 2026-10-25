@@ -102,7 +102,8 @@ public sealed partial class ToolsPage : Page
 
         PanicTitle.Text = Loc.T("Tools_Panic_Title");
         PanicDesc.Text = Loc.T("Tools_Panic_Desc");
-        PanicButton.Content = Loc.T("Tools_Panic_Button");
+        PanicButton.Content = _panicArmed ? Loc.T("Tools_Panic_Button_Confirm") : Loc.T("Tools_Panic_Button");
+        PanicCancelButton.Content = Loc.T("Common_Cancel");
 
         if (_recording)
         {
@@ -288,22 +289,55 @@ public sealed partial class ToolsPage : Page
         RefreshStatus();
     }
 
+    private bool _panicArmed;
+    private int _panicArmVersion;
+
+    /// <summary>
+    /// 两步确认：首次点击进入待确认态（按钮变「确认保队友」、右侧出现取消），
+    /// 再点同一按钮即执行。8 秒无操作自动复位，避免用户走了之后下次误触直接下线全员。
+    /// </summary>
     private async void OnPanicClick(object sender, RoutedEventArgs e)
     {
-        var dialog = new ContentDialog
+        if (!_panicArmed)
         {
-            Title = Loc.T("Tools_Panic_ConfirmTitle"),
-            Content = Loc.T("Tools_Panic_ConfirmBody"),
-            PrimaryButtonText = Loc.T("Tools_Panic_ConfirmOk"),
-            CloseButtonText = Loc.T("Common_Cancel"),
-            DefaultButton = ContentDialogButton.Close,
-            XamlRoot = XamlRoot
-        };
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
+            ArmPanic();
             return;
         }
+
+        await ExecutePanicAsync();
+    }
+
+    private async void ArmPanic()
+    {
+        _panicArmed = true;
+        var version = ++_panicArmVersion;
+
+        PanicButton.Content = Loc.T("Tools_Panic_Button_Confirm");
+        PanicCancelButton.Content = Loc.T("Common_Cancel");
+        PanicCancelButton.Visibility = Visibility.Visible;
+
+        await Task.Delay(8000);
+
+        // 期间若已取消/已执行/又重新进入待确认，就不要再动 UI。
+        if (_panicArmed && version == _panicArmVersion)
+        {
+            DisarmPanic();
+        }
+    }
+
+    private void DisarmPanic()
+    {
+        _panicArmed = false;
+        _panicArmVersion++;
+        PanicButton.Content = Loc.T("Tools_Panic_Button");
+        PanicCancelButton.Visibility = Visibility.Collapsed;
+    }
+
+    private void OnPanicCancelClick(object sender, RoutedEventArgs e) => DisarmPanic();
+
+    private async Task ExecutePanicAsync()
+    {
+        DisarmPanic();
 
         PanicButton.IsEnabled = false;
         if (!await ChatHub.SendPanicAsync())

@@ -136,10 +136,18 @@
                 <StackPanel Spacing="8">
                     <TextBlock x:Name="PanicTitle" Style="{StaticResource SectionTitleTextStyle}" />
                     <TextBlock x:Name="PanicDesc" Style="{StaticResource FieldLabelTextStyle}" TextWrapping="Wrap" />
-                    <Button
-                        x:Name="PanicButton"
-                        Style="{StaticResource AuroraGlassButtonStyle}"
-                        Click="OnPanicClick" />
+                    <!-- 两步确认：第一次点击变「确认保队友」并在右侧出现取消，再点同一位置才执行。 -->
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button
+                            x:Name="PanicButton"
+                            MinWidth="200"
+                            Style="{StaticResource AuroraGlassButtonStyle}"
+                            Click="OnPanicClick" />
+                        <Button
+                            x:Name="PanicCancelButton"
+                            Click="OnPanicCancelClick"
+                            Visibility="Collapsed" />
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </StackPanel>

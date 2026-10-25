@@ -231,6 +231,31 @@ internal sealed class UpdateLatestDto
     public string Url { get; set; } = string.Empty;
 }
 
+/// <summary>云游戏列表项（内置 + 用户自定义）。</summary>
+internal sealed class CloudGameItemDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+    public bool Builtin { get; set; }
+    public bool Visible { get; set; }
+    public bool Mine { get; set; }
+}
+
+internal sealed class CloudGamesDto
+{
+    public bool Ok { get; set; }
+    public List<CloudGameItemDto>? Games { get; set; }
+}
+
+internal sealed class CloudCreateGameDto
+{
+    public bool Ok { get; set; }
+    public string? Key { get; set; }
+    public bool Existing { get; set; }
+    public bool Visible { get; set; }
+}
+
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
 [JsonSerializable(typeof(UserDto))]
 [JsonSerializable(typeof(AuthResultDto))]
@@ -240,6 +265,8 @@ internal sealed class UpdateLatestDto
 [JsonSerializable(typeof(CloudMyDto))]
 [JsonSerializable(typeof(CloudDownloadDto))]
 [JsonSerializable(typeof(CloudActionResultDto))]
+[JsonSerializable(typeof(CloudGamesDto))]
+[JsonSerializable(typeof(CloudCreateGameDto))]
 [JsonSerializable(typeof(SyncMessage))]
 [JsonSerializable(typeof(SyncPendingDto))]
 [JsonSerializable(typeof(SyncPushRequest))]
