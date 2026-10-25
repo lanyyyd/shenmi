@@ -234,6 +234,14 @@ fun WheelPage(token: String, topInset: Dp, refreshTick: Int) {
             scope.launch { doSpin() }
         }
 
+        // 抽完（有结果且不在转动中）在「抽」下方补一个确认按钮，和网页端一致
+        if (task != null && !spinning) {
+            Spacer(Modifier.height(10.dp))
+            PrimaryButton("🍽️ 就吃这个了！") {
+                message = "已生成任务，快去吃吧！"
+            }
+        }
+
         Spacer(Modifier.height(10.dp))
 
         Row(
