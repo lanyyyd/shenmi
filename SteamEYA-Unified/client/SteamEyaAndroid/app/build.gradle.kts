@@ -12,6 +12,11 @@ val appVersionCode = ((project.findProperty("appVersionCode") as String?) ?: "1"
 // CI 想换成自己的密钥时，配 ANDROID_KEYSTORE_PATH / ANDROID_KEYSTORE_PASSWORD 等环境变量即可覆盖。
 val fixedKeystore = rootProject.layout.projectDirectory.file("keystore/teatt-release.jks").asFile
 
+// 注意：没配置的 GitHub secret 在 runner 上会变成空字符串（不是 null），
+// 直接写 `?: default` 兜不住，会把 alias/密码覆盖成 ""，打包阶段就会报 "keystore password was incorrect"。
+fun signingEnv(key: String, fallback: String): String =
+    System.getenv(key)?.takeIf { it.isNotBlank() } ?: fallback
+
 android {
     namespace = "com.teatt.pocket"
     compileSdk = 37
@@ -28,9 +33,9 @@ android {
         create("release") {
             val envPath = System.getenv("ANDROID_KEYSTORE_PATH")
             storeFile = if (!envPath.isNullOrBlank()) file(envPath) else fixedKeystore
-            storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: "shenmi2026"
-            keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: "teatt"
-            keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: "shenmi2026"
+            storePassword = signingEnv("ANDROID_KEYSTORE_PASSWORD", "shenmi2026")
+            keyAlias = signingEnv("ANDROID_KEY_ALIAS", "teatt")
+            keyPassword = signingEnv("ANDROID_KEY_PASSWORD", "shenmi2026")
         }
     }
 
