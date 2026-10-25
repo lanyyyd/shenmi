@@ -86,13 +86,9 @@ jobs:
           find SteamEYA-Unified/client/SteamEyaAndroid/app/build/outputs/apk/release -name "*.apk" -exec cp {} out/ShenMi-android.apk \;
           ls -lh out
 
-      - name: 上传构建产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: ShenMi-android-apk
-          path: out/ShenMi-android.apk
-          if-no-files-found: error
-
+      # 只发 Release，不用 upload-artifact：Actions 存储免费额度只有 500MB，
+      # 每个 artifact 十几 MB 且保留 90 天，攒几次就把额度吃光、构建会被直接锁停。
+      # Release 附件不占 Actions 存储，也不会有过期问题。
       - name: 发布到 Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

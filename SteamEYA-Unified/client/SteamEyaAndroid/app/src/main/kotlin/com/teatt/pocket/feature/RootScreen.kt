@@ -27,8 +27,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -186,11 +184,12 @@ fun RootScreen(
 }
 
 /**
- * WebView 页容器：只做层级和触摸隔离，**不做任何透明度/缩放变换**。
- * 隐藏时 WebView 自己变 INVISIBLE（见 WebPane），这里再兜一层吞事件，防止点穿。
+ * WebView 页容器：只做层级隔离，**不做任何透明度/缩放变换**。
  *
- * zIndex 固定不动：以前用 `if (visible) 1f else -1f`，每次切页都会重排 interop View 的绘制顺序，
- * WebView 的表面被重新合成，就是切 tab 时那一下白闪。
+ * 层级必须"可见的高、隐藏的低"：隐藏层如果和可见层同高（曾经都固定 1f），
+ * 后声明的那个 WebView 容器会压在聊天页之上，触摸被它接住 → 整页像卡死。
+ * 隐藏时也不要再挂 pointerInput 去"吞事件"——那会在 Initial 阶段消费掉，
+ * 可见层的按钮同样收不到。WebView 隐藏时是 INVISIBLE，本来就不接收触摸。
  */
 @Composable
 private fun WebPageLayer(
@@ -200,8 +199,7 @@ private fun WebPageLayer(
     Box(
         Modifier
             .fillMaxSize()
-            .zIndex(1f)
-            .then(if (visible) Modifier else Modifier.swallowTouches())
+            .zIndex(if (visible) 1f else 0f)
     ) {
         content()
     }
@@ -235,17 +233,7 @@ private fun NativePage(
                 scaleY = scale
             }
             .background(MaterialTheme.colorScheme.background)
-            .then(if (visible) Modifier else Modifier.swallowTouches())
     ) {
         content()
-    }
-}
-
-/** 隐藏页仍参与命中测试，必须显式吞掉事件，否则会点穿到底下的 WebView。 */
-private fun Modifier.swallowTouches(): Modifier = pointerInput(Unit) {
-    awaitPointerEventScope {
-        while (true) {
-            awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
-        }
     }
 }
