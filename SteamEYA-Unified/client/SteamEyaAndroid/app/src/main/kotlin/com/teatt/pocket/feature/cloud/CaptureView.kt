@@ -2,7 +2,6 @@ package com.teatt.pocket.feature.cloud
 
 import android.annotation.SuppressLint
 import android.graphics.Color as AndroidColor
-import android.net.Uri
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
@@ -20,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -72,7 +72,13 @@ fun CaptureView(
         if (view != null && view.canGoBack()) view.goBack() else onCancel()
     }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            // 全屏 Dialog 里键盘不会自动压缩窗口，靠 ime inset 把底部按钮顶上来
+            .imePadding()
+    ) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -210,7 +216,3 @@ fun CaptureView(
     }
 }
 
-@Composable
-private fun LoadingDot() {
-    Box(Modifier.size(2.dp).background(Color.Transparent))
-}

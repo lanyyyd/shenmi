@@ -8,6 +8,10 @@ plugins {
 val appVersionName = (project.findProperty("appVersionName") as String?) ?: "1.0.0"
 val appVersionCode = ((project.findProperty("appVersionCode") as String?) ?: "1").toInt()
 
+// 固定签名：keystore 跟着仓库走，保证每次构建签名一致，新版本可以直接覆盖安装。
+// CI 想换成自己的密钥时，配 ANDROID_KEYSTORE_PATH / ANDROID_KEYSTORE_PASSWORD 等环境变量即可覆盖。
+val fixedKeystore = rootProject.layout.projectDirectory.file("keystore/teatt-release.jks").asFile
+
 android {
     namespace = "com.teatt.pocket"
     compileSdk = 37
@@ -22,14 +26,11 @@ android {
 
     signingConfigs {
         create("release") {
-            // CI 用 secrets 里的 keystore；本地没配就直接走 debug 签名，保证能装。
-            val storePath = System.getenv("ANDROID_KEYSTORE_PATH")
-            if (!storePath.isNullOrBlank()) {
-                storeFile = file(storePath)
-                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
-                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
-            }
+            val envPath = System.getenv("ANDROID_KEYSTORE_PATH")
+            storeFile = if (!envPath.isNullOrBlank()) file(envPath) else fixedKeystore
+            storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: "shenmi2026"
+            keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: "teatt"
+            keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: "shenmi2026"
         }
     }
 
@@ -38,11 +39,8 @@ android {
             isMinifyEnabled = false
             isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = if (!System.getenv("ANDROID_KEYSTORE_PATH").isNullOrBlank()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            // release 一律用固定签名，不再回退 debug（debug 签名每次换机器都会变，装不上覆盖包）
+            signingConfig = signingConfigs.getByName("release")
         }
         debug {
             applicationIdSuffix = ".debug"

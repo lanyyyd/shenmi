@@ -36,13 +36,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +49,8 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.teatt.pocket.core.ApiException
 import com.teatt.pocket.core.CloudAccountDto
 import com.teatt.pocket.core.CloudGameDto
@@ -58,7 +58,6 @@ import com.teatt.pocket.core.CookieDto
 import com.teatt.pocket.data.CloudApi
 import com.teatt.pocket.ui.BrandPink
 import com.teatt.pocket.ui.LocalBarInset
-import com.teatt.pocket.ui.LocalOverlayHost
 import kotlinx.coroutines.launch
 
 @Composable
@@ -113,32 +112,27 @@ fun CloudScreen(
         }
     }
 
-    // 抓取页走 RootScreen 级浮层：它必须盖在底部玻璃栏之上，
-    // 放在页面内部（哪怕 return 提前返回）都会被栏压住底部按钮。
-    val host = LocalOverlayHost.current
-    // 浮层里的 lambda 只投递一次，用最新引用兜住 token 变化后的上传逻辑
-    val latestUpload = rememberUpdatedState<(CloudGameDto, List<CookieDto>) -> Unit> { g, c ->
-        upload(g, c)
-    }
-    LaunchedEffect(captureTarget) {
-        val target = captureTarget
-        if (target == null) {
-            host?.clear()
-        } else {
-            host?.show {
-                CaptureView(
-                    game = target,
-                    onCancel = { captureTarget = null },
-                    onHarvest = { cookies ->
-                        captureTarget = null
-                        latestUpload.value(target, cookies)
-                    }
-                )
-            }
+    // 抓取页用全屏 Dialog（独立 Window）承载：放在 Compose 页面里、哪怕提到 RootScreen 的
+    // overlay 层，AndroidView 里的 WebView 仍可能被底部玻璃栏压住。Dialog 是另一个 Window，
+    // 一定在 Activity 窗口之上，底部按钮不会再被菜单栏挡住。
+    captureTarget?.let { target ->
+        Dialog(
+            onDismissRequest = { captureTarget = null },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false,
+                dismissOnClickOutside = false
+            )
+        ) {
+            CaptureView(
+                game = target,
+                onCancel = { captureTarget = null },
+                onHarvest = { cookies ->
+                    captureTarget = null
+                    upload(target, cookies)
+                }
+            )
         }
-    }
-    DisposableEffect(Unit) {
-        onDispose { host?.clear() }
     }
 
     val bottomInset = LocalBarInset.current + 24.dp

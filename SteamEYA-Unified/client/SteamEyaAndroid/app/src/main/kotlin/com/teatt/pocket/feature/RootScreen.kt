@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Forum
@@ -85,8 +86,11 @@ fun RootScreen(
     val chatUrl = remember(state.token) { Session.webUrl("/") }
     val eatUrl = remember(state.token) { Session.webUrl("/eat.html") }
 
-    // 键盘弹出时 WebView 已经被 adjustResize 压矮，网页不能再按栏高留白
-    val webBarPx = if (imeVisible) 0 else barInset.value.toInt()
+    // 网页 tab 的底部让位：直接在这层把 WebView 缩到玻璃栏之上。
+    // 之前靠 JS 给网页塞 --tt-bar + 兜底样式，网页 DOM 一改（聊天/吃什么的后端前端是独立演进的）
+    // 就对不上，表现就是输入框、列表尾部被栏压住。缩高是布局层面的事实，不依赖网页配合。
+    // 键盘弹出时 WebView 已被 adjustResize 压矮，这里必须归零，否则会多留一条空白。
+    val webBottomPad = if (imeVisible) 0.dp else barInset
     val pageBg = MaterialTheme.colorScheme.background
 
     val barHide by animateFloatAsState(
@@ -113,9 +117,9 @@ fun RootScreen(
                         WebPane(
                             url = chatUrl,
                             visible = tab == 0,
-                            barInsetPx = webBarPx,
+                            barInsetPx = 0,
                             backgroundColor = pageBg,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize().padding(bottom = webBottomPad)
                         )
                     }
                 }
@@ -124,9 +128,9 @@ fun RootScreen(
                         WebPane(
                             url = eatUrl,
                             visible = tab == 1,
-                            barInsetPx = webBarPx,
+                            barInsetPx = 0,
                             backgroundColor = pageBg,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize().padding(bottom = webBottomPad)
                         )
                     }
                 }
@@ -172,6 +176,9 @@ fun RootScreen(
 /**
  * WebView 页容器：只做层级和触摸隔离，**不做任何透明度/缩放变换**。
  * 隐藏时 WebView 自己变 INVISIBLE（见 WebPane），这里再兜一层吞事件，防止点穿。
+ *
+ * zIndex 固定不动：以前用 `if (visible) 1f else -1f`，每次切页都会重排 interop View 的绘制顺序，
+ * WebView 的表面被重新合成，就是切 tab 时那一下白闪。
  */
 @Composable
 private fun WebPageLayer(
@@ -181,7 +188,7 @@ private fun WebPageLayer(
     Box(
         Modifier
             .fillMaxSize()
-            .zIndex(if (visible) 1f else -1f)
+            .zIndex(1f)
             .then(if (visible) Modifier else Modifier.swallowTouches())
     ) {
         content()
@@ -208,7 +215,8 @@ private fun NativePage(
     Box(
         Modifier
             .fillMaxSize()
-            .zIndex(if (visible) 1f else -1f)
+            // 可见时必须压在 WebView 层（1f）之上
+            .zIndex(if (visible) 2f else 0f)
             .graphicsLayer {
                 this.alpha = alpha
                 scaleX = scale

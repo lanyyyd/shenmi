@@ -101,6 +101,9 @@ fun WebPane(
                     overScrollMode = WebView.OVER_SCROLL_NEVER
                     // 固定硬件层，避免透明度/滚动时反复切软件层
                     setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                    // 切 tab 只是 INVISIBLE，不要让渲染进程被系统降级回收，
+                    // 否则切回来的第一帧是空表面 = 白闪
+                    setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
 
                     with(settings) {
                         javaScriptEnabled = true
@@ -179,12 +182,11 @@ fun WebPane(
                 }
             },
             update = { view ->
+                // 只切可见性，**不要**调 onPause/onResume。
+                // 一旦 pause，WebView 的渲染进程会被降级，切回来要重建表面，
+                // 就是用户看到的那一下白闪（两个 WebView 交替暂停/恢复时尤其明显）。
                 val want = if (visible) View.VISIBLE else View.INVISIBLE
-                if (view.visibility != want) {
-                    view.visibility = want
-                    // per-view 的暂停/恢复，不动 pauseTimers（那个是全局的，会误伤另一个 WebView）
-                    if (visible) view.onResume() else view.onPause()
-                }
+                if (view.visibility != want) view.visibility = want
             },
             onRelease = { view ->
                 CookieManager.getInstance().flush()
