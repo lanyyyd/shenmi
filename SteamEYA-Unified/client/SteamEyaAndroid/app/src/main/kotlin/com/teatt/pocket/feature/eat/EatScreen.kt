@@ -1,6 +1,9 @@
 package com.teatt.pocket.feature.eat
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -48,8 +51,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -64,10 +69,12 @@ import com.kyant.backdrop.effects.vibrancy
 import com.teatt.pocket.data.EatApi
 import com.teatt.pocket.data.EatDish
 import com.teatt.pocket.data.EatStore
+import com.teatt.pocket.data.EatTask
 import com.teatt.pocket.ui.BrandPink
 import com.teatt.pocket.ui.BrandViolet
 import com.teatt.pocket.ui.LocalBarInset
 import com.teatt.pocket.ui.luminanceIsDark
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -92,9 +99,17 @@ fun EatScreen(
     var detail by remember { mutableStateOf<EatStore?>(null) }
     var refreshTick by remember { mutableIntStateOf(0) }
     var headerHeight by remember { mutableStateOf(120.dp) }
+    var toastText by remember { mutableStateOf<String?>(null) }
+    var toastSeq by remember { mutableIntStateOf(0) }
+    var noticeTask by remember { mutableStateOf<EatTask?>(null) }
+    var reviewTask by remember { mutableStateOf<EatTask?>(null) }
     val backdrop = rememberLayerBackdrop()
+    val context = LocalContext.current
     val density = LocalDensity.current
-    val scope = rememberCoroutineScope()
+    val showToast: (String) -> Unit = { msg ->
+        toastSeq += 1
+        toastText = msg
+    }
 
     suspend fun loadStores() {
         loading = true
@@ -106,6 +121,20 @@ fun EatScreen(
 
     // 冷启动 / 登录 / 点右上角刷新，都走这里
     LaunchedEffect(token, refreshTick) { loadStores() }
+
+    // 启动时看一眼当前任务：同一个任务只提示一次，自己动手选/抽的任务不算未读
+    LaunchedEffect(token) {
+        val dto = runCatching { EatApi.task(token) }.getOrNull() ?: return@LaunchedEffect
+        val task = dto.task ?: return@LaunchedEffect
+        if (!EatTaskSeen.isSeen(context, task.id)) noticeTask = task
+    }
+
+    LaunchedEffect(toastSeq) {
+        if (toastSeq > 0) {
+            delay(1900)
+            toastText = null
+        }
+    }
 
     BackHandler(enabled = detail != null || tab != 0) {
         if (detail != null) detail = null else tab = 0
@@ -121,13 +150,7 @@ fun EatScreen(
                     store = store,
                     topInset = headerHeight,
                     onBack = { detail = null },
-                    onEatHere = {
-                        scope.launch {
-                            runCatching { EatApi.pick(token, store.id) }
-                            detail = null
-                            tab = 1
-                        }
-                    }
+                    onToast = showToast
                 )
 
                 tab == 0 -> StoreListPage(
@@ -140,7 +163,12 @@ fun EatScreen(
                     onReload = { refreshTick++ }
                 )
 
-                tab == 1 -> WheelPage(token = token, topInset = headerHeight, refreshTick = refreshTick)
+                tab == 1 -> WheelPage(
+                    token = token,
+                    topInset = headerHeight,
+                    refreshTick = refreshTick,
+                    onToast = showToast
+                )
 
                 tab == 2 -> FeedPage(token = token, topInset = headerHeight, refreshTick = refreshTick)
 
@@ -162,6 +190,56 @@ fun EatScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .onSizeChanged { headerHeight = with(density) { it.height.toDp() } }
+        )
+
+        // 轻量 toast：和网页端一样，1.9 秒后自动消失
+        AnimatedVisibility(
+            visible = toastText != null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = LocalBarInset.current + 24.dp, start = 32.dp, end = 32.dp)
+        ) {
+            Text(
+                toastText.orEmpty(),
+                color = Color.White,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = .82f))
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            )
+        }
+    }
+
+    // 启动时的任务提醒：同一个任务只弹一次
+    noticeTask?.let { task ->
+        TaskNoticeDialog(
+            task = task,
+            onReview = {
+                EatTaskSeen.markSeen(context, task.id)
+                noticeTask = null
+                reviewTask = task
+            },
+            onDismiss = {
+                EatTaskSeen.markSeen(context, task.id)
+                noticeTask = null
+            }
+        )
+    }
+
+    reviewTask?.let { task ->
+        ReviewEditor(
+            token = token,
+            parent = null,
+            presetTask = task,
+            onDismiss = { reviewTask = null },
+            onDone = {
+                reviewTask = null
+                refreshTick += 1
+            }
         )
     }
 }
@@ -352,12 +430,15 @@ private fun StoreDetailPage(
     store: EatStore,
     topInset: Dp,
     onBack: () -> Unit,
-    onEatHere: () -> Unit
+    onToast: (String) -> Unit
 ) {
     var dishes by remember { mutableStateOf<List<EatDish>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var picked by remember { mutableStateOf<EatDish?>(null) }
     var pending by remember { mutableStateOf(false) }
+    var choosing by remember { mutableStateOf(false) }
+    var confirmTask by remember { mutableStateOf<EatTask?>(null) }
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val bottomInset = LocalBarInset.current + 20.dp
 
@@ -417,7 +498,16 @@ private fun StoreDetailPage(
                 ) {
                     pending = true
                     scope.launch {
-                        runCatching { EatApi.pick(token, store.id) }.onSuccess { onEatHere() }
+                        runCatching { EatApi.pick(token, store.id) }
+                            .onSuccess { dto ->
+                                val task = dto.task
+                                if (task != null) {
+                                    // 自己挑出来的任务直接算已读，下次启动不再弹任务提醒
+                                    EatTaskSeen.markSeen(context, task.id)
+                                    confirmTask = task
+                                }
+                            }
+                            .onFailure { onToast(it.message ?: "挑选失败") }
                         pending = false
                     }
                 }
@@ -451,15 +541,35 @@ private fun StoreDetailPage(
         }
     }
 
+    confirmTask?.let { task ->
+        TaskConfirmDialog(
+            task = task,
+            onConfirm = {
+                confirmTask = null
+                onToast("已生成任务，快去吃吧！")
+            },
+            onDismiss = { confirmTask = null }
+        )
+    }
+
     picked?.let { dish ->
         DishDetailDialog(
             dish = dish,
+            busy = choosing,
             onDismiss = { picked = null },
             onChoose = {
-                scope.launch {
-                    runCatching { EatApi.choose(token, dish.id) }
-                    picked = null
-                    onEatHere()
+                if (!choosing) {
+                    choosing = true
+                    scope.launch {
+                        runCatching { EatApi.choose(token, dish.id) }
+                            .onSuccess { dto ->
+                                dto.task?.let { EatTaskSeen.markSeen(context, it.id) }
+                                picked = null
+                                onToast("已生成任务，快去吃吧！")
+                            }
+                            .onFailure { onToast(it.message ?: "操作失败") }
+                        choosing = false
+                    }
                 }
             }
         )

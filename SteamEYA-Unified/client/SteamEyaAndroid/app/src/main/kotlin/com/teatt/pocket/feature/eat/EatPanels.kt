@@ -81,6 +81,7 @@ import com.teatt.pocket.data.EatImageRef
 import com.teatt.pocket.data.EatReview
 import com.teatt.pocket.data.EatStore
 import com.teatt.pocket.data.EatSummary
+import com.teatt.pocket.data.EatTask
 import com.teatt.pocket.data.EatTaskState
 import com.teatt.pocket.data.EatUser
 import com.teatt.pocket.ui.BrandPink
@@ -96,7 +97,7 @@ private val WHEEL_COLORS = listOf(
 )
 
 @Composable
-fun WheelPage(token: String, topInset: Dp, refreshTick: Int) {
+fun WheelPage(token: String, topInset: Dp, refreshTick: Int, onToast: (String) -> Unit) {
     var dishes by remember { mutableStateOf<List<EatDish>>(emptyList()) }
     var state by remember { mutableStateOf<EatTaskState?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -105,6 +106,7 @@ fun WheelPage(token: String, topInset: Dp, refreshTick: Int) {
     val angle = remember { Animatable(0f) }
     val measurer = rememberTextMeasurer()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val bottomInset = LocalBarInset.current + 20.dp
 
     suspend fun load() {
@@ -146,6 +148,8 @@ fun WheelPage(token: String, topInset: Dp, refreshTick: Int) {
             animationSpec = tween(3600, easing = CubicBezierEasing(0.16f, 0.9f, 0.18f, 1f))
         )
         state = result
+        // 自己抽出来的任务记为已读，避免下次启动重复弹任务提醒
+        EatTaskSeen.markSeen(context, picked.id)
         spinning = false
     }
 
@@ -238,7 +242,7 @@ fun WheelPage(token: String, topInset: Dp, refreshTick: Int) {
         if (task != null && !spinning) {
             Spacer(Modifier.height(10.dp))
             PrimaryButton("🍽️ 就吃这个了！") {
-                message = "已生成任务，快去吃吧！"
+                onToast("已生成任务，快去吃吧！")
             }
         }
 
@@ -654,11 +658,14 @@ fun MinePage(
     var viewer by remember { mutableStateOf<String?>(null) }
     var showAddStore by remember { mutableStateOf(false) }
     var showAddDish by remember { mutableStateOf(false) }
+    var taskState by remember { mutableStateOf<EatTaskState?>(null) }
+    var reviewingTask by remember { mutableStateOf<EatTask?>(null) }
     val scope = rememberCoroutineScope()
     val bottomInset = LocalBarInset.current + 20.dp
 
     LaunchedEffect(token, period, refreshTick) {
         loading = true
+        runCatching { taskState = EatApi.task(token) }
         runCatching { summary = EatApi.summary(token, period) }
         runCatching { wall = EatApi.wall(token) }
         loading = false
@@ -669,6 +676,16 @@ fun MinePage(
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = topInset + 6.dp, bottom = bottomInset),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        item {
+            val state = taskState
+            val task = state?.task
+            when {
+                task != null -> MineTaskCard(task) { reviewingTask = task }
+                loading && state == null -> Unit
+                else -> EmptyTaskCard()
+            }
+        }
+
         item {
             Row(
                 Modifier
@@ -765,6 +782,75 @@ fun MinePage(
         )
     }
     viewer?.let { FullImageDialog(it) { viewer = null } }
+    reviewingTask?.let { task ->
+        ReviewEditor(
+            token = token,
+            parent = null,
+            presetTask = task,
+            onDismiss = { reviewingTask = null },
+            onDone = {
+                reviewingTask = null
+                onNeedReload()
+            }
+        )
+    }
+}
+
+@Composable
+private fun MineTaskCard(task: EatTask, onReview: () -> Unit) {
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(
+                "🎯 当前任务" + if (task.global) "（全局共享）" else "（我的）",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(task.dishName.ifBlank { "这份神秘料理" }, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "🍽️ ${task.storeName.ifBlank { "—" }}",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "📍 ${task.location.ifBlank { "—" }} · ${priceText(task.price)} · ⭐ ${taskRatingText(task.rating)}",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+            SoftAction("✍️ 我要评价", onReview)
+        }
+    }
+}
+
+@Composable
+private fun EmptyTaskCard() {
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+        Text(
+            "还没有任务，去「转盘」抽一个吧～",
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth().padding(18.dp)
+        )
+    }
+}
+
+@Composable
+private fun SoftAction(text: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(15.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f))
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text, fontSize = 14.sp, color = BrandPink, fontWeight = FontWeight.Medium)
+    }
 }
 
 @Composable
@@ -776,10 +862,139 @@ private fun StatCell(value: String, label: String, modifier: Modifier = Modifier
     }
 }
 
+private fun taskRatingText(rating: Double?): String =
+    rating?.let { String.format(Locale.US, "%.1f", it) } ?: "暂无评分"
+
 // ---------------------------------------------------------------- 弹窗
 
+/** 启动时的「你有新任务」弹窗，对应网页端 #taskMask。 */
 @Composable
-fun DishDetailDialog(dish: EatDish, onDismiss: () -> Unit, onChoose: () -> Unit) {
+fun TaskNoticeDialog(task: EatTask, onReview: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("🔔 你有新任务", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                Text(
+                    "大家已经帮你决定了，去吃这一个吧！",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f))
+                        .padding(14.dp)
+                ) {
+                    val priceLine = if (task.price > 0)
+                        "价格是 ${String.format(Locale.US, "%.0f", task.price)} 元"
+                    else "价格待定"
+                    Text(
+                        task.dishName.ifBlank { "这份神秘料理" },
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "你要吃的是 ${task.dishName.ifBlank { "这份神秘料理" }}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "位置在 ${task.location.ifBlank { "—" }}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        priceLine,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "评分 ${taskRatingText(task.rating)}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onReview) { Text("我要评价", color = BrandPink, fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("我知道了") }
+        }
+    )
+}
+
+/** 店铺「就吃这家了！」后的确认弹窗，对应网页端 showConfirmTask。 */
+@Composable
+fun TaskConfirmDialog(task: EatTask, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("🍽️ 就决定是你了", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                Text(
+                    "帮你从这家店挑了一个～",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f))
+                        .padding(14.dp)
+                ) {
+                    Text(
+                        task.dishName.ifBlank { "这份神秘料理" },
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "🍽️ ${task.storeName.ifBlank { "—" }}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "📍 ${task.location.ifBlank { "—" }}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "价格 ${priceText(task.price)}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "⭐ ${taskRatingText(task.rating)}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("就吃这个了！", color = BrandPink, fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("再想想") }
+        }
+    )
+}
+
+@Composable
+fun DishDetailDialog(
+    dish: EatDish,
+    onDismiss: () -> Unit,
+    onChoose: () -> Unit,
+    busy: Boolean = false
+) {
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface) {
             Column(Modifier.padding(16.dp)) {
@@ -800,7 +1015,7 @@ fun DishDetailDialog(dish: EatDish, onDismiss: () -> Unit, onChoose: () -> Unit)
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(14.dp))
-                PrimaryButton("🍽️ 就吃这个了！", onClick = onChoose)
+                PrimaryButton(if (busy) "提交中…" else "🍽️ 就吃这个了！", enabled = !busy, onClick = onChoose)
                 Spacer(Modifier.height(8.dp))
                 TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("关闭") }
             }
@@ -1001,15 +1216,17 @@ private fun PickerDialog(
 fun ReviewEditor(
     token: String,
     parent: EatReview?,
+    presetTask: EatTask? = null,
     onDismiss: () -> Unit,
     onDone: () -> Unit
 ) {
     val isSame = parent != null
+    val lockedTask = presetTask?.takeIf { !isSame }
     var stores by remember { mutableStateOf<List<EatStore>>(emptyList()) }
     var dishes by remember { mutableStateOf<List<EatDish>>(emptyList()) }
     var users by remember { mutableStateOf<List<EatUser>>(emptyList()) }
-    var storeId by remember { mutableStateOf(parent?.storeId ?: 0) }
-    var dishId by remember { mutableStateOf(parent?.dishId ?: 0) }
+    var storeId by remember { mutableStateOf(parent?.storeId ?: presetTask?.storeId ?: 0) }
+    var dishId by remember { mutableStateOf(parent?.dishId ?: presetTask?.dishId ?: 0) }
     var rating by remember { mutableStateOf(0) }
     var comment by remember { mutableStateOf("") }
     val guests = remember { mutableStateListOf<Int>() }
@@ -1029,8 +1246,14 @@ fun ReviewEditor(
         }
     }
 
-    val storeName = stores.firstOrNull { it.id == storeId }?.name ?: parent?.storeName.orEmpty()
-    val dishName = dishes.firstOrNull { it.id == dishId }?.name ?: parent?.dishName.orEmpty()
+    val storeName = stores.firstOrNull { it.id == storeId }?.name
+        ?: parent?.storeName
+        ?: lockedTask?.storeName.orEmpty()
+    val dishName = dishes.firstOrNull { it.id == dishId }?.name
+        ?: parent?.dishName
+        ?: lockedTask?.dishName.orEmpty()
+    val lockedPrice = parent?.price ?: lockedTask?.price ?: 0.0
+    val locked = isSame || lockedTask != null
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
@@ -1051,8 +1274,8 @@ fun ReviewEditor(
                 )
                 Spacer(Modifier.height(14.dp))
 
-                if (isSame) {
-                    // 同评锁定目标，不给改
+                if (locked) {
+                    // 同评 / 从任务进来：目标锁定，不给改
                     Column(
                         Modifier
                             .fillMaxWidth()
@@ -1063,7 +1286,7 @@ fun ReviewEditor(
                         Text(dishName.ifBlank { "这道菜" }, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(3.dp))
                         Text(
-                            "🍽️ ${storeName.ifBlank { "—" }}" + if ((parent?.price ?: 0.0) > 0) " · ${priceText(parent!!.price)}" else "",
+                            "🍽️ ${storeName.ifBlank { "—" }}" + if (lockedPrice > 0) " · ${priceText(lockedPrice)}" else "",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
