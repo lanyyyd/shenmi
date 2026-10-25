@@ -1,5 +1,7 @@
 package com.teatt.pocket.feature.wireguard
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -39,18 +41,23 @@ fun WgToolsHost(
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
             decorFitsSystemWindows = false
-        ),
-        modifier = modifier.fillMaxSize()
+        )
     ) {
-        when (uiState) {
-            WgUiState.Login -> WgLoginScreen(
-                onBack = onDismiss,
-                onLoggedIn = { uiState = WgUiState.Panel }
-            )
+        Box(
+            modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            when (uiState) {
+                WgUiState.Login -> WgLoginScreen(
+                    onBack = onDismiss,
+                    onLoggedIn = { uiState = WgUiState.Panel }
+                )
 
-            WgUiState.Panel -> WgSheet(
-                onBack = onDismiss
-            )
+                WgUiState.Panel -> WgSheet(
+                    onBack = onDismiss
+                )
+            }
         }
     }
 }
