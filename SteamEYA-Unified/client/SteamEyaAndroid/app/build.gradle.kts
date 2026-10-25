@@ -11,12 +11,12 @@ val appVersionCode = ((project.findProperty("appVersionCode") as String?) ?: "1"
 
 android {
     namespace = "com.teatt.pocket"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.teatt.pocket"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 37
         versionCode = appVersionCode
         versionName = appVersionName
     }
