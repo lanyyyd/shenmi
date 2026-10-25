@@ -46,10 +46,21 @@ jobs:
           echo "=== 已装 build-tools ==="
           ls "$SDK/build-tools" 2>/dev/null || true
 
-      # 不指定 gradle-version：runner 自带 Gradle 9.8.1（/usr/bin/gradle），
-      # 而 setup-gradle 的版本清单里 9.4 实际叫 9.4.0，写 9.4 会报 "does not exist"。
-      - name: Setup Gradle
+      - name: Setup Gradle（仅用于缓存）
         uses: gradle/actions/setup-gradle@v4
+
+      # 必须锁 Gradle 9.0：
+      #   - runner 自带 9.8.1，而 Gradle 9.6 起移除了 AGP 8.x 依赖的
+      #     org.gradle.api.problems.internal.InternalProblems，直接 "Failed to apply plugin"
+      #   - 9.1~9.5 官方没有发布（distributions 全部 404），所以 9.0 是唯一可用版本
+      - name: 安装 Gradle 9.0
+        run: |
+          curl -sSL -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-9.0-bin.zip
+          unzip -q /tmp/gradle.zip -d "$HOME/.gradle-dist"
+          echo "$HOME/.gradle-dist/gradle-9.0/bin" >> "$GITHUB_PATH"
+
+      - name: 确认 Gradle 版本
+        run: gradle --version
 
       - name: 还原签名密钥
         env:
