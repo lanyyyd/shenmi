@@ -8,6 +8,7 @@ import json
 import os
 import time
 import uuid
+from datetime import datetime
 
 import requests
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
@@ -523,6 +524,60 @@ def my(user: dict = Depends(get_current_user)):
 
 
 # ---------------- 管理员：云游戏账号管理 ----------------
+@router.get("/admin/games")
+def admin_games(admin: dict = Depends(require_admin)):
+    """后台：全部游戏（内置 + 用户自定义），供管理页面做「删除自定义游戏名」。"""
+    seed_builtin_games()
+    rows = query_all(
+        "SELECT g.game_key, g.name, g.url, g.vendor, g.builtin, g.visible, g.created_by, g.created_at, "
+        "COALESCE(NULLIF(u.nickname,''), u.username, '') AS creator "
+        "FROM cloud_games g LEFT JOIN users u ON u.id = g.created_by "
+        "ORDER BY g.builtin DESC, g.id"
+    )
+    out = []
+    for r in rows:
+        d = dict(r)
+        # 该游戏下还留着的云端 Cookie 数，删之前先告诉管理员会连带删掉多少
+        d["cookie_count"] = query_one(
+            "SELECT COUNT(*) AS c FROM cloud_cookies WHERE game=?", (r["game_key"],)
+        )["c"]
+        d["builtin"] = bool(r["builtin"])
+        d["visible"] = bool(r["visible"])
+        d["mine"] = r["created_by"] == admin["id"]
+        out.append(d)
+    return {"ok": True, "games": out}
+
+
+@router.delete("/admin/games/{game_key}")
+def admin_delete_game(game_key: str, admin: dict = Depends(require_admin)):
+    """后台：删除一个用户自定义的游戏名。
+
+    删掉后客户端的游戏列表里就不会再有它（/api/cloud/games 是查 cloud_games 表的）。
+    内置游戏不允许删（否则会破坏原神/星铁这些核心功能）。
+
+    连带删除该游戏下所有云端 Cookie —— 留着的话账号列表会出现「游戏名不存在」的孤儿记录。
+    """
+    row = query_one("SELECT game_key, name, builtin FROM cloud_games WHERE game_key=?", (game_key,))
+    if not row:
+        raise HTTPException(404, "游戏不存在")
+    if row["builtin"]:
+        raise HTTPException(400, "内置游戏不能删除")
+
+    cookies = query_one(
+        "SELECT COUNT(*) AS c FROM cloud_cookies WHERE game=?", (game_key,)
+    )["c"]
+    execute("DELETE FROM cloud_cookies WHERE game=?", (game_key,))
+    execute("DELETE FROM cloud_games WHERE game_key=?", (game_key,))
+    # 留痕（与 admin.py 的 _audit 写同一张 logs 表；_audit 是那个模块私有的，这里自己写）
+    execute(
+        "INSERT INTO logs (user_id, username, action, detail, ip_address, created_at) VALUES (?,?,?,?,?,?)",
+        (admin["id"], admin["username"], "delete_cloud_game",
+         f"{row['name']}（{game_key}），连带删除 {cookies} 条云端 Cookie", "",
+         datetime.now().isoformat()),
+    )
+    return {"ok": True, "deleted_cookies": cookies}
+
+
 @router.get("/admin/stats")
 def admin_stats(admin: dict = Depends(require_admin)):
     total = query_one("SELECT COUNT(*) AS c FROM cloud_cookies")["c"]

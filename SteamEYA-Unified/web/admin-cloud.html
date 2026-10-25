@@ -136,6 +136,23 @@ html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c
 
     <div class="card" style="margin-top:20px">
       <div class="card-h">
+        <h2>游戏名管理</h2>
+        <div class="spacer"></div>
+        <span class="mono" style="font-size:12px;opacity:.7">删除后该游戏名不再出现在客户端游戏列表</span>
+        <button class="btn" onclick="loadGames()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr>
+            <th>游戏名</th><th>Key</th><th>类型</th><th>创建者</th><th>可见性</th><th>云端 Cookie</th><th>操作</th>
+          </tr></thead>
+          <tbody id="gameBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
         <h2>上号日志</h2>
         <div class="spacer"></div>
         <button class="btn" onclick="loadLogs()">刷新</button>
@@ -239,7 +256,36 @@ async function loadLogs(){
     <td data-l="IP"><span class="mono">${esc(l.client_ip||'—')}</span></td>
   </tr>`).join('');
 }
-function loadAll(){ loadUsers(); loadStats(); loadAccounts(); loadLogs(); }
+
+/* 游戏名管理：删除用户自定义的游戏名 */
+async function loadGames(){
+  const r = await fetch('/api/cloud/admin/games'); if(!r.ok) return;
+  const d = await r.json().catch(()=>({}));
+  const list = (d && d.games) || [];
+  if(!list.length){ $('gameBody').innerHTML = '<tr><td colspan="7" class="empty">暂无游戏</td></tr>'; return; }
+  $('gameBody').innerHTML = list.map(g=>`<tr>
+    <td data-l="游戏名"><strong>${esc(g.name||'—')}</strong></td>
+    <td data-l="Key"><span class="mono">${esc(g.game_key||'')}</span></td>
+    <td data-l="类型">${g.builtin?'<span class="chip">内置</span>':'<span class="chip gray">自定义</span>'}</td>
+    <td data-l="创建者"><span class="mono">${esc(g.creator||'—')}</span></td>
+    <td data-l="可见性">${g.visible?'<span class="chip">公开</span>':'<span class="chip gray">仅创建者</span>'}</td>
+    <td data-l="云端 Cookie">${esc(g.cookie_count||0)} 条</td>
+    <td data-l="操作"><div class="acts">${g.builtin
+      ? '<span style="opacity:.5;font-size:12px">内置不可删</span>'
+      : `<button class="dg" onclick="delGame('${esc(g.game_key)}','${esc(g.name)}',${g.cookie_count||0})">删除</button>`}</div></td>
+  </tr>`).join('');
+}
+async function delGame(key, name, cookieCount){
+  let msg = `确定删除游戏名「${name}」？\n删除后客户端的游戏列表里不会再出现它。`;
+  if(cookieCount > 0) msg += `\n\n该游戏下还有 ${cookieCount} 条云端 Cookie，会一并删除。`;
+  if(!confirm(msg)) return;
+  const r = await fetch('/api/cloud/admin/games/'+encodeURIComponent(key),{method:'DELETE'});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ toast(d.detail||d.error||'删除失败'); return; }
+  toast(`已删除「${name}」`+(d.deleted_cookies?`，连带删除 ${d.deleted_cookies} 条 Cookie`:''));
+  loadAll();
+}
+function loadAll(){ loadUsers(); loadStats(); loadAccounts(); loadLogs(); loadGames(); }
 
 /* 用户下拉（编辑时选择把该云端账号分配给谁） */
 async function loadUsers(){
