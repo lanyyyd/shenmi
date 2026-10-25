@@ -7,7 +7,9 @@ import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.teatt.pocket.core.Session
+import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
 
 @SuppressLint("StaticFieldLeak")
@@ -25,12 +27,24 @@ class App : Application(), SingletonImageLoader.Factory {
     }
 
     /**
-     * 图片磁盘缓存显式固定到 cacheDir/image_cache 并给到 256MB。
-     * 网关的 /uploads 是 StaticFiles 直出、没有 Cache-Control，靠默认策略容易退化；
-     * 这里把缓存目录和上限写死，冷启动后直接按 URL 命中，不再重下一整批图。
+     * 图片加载器：
+     * 1) 网络层强制把 /uploads 的响应改写成 `Cache-Control: max-age=30d`。
+     *    网关原本不带缓存头，Coil 认为每次都过期，冷启动会把整批图重下一遍（≈70MB）。
+     * 2) 磁盘缓存固定到 cacheDir/image_cache，上限 256MB，保证跨进程复用。
      */
+    private val imageClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .addNetworkInterceptor { chain ->
+                chain.proceed(chain.request()).newBuilder()
+                    .header("Cache-Control", "public, max-age=2592000")
+                    .build()
+            }
+            .build()
+    }
+
     override fun newImageLoader(context: PlatformContext): ImageLoader =
         ImageLoader.Builder(context)
+            .components { add(OkHttpNetworkFetcherFactory(callFactory = { imageClient })) }
             .diskCache {
                 DiskCache.Builder()
                     .directory(context.cacheDir.resolve("image_cache").toOkioPath())

@@ -133,8 +133,7 @@ fun WheelPage(token: String, topInset: Dp, refreshTick: Int) {
             message = "抽不出来，稍后再试"
             return
         }
-        state = result
-
+        // 结果先扣在手里：等转盘停稳再落到 state，否则还没转完答案就蹦出来了
         var idx = dishes.indexOfFirst { it.id == picked.dishId }
         if (idx < 0) idx = 0
         val sweep = 360f / n
@@ -146,6 +145,7 @@ fun WheelPage(token: String, topInset: Dp, refreshTick: Int) {
             targetValue = current + delta,
             animationSpec = tween(3600, easing = CubicBezierEasing(0.16f, 0.9f, 0.18f, 1f))
         )
+        state = result
         spinning = false
     }
 
@@ -184,7 +184,15 @@ fun WheelPage(token: String, topInset: Dp, refreshTick: Int) {
         // 当前结果
         Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp)) {
-                if (task == null) {
+                if (spinning) {
+                    Text("转盘转动中…", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "停稳后揭晓今天吃什么",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else if (task == null) {
                     Text("今天还没抽出结果，点下面「抽」试试", fontSize = 13.sp)
                     Spacer(Modifier.height(4.dp))
                     Text(

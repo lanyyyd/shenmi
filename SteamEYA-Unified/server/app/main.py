@@ -39,6 +39,20 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def _cache_uploads(request, call_next):
+    """给 /uploads/ 下的静态资源补缓存头。
+
+    StaticFiles 直出不带 Cache-Control，WebView / Coil / 浏览器没有新鲜度依据，
+    每次进页面都要重新把整批图拉一遍（「吃什么」一进就是几十 MB）。
+    这里统一补 30 天，客户端就能真正命中本地缓存。
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/uploads/"):
+        response.headers["Cache-Control"] = "public, max-age=2592000"
+    return response
+
+
 @app.on_event("startup")
 def _startup():
     init_db()
