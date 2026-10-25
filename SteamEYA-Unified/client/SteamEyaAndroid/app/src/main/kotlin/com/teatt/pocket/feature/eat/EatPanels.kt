@@ -665,7 +665,7 @@ fun AddStoreDialog(token: String, onDismiss: () -> Unit, onDone: () -> Unit) {
                 ImagePickerRow(
                     token = token,
                     images = listOf(image).filter { it.isNotBlank() },
-                    onPick = { image = it.firstOrNull().orEmpty() },
+                    onPick = { image = it },
                     maxCount = 1
                 )
                 error?.let {
@@ -747,7 +747,7 @@ fun AddDishDialog(token: String, stores: List<EatStore>, onDismiss: () -> Unit, 
                 ImagePickerRow(
                     token = token,
                     images = listOf(image).filter { it.isNotBlank() },
-                    onPick = { image = it.firstOrNull().orEmpty() },
+                    onPick = { image = it },
                     maxCount = 1
                 )
                 error?.let {
