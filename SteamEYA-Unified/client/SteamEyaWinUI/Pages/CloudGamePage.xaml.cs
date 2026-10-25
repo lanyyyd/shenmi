@@ -81,6 +81,9 @@ public sealed partial class CloudGamePage : Page
                 return;
             }
 
+            // 登记 key → 名称，供「我的账号」列表里只拿到 key 的地方反查。
+            CloudGameService.RememberGames(games);
+
             var target = selectKey ?? CurrentGame;
             GameCombo.Items.Clear();
             _gameUrls.Clear();
@@ -189,6 +192,9 @@ public sealed partial class CloudGamePage : Page
     /// <summary>当前游戏的打开地址；内置游戏返回 null。</summary>
     private string? CurrentGameUrl => _gameUrls.GetValueOrDefault(CurrentGame);
 
+    /// <summary>当前游戏的显示名，传给引擎做提示文案，避免出现 custom_xxxxxxxx。</summary>
+    private string CurrentGameName => CloudGameService.DisplayName(CurrentGame);
+
     private async Task RefreshStatusAsync()
     {
         try
@@ -223,7 +229,7 @@ public sealed partial class CloudGamePage : Page
                 return;
             }
 
-            var (ok, body, error) = await _cloud.EngineLoginAsync(game, CurrentBrowser, cookies, data.ComboToken ?? "", CurrentGameUrl);
+            var (ok, body, error) = await _cloud.EngineLoginAsync(game, CurrentBrowser, cookies, data.ComboToken ?? "", CurrentGameUrl, CurrentGameName);
             if (!ok)
             {
                 ShowInfo($"调用本地引擎失败：{error}（请确认引擎服务已启动）", InfoBarSeverity.Error);
@@ -243,7 +249,7 @@ public sealed partial class CloudGamePage : Page
 
     private async void OnOpenBrowser(object sender, RoutedEventArgs e)
     {
-        var (ok, _, error) = await _cloud.EngineOpenAsync(CurrentGame, CurrentBrowser, CurrentGameUrl);
+        var (ok, _, error) = await _cloud.EngineOpenAsync(CurrentGame, CurrentBrowser, CurrentGameUrl, CurrentGameName);
         ShowInfo(ok ? "已打开浏览器，请登录后点「抓取并上传」" : $"打开浏览器失败：{error}",
             ok ? InfoBarSeverity.Informational : InfoBarSeverity.Error);
     }
@@ -251,7 +257,7 @@ public sealed partial class CloudGamePage : Page
     private async void OnCaptureUpload(object sender, RoutedEventArgs e)
     {
         var game = CurrentGame;
-        var (ok, body, error) = await _cloud.EngineCaptureAsync(game, CurrentGameUrl);
+        var (ok, body, error) = await _cloud.EngineCaptureAsync(game, CurrentGameUrl, CurrentGameName);
         if (!ok)
         {
             ShowInfo($"抓取失败：{error}", InfoBarSeverity.Error);

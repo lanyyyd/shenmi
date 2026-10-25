@@ -21,6 +21,49 @@ internal sealed class CloudGameService
         ("bilibili", "哔哩哔哩")
     ];
 
+    /// <summary>
+    /// 运行时已知的 key → 显示名（内置 + 服务端返回的自定义游戏）。
+    /// 页面刷新列表时写入，供「我的账号」等只拿到 key 的地方反查。
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> KnownNames =
+        new(StringComparer.Ordinal);
+
+    /// <summary>把服务端返回的游戏列表登记进来，后续按 key 反查显示名。</summary>
+    internal static void RememberGames(IEnumerable<CloudGameItemDto> games)
+    {
+        foreach (var game in games)
+        {
+            if (!string.IsNullOrWhiteSpace(game.Key) && !string.IsNullOrWhiteSpace(game.Name))
+            {
+                KnownNames[game.Key] = game.Name;
+            }
+        }
+    }
+
+    /// <summary>key → 显示名；未知就直接返回 key，不再拼「自定义游戏」之类占位。</summary>
+    public static string DisplayName(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return string.Empty;
+        }
+
+        if (KnownNames.TryGetValue(key, out var name))
+        {
+            return name;
+        }
+
+        foreach (var (k, n) in Games)
+        {
+            if (string.Equals(k, key, StringComparison.Ordinal))
+            {
+                return n;
+            }
+        }
+
+        return key;
+    }
+
     private static HttpRequestMessage Auth(HttpMethod method, string path)
     {
         var req = new HttpRequestMessage(method, SessionState.BaseUrl.TrimEnd('/') + path);
@@ -104,29 +147,40 @@ internal sealed class CloudGameService
 
     // ---------------- 本地引擎（Selenium 服务） ----------------
     /// <param name="url">自定义游戏的打开地址；内置游戏传 null 由引擎查表。</param>
-    public async Task<(bool ok, string body, string? error)> EngineOpenAsync(string game, string browser, string? url = null, CancellationToken ct = default)
-        => await EnginePostAsync("/engine/browser/open", WithUrl(
-            new JsonObject { ["game"] = game, ["browser"] = browser }, url), ct);
+    public async Task<(bool ok, string body, string? error)> EngineOpenAsync(
+        string game, string browser, string? url = null, string? name = null, CancellationToken ct = default)
+        => await EnginePostAsync("/engine/browser/open", WithTarget(
+            new JsonObject { ["game"] = game, ["browser"] = browser }, url, name), ct);
 
-    public async Task<(bool ok, string body, string? error)> EngineCaptureAsync(string game, string? url = null, CancellationToken ct = default)
-        => await EnginePostAsync("/engine/capture", WithUrl(new JsonObject { ["game"] = game }, url), ct);
+    public async Task<(bool ok, string body, string? error)> EngineCaptureAsync(
+        string game, string? url = null, string? name = null, CancellationToken ct = default)
+        => await EnginePostAsync("/engine/capture", WithTarget(new JsonObject { ["game"] = game }, url, name), ct);
 
     public async Task<(bool ok, string body, string? error)> EngineLoginAsync(
-        string game, string browser, JsonElement cookies, string comboToken, string? url = null, CancellationToken ct = default)
-        => await EnginePostAsync("/engine/login", WithUrl(new JsonObject
+        string game, string browser, JsonElement cookies, string comboToken,
+        string? url = null, string? name = null, CancellationToken ct = default)
+        => await EnginePostAsync("/engine/login", WithTarget(new JsonObject
         {
             ["game"] = game,
             ["browser"] = browser,
             ["combo_token"] = comboToken,
             ["cookies"] = JsonNode.Parse(cookies.GetRawText())
-        }, url), ct);
+        }, url, name), ct);
 
-    /// <summary>自定义游戏才带 url，内置的保持原请求体不变（引擎查表更可靠）。</summary>
-    private static JsonObject WithUrl(JsonObject body, string? url)
+    /// <summary>
+    /// 自定义游戏才带 url；name 用来让引擎的提示文案显示「抖音」而不是 custom_xxxxxxxx。
+    /// 内置游戏两者都不传，引擎查表更可靠。
+    /// </summary>
+    private static JsonObject WithTarget(JsonObject body, string? url, string? name)
     {
         if (!string.IsNullOrWhiteSpace(url))
         {
             body["url"] = url;
+        }
+
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            body["name"] = name;
         }
 
         return body;

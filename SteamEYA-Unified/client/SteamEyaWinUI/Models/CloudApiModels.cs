@@ -82,14 +82,17 @@ internal sealed class CloudGameItem
     [JsonPropertyName("total_duration")]
     public int? TotalDuration { get; set; }
 
-    public string GameName => Game switch
-    {
-        "genshin" => "原神",
-        "starrail" => "星穹铁道",
-        "yihuan" => "异环",
-        "bilibili" => "哔哩哔哩",
-        _ => Game
-    };
+    /// <summary>服务端解析好的显示名（含用户自定义游戏）；老服务端不返回时为空。</summary>
+    [JsonPropertyName("game_name")]
+    public string GameNameFromServer { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 显示名优先级：服务端 → 客户端已知列表（/api/cloud/games 拉到的）→ 内置硬编码 → key。
+    /// 之前只有内置 switch，自定义游戏（key 形如 custom_xxxxxxxx）会直接把 key 显示给用户。
+    /// </summary>
+    public string GameName => !string.IsNullOrWhiteSpace(GameNameFromServer)
+        ? GameNameFromServer
+        : Services.CloudGameService.DisplayName(Game);
 
     public string StatusText => Valid switch
     {

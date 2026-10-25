@@ -297,6 +297,26 @@ def inject_cookies(driver: webdriver.Remote, cookies: list, game: str = "genshin
             logger.debug(f"跳过 Cookie {cookie['name']}: {e}")
 
 
+def display_name(game: str, url: str | None = None, name: str | None = None) -> str:
+    """给人看的游戏名：客户端传的 name → 内置表 → 自定义地址的域名 → key。
+
+    自定义游戏的 key 是 custom_xxxxxxxx，直接抛给用户看不懂。
+    """
+    if name:
+        return name
+    cfg = GAMES.get(game)
+    if cfg:
+        return cfg.get("name") or game
+    if url:
+        try:
+            host = (urlparse(url).netloc or "").lower()
+        except Exception:
+            host = ""
+        if host:
+            return host
+    return game
+
+
 def _resolve_cfg(game: str, url: str | None = None) -> dict:
     """取游戏配置：内置查表，自定义按传入地址推导（域名用于 Cookie 过滤）。"""
     cfg = GAMES.get(game)

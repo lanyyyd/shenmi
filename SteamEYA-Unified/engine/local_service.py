@@ -99,13 +99,14 @@ def browser_open(payload: dict = Body(...)):
     game = payload.get("game") or "genshin"
     browser = payload.get("browser") or "edge"
     url = (payload.get("url") or "").strip() or None
+    name = (payload.get("name") or "").strip() or None
     with _driver_lock:
         try:
             drv = _drv()
             driver, reused = _get_capture_driver(game, browser)
             if not reused:
                 drv.navigate_to_game(driver, game, url)
-            return {"ok": True, "reused": reused, "name": drv.GAMES.get(game, {}).get("name", game)}
+            return {"ok": True, "reused": reused, "name": drv.display_name(game, url, name)}
         except Exception as e:
             return {"ok": False, "msg": str(e)}
 
@@ -114,11 +115,12 @@ def browser_open(payload: dict = Body(...)):
 def capture(payload: dict = Body(...)):
     game = payload.get("game") or "genshin"
     url = (payload.get("url") or "").strip() or None
+    name = (payload.get("name") or "").strip() or None
     with _driver_lock:
         drv = _drv()
         driver = _capture_drivers.get(game)
         if driver is None:
-            return {"ok": False, "msg": f"请先为「{drv.GAMES.get(game, {}).get('name', game)}」打开浏览器"}
+            return {"ok": False, "msg": f"请先为「{drv.display_name(game, url, name)}」打开浏览器"}
         try:
             cookies = drv.capture_cookies(driver, game, url)
             combo = ""
