@@ -6,6 +6,7 @@ import android.webkit.WebView
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
+import coil3.disk.DiskCache
 import com.teatt.pocket.core.Session
 
 @SuppressLint("StaticFieldLeak")
@@ -23,13 +24,18 @@ class App : Application(), SingletonImageLoader.Factory {
     }
 
     /**
-     * Coil 默认 respectCacheHeaders=true：网关的 /uploads 由 StaticFiles/nginx 提供，
-     * 没有 Cache-Control，Coil 每次冷启动都会把这批图重新拉一遍（≈70MB）。
-     * 这里关掉它，按 URL 直接吃本地磁盘缓存。
+     * 图片磁盘缓存显式固定到 cacheDir/image_cache 并给到 256MB。
+     * 网关的 /uploads 是 StaticFiles 直出、没有 Cache-Control，靠默认策略容易退化；
+     * 这里把缓存目录和上限写死，冷启动后直接按 URL 命中，不再重下一整批图。
      */
     override fun newImageLoader(context: PlatformContext): ImageLoader =
         ImageLoader.Builder(context)
-            .respectCacheHeaders(false)
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(context.cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(256L * 1024 * 1024)
+                    .build()
+            }
             .build()
 
     companion object {
