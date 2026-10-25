@@ -31,7 +31,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,6 +54,7 @@ import com.teatt.pocket.core.ApiException
 import com.teatt.pocket.core.Session
 import com.teatt.pocket.data.AuthApi
 import com.teatt.pocket.ui.BrandPink
+import com.teatt.pocket.ui.fieldColors
 import com.teatt.pocket.ui.BrandViolet
 import kotlinx.coroutines.launch
 
@@ -289,14 +289,6 @@ private fun SegmentButton(
         )
     }
 }
-
-@Composable
-private fun fieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = BrandPink,
-    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-    focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-    unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.45f)
-)
 
 @Composable
 internal fun Spacer8() = Spacer(Modifier.height(8.dp))

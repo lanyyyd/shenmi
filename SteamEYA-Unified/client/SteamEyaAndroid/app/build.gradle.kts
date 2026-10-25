@@ -55,6 +55,9 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // WireGuard 的 tunnel 库用到了 java.time / java.util.stream，
+        // 本项目 minSdk 26 —— 这两类 API 在 Android 8.0 已原生提供，无需 core library desugaring，
+        // 因此不引入 desugar_jdk_libs（避免与 AGP 9.x 的版本兼容问题）。
     }
 
     buildFeatures {
@@ -96,4 +99,7 @@ dependencies {
     // 液态玻璃：底部功能栏的背景折射与高光
     implementation(libs.backdrop)
     implementation(libs.kyant.shapes)
+
+    // 「小工具」里的 WireGuard VPN：官方用户态隧道库（GoBackend），不需要 root / NDK
+    implementation(libs.wireguard.tunnel)
 }

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「神秘WiFi」服务端部署在 47.104.210.199:8999，只有 HTTP（未配 HTTPS）。
+  这里只对这一个 IP 放开明文流量，其他域名仍然强制 HTTPS。
+
+  注意：usesCleartextTraffic 必须为 true，否则本文件里的
+  cleartextTrafficPermitted 会被系统忽略（那是全局开关）。
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">47.104.210.199</domain>
+    </domain-config>
+</network-security-config>

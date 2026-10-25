@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Person
@@ -59,6 +60,8 @@ import com.teatt.pocket.core.Session
 import com.teatt.pocket.core.SessionState
 import com.teatt.pocket.data.ProfileApi
 import com.teatt.pocket.feature.update.UpdateCenter
+import com.teatt.pocket.feature.wireguard.WgSession
+import com.teatt.pocket.feature.wireguard.WgToolsHost
 import com.teatt.pocket.ui.BrandPink
 import com.teatt.pocket.ui.BrandViolet
 import com.teatt.pocket.ui.LocalBarInset
@@ -73,6 +76,7 @@ fun ProfileScreen(
     var dialog by remember { mutableStateOf<ProfileDialog?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var showTools by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -208,6 +212,13 @@ fun ProfileScreen(
                         dialog = ProfileDialog.Password
                     }
                     SettingRow(
+                        Icons.Filled.Build,
+                        "小工具",
+                        if (WgSession.loggedIn) "WiFi" else "未登录"
+                    ) {
+                        showTools = true
+                    }
+                    SettingRow(
                         Icons.Filled.SystemUpdate,
                         "检查更新",
                         if (UpdateCenter.checking) "检查中…" else "当前 ${AppVersion.current}"
@@ -230,6 +241,10 @@ fun ProfileScreen(
                 }
             }
         }
+    }
+
+    if (showTools) {
+        WgToolsHost(onDismiss = { showTools = false })
     }
 
     when (val current = dialog) {
