@@ -34,6 +34,7 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.teatt.pocket.core.Session
 import com.teatt.pocket.feature.cloud.CloudScreen
+import com.teatt.pocket.feature.eat.EatScreen
 import com.teatt.pocket.feature.profile.ProfileScreen
 import com.teatt.pocket.feature.update.UpdateCenter
 import com.teatt.pocket.feature.update.UpdateDialogHost
@@ -91,7 +92,6 @@ fun RootScreen(
     val barHidden = imeVisible || overlayOpen
 
     val chatUrl = remember(state.token) { Session.webUrl("/") }
-    val eatUrl = remember(state.token) { Session.webUrl("/eat.html") }
 
     // 网页 tab 的底部让位：直接在这层把 WebView 缩到玻璃栏之上。
     // 之前靠 JS 给网页塞 --tt-bar + 兜底样式，网页 DOM 一改（聊天/吃什么的后端前端是独立演进的）
@@ -130,15 +130,10 @@ fun RootScreen(
                         )
                     }
                 }
+                // 「吃什么」已改成原生页面，不再嵌 WebView
                 if (1 in known) {
-                    WebPageLayer(visible = tab == 1) {
-                        WebPane(
-                            url = eatUrl,
-                            visible = tab == 1,
-                            barInsetPx = 0,
-                            backgroundColor = pageBg,
-                            modifier = Modifier.fillMaxSize().padding(bottom = webBottomPad)
-                        )
+                    NativePage(visible = tab == 1) {
+                        EatScreen(token = state.token, modifier = Modifier.fillMaxSize())
                     }
                 }
                 if (2 in known) {
