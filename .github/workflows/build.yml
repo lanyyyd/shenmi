@@ -4,7 +4,25 @@ name: Build TeaTT (Windows x64)
 on:
   push:
     branches: [ main, master ]
+    # 只在与桌面端相关的路径变化时构建：安卓目录的提交由 android.yml 负责，
+    # 不加过滤的话每推一次安卓代码都会白跑一遍 Windows 打包（几分钟 + 一个多余 Release）。
+    paths:
+      - 'SteamEYA-Unified/client/SteamEyaWinUI/**'
+      - 'SteamEYA-Unified/server/**'
+      - 'SteamEYA-Unified/web/**'
+      - 'SteamEYA-Unified/engine/**'
+      - 'SteamEYA-Unified/native/**'
+      - 'SteamEYA-Unified/build/**'
+      - '.github/workflows/build.yml'
   pull_request:
+    paths:
+      - 'SteamEYA-Unified/client/SteamEyaWinUI/**'
+      - 'SteamEYA-Unified/server/**'
+      - 'SteamEYA-Unified/web/**'
+      - 'SteamEYA-Unified/engine/**'
+      - 'SteamEYA-Unified/native/**'
+      - 'SteamEYA-Unified/build/**'
+      - '.github/workflows/build.yml'
   workflow_dispatch:
 
 # 发布安装包需要写权限：把产物传到 Release（Release 附件不占 Actions 存储配额）
