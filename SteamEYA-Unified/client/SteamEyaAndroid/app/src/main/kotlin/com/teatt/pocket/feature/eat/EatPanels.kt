@@ -4,7 +4,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +28,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -35,7 +38,6 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -52,18 +54,27 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
+import com.teatt.pocket.core.Session
 import com.teatt.pocket.data.EatApi
 import com.teatt.pocket.data.EatDish
 import com.teatt.pocket.data.EatImageRef
@@ -71,36 +82,78 @@ import com.teatt.pocket.data.EatReview
 import com.teatt.pocket.data.EatStore
 import com.teatt.pocket.data.EatSummary
 import com.teatt.pocket.data.EatTaskState
+import com.teatt.pocket.data.EatUser
 import com.teatt.pocket.ui.BrandPink
 import com.teatt.pocket.ui.LocalBarInset
 import kotlinx.coroutines.launch
+import java.util.Locale
 
-// ---------------------------------------------------------------- 转盘 / 今日推荐
+// ---------------------------------------------------------------- 转盘
+
+private val WHEEL_COLORS = listOf(
+    Color(0xFFFFB020), Color(0xFFFF8A00), Color(0xFFFFC53D),
+    Color(0xFFFFD97A), Color(0xFFFF9E2C), Color(0xFFFFB84D)
+)
 
 @Composable
-fun WheelPage(token: String) {
+fun WheelPage(token: String, topInset: Dp, refreshTick: Int) {
+    var dishes by remember { mutableStateOf<List<EatDish>>(emptyList()) }
     var state by remember { mutableStateOf<EatTaskState?>(null) }
     var loading by remember { mutableStateOf(true) }
-    var busy by remember { mutableStateOf(false) }
+    var spinning by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
-    val spin = remember { Animatable(0f) }
+    val angle = remember { Animatable(0f) }
+    val measurer = rememberTextMeasurer()
     val scope = rememberCoroutineScope()
     val bottomInset = LocalBarInset.current + 20.dp
 
-    suspend fun refresh() {
+    suspend fun load() {
+        loading = true
+        runCatching { dishes = EatApi.dishes(token) }
         runCatching { state = EatApi.task(token) }
         loading = false
     }
 
-    LaunchedEffect(token) { refresh() }
+    LaunchedEffect(token, refreshTick) { load() }
 
     val task = state?.task
+
+    suspend fun doSpin() {
+        if (spinning) return
+        val n = dishes.size
+        if (n == 0) {
+            message = "还没有菜品可以抽，先去「我的」加一道吧"
+            return
+        }
+        spinning = true
+        val result = runCatching { EatApi.spin(token) }.getOrNull()
+        val picked = result?.task
+        if (result == null || picked == null) {
+            spinning = false
+            message = "抽不出来，稍后再试"
+            return
+        }
+        state = result
+
+        var idx = dishes.indexOfFirst { it.id == picked.dishId }
+        if (idx < 0) idx = 0
+        val sweep = 360f / n
+        val base = -(idx * sweep + sweep / 2f)
+        val current = angle.value
+        val currentMod = ((current % 360f) + 360f) % 360f
+        val delta = ((base - currentMod) % 360f + 360f) % 360f + 360f * 5
+        angle.animateTo(
+            targetValue = current + delta,
+            animationSpec = tween(3600, easing = CubicBezierEasing(0.16f, 0.9f, 0.18f, 1f))
+        )
+        spinning = false
+    }
 
     Column(
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(start = 20.dp, end = 20.dp, bottom = bottomInset)
+            .padding(start = 20.dp, end = 20.dp, top = topInset + 6.dp, bottom = bottomInset)
     ) {
         Text(
             "全局大转盘",
@@ -109,64 +162,68 @@ fun WheelPage(token: String) {
             modifier = Modifier.padding(bottom = 8.dp)
         )
 
-        if (loading) {
-            Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
+        if (loading && dishes.isEmpty()) {
+            Box(Modifier.fillMaxWidth().height(240.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = BrandPink, strokeWidth = 2.dp)
             }
+        } else if (dishes.isEmpty()) {
+            Box(Modifier.fillMaxWidth().height(240.dp), contentAlignment = Alignment.Center) {
+                Text("还没有菜品，先去「我的」页添加吧～", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         } else {
-            Surface(
-                shape = RoundedCornerShape(22.dp),
-                color = MaterialTheme.colorScheme.surface,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(Modifier.padding(14.dp)) {
-                    Box(Modifier.graphicsLayer { rotationZ = spin.value }) {
+            BoxWithWheel(
+                dishes = dishes,
+                angle = angle.value,
+                measurer = measurer,
+                modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // 当前结果
+        Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp)) {
+                if (task == null) {
+                    Text("今天还没抽出结果，点下面「抽」试试", fontSize = 13.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "抽出来的结果全站共享，大家看到的是同一道菜",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         EatCover(
-                            url = task?.dishImage,
-                            fallback = "🎡",
-                            modifier = Modifier.fillMaxWidth().aspectRatio(4f / 3f).clip(RoundedCornerShape(18.dp))
+                            url = task.dishImage,
+                            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp))
                         )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    if (task == null) {
-                        Text("今天还没抽出结果，点下面的「抽」试试", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(6.dp))
-                        Text("抽出来的结果全站共享，大家看到的是同一道菜", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    } else {
-                        Text(task.dishName.ifBlank { "这份神秘料理" }, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "${task.storeName} · ${priceText(task.price)}",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(task.dishName.ifBlank { "这份神秘料理" }, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(2.dp))
                             Text(
-                                if (task.global) "🌍 全站共享" else "🙋 只对你生效",
+                                "${task.storeName} · ${priceText(task.price)}",
                                 fontSize = 11.sp,
-                                color = BrandPink
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            if (state?.overridden == true) {
-                                Spacer(Modifier.width(8.dp))
-                                Text("已选「我要吃别的」", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
                         }
+                        Text(
+                            if (task.global) "🌍 共享" else "🙋 仅你",
+                            fontSize = 10.sp,
+                            color = BrandPink
+                        )
                     }
                 }
             }
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
 
-        PrimaryButton(text = if (busy) "抽取中…" else "🎯 抽！", enabled = !busy) {
-            scope.launch {
-                busy = true
-                runCatching { EatApi.spin(token) }
-                    .onSuccess { state = it; spin.snapTo(0f); spin.animateTo(720f, tween(700)) }
-                    .onFailure { message = it.message ?: "抽不出来，稍后再试" }
-                busy = false
-            }
+        PrimaryButton(text = if (spinning) "转动中…" else "🎯 抽！", enabled = !spinning && dishes.isNotEmpty()) {
+            scope.launch { doSpin() }
         }
 
         Spacer(Modifier.height(10.dp))
@@ -177,12 +234,10 @@ fun WheelPage(token: String) {
                 .height(46.dp)
                 .clip(RoundedCornerShape(15.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f))
-                .clickable(enabled = !busy) {
+                .clickable(enabled = !spinning) {
                     scope.launch {
-                        busy = true
-                        runCatching { EatApi.eatOther(token); refresh() }
+                        runCatching { EatApi.eatOther(token); load() }
                             .onFailure { message = it.message }
-                        busy = false
                     }
                 },
             horizontalArrangement = Arrangement.Center,
@@ -191,7 +246,7 @@ fun WheelPage(token: String) {
             Text("🍽️ 我要吃别的", fontSize = 14.sp, color = BrandPink, fontWeight = FontWeight.Medium)
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
         Text(
             "「我要吃别的」只会重置你自己的结果，之后抽取只对你生效，不影响别人看到的那道菜。",
             fontSize = 11.sp,
@@ -209,15 +264,90 @@ fun WheelPage(token: String) {
     }
 }
 
+/** 画布转盘：扇区用菜品名，指针在正上方，中心是「抽」。 */
+@Composable
+private fun BoxWithWheel(
+    dishes: List<EatDish>,
+    angle: Float,
+    measurer: androidx.compose.ui.text.TextMeasurer,
+    modifier: Modifier = Modifier
+) {
+    val labelStyle = TextStyle(fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
+    val centerStyle = TextStyle(fontSize = 20.sp, color = Color(0xFFE06A00), fontWeight = FontWeight.Bold)
+
+    Canvas(modifier) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val radius = size.minDimension / 2f - 6.dp.toPx()
+        val n = dishes.size
+        val sweep = 360f / n
+
+        rotate(angle, center) {
+            dishes.forEachIndexed { i, dish ->
+                drawArc(
+                    color = WHEEL_COLORS[i % WHEEL_COLORS.size],
+                    startAngle = i * sweep - 90f,
+                    sweepAngle = sweep,
+                    useCenter = true,
+                    topLeft = Offset(center.x - radius, center.y - radius),
+                    size = Size(radius * 2, radius * 2)
+                )
+                drawArc(
+                    color = Color.White,
+                    startAngle = i * sweep - 90f,
+                    sweepAngle = sweep,
+                    useCenter = true,
+                    topLeft = Offset(center.x - radius, center.y - radius),
+                    size = Size(radius * 2, radius * 2),
+                    style = Stroke(width = 2.dp.toPx())
+                )
+            }
+
+            dishes.forEachIndexed { i, dish ->
+                val mid = i * sweep - 90f + sweep / 2f
+                rotate(mid, center) {
+                    val raw = if (dish.name.length > 6) dish.name.take(6) + "…" else dish.name
+                    val layout = measurer.measure(raw, labelStyle)
+                    drawText(
+                        textLayoutResult = layout,
+                        topLeft = Offset(
+                            center.x + radius - 22.dp.toPx() - layout.size.width,
+                            center.y - layout.size.height / 2f
+                        )
+                    )
+                }
+            }
+        }
+
+        // 中心按钮
+        drawCircle(Color.White, radius = radius * 0.26f, center = center)
+        drawCircle(Color(0xFFFF8A00), radius = radius * 0.26f, center = center, style = Stroke(width = 5.dp.toPx()))
+        val label = measurer.measure("抽", centerStyle)
+        drawText(
+            textLayoutResult = label,
+            topLeft = Offset(center.x - label.size.width / 2f, center.y - label.size.height / 2f)
+        )
+
+        // 顶部指针
+        val pointer = Path().apply {
+            moveTo(center.x - 11.dp.toPx(), center.y - radius - 2.dp.toPx())
+            lineTo(center.x + 11.dp.toPx(), center.y - radius - 2.dp.toPx())
+            lineTo(center.x, center.y - radius + 20.dp.toPx())
+            close()
+        }
+        drawPath(pointer, Color(0xFFE53935))
+    }
+}
+
 // ---------------------------------------------------------------- 评价流
 
 @Composable
-fun FeedPage(token: String) {
+fun FeedPage(token: String, topInset: Dp, refreshTick: Int) {
     var reviews by remember { mutableStateOf<List<EatReview>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var hasMore by remember { mutableStateOf(false) }
     var offset by remember { mutableStateOf(0) }
     var showEditor by remember { mutableStateOf(false) }
+    var sameTarget by remember { mutableStateOf<EatReview?>(null) }
     var viewer by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -238,7 +368,7 @@ fun FeedPage(token: String) {
         loading = false
     }
 
-    LaunchedEffect(token) { load(true) }
+    LaunchedEffect(token, refreshTick) { load(true) }
 
     Box(Modifier.fillMaxSize()) {
         when {
@@ -246,7 +376,7 @@ fun FeedPage(token: String) {
             reviews.isEmpty() -> CenterTip("还没有人发评价，来当第一个吧") { showEditor = true }
             else -> LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = bottomInset),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = topInset + 6.dp, bottom = bottomInset),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
@@ -272,6 +402,7 @@ fun FeedPage(token: String) {
                                     .onFailure { message = it.message }
                             }
                         },
+                        onSame = { sameTarget = review },
                         onImage = { viewer = it }
                     )
                 }
@@ -289,14 +420,22 @@ fun FeedPage(token: String) {
     if (showEditor) {
         ReviewEditor(
             token = token,
+            parent = null,
             onDismiss = { showEditor = false },
             onDone = { showEditor = false; scope.launch { load(true) } }
         )
     }
 
-    viewer?.let { url ->
-        FullImageDialog(url) { viewer = null }
+    sameTarget?.let { parent ->
+        ReviewEditor(
+            token = token,
+            parent = parent,
+            onDismiss = { sameTarget = null },
+            onDone = { sameTarget = null; scope.launch { load(true) } }
+        )
     }
+
+    viewer?.let { url -> FullImageDialog(url) { viewer = null } }
 
     message?.let {
         AlertDialog(
@@ -309,7 +448,12 @@ fun FeedPage(token: String) {
 }
 
 @Composable
-private fun ReviewCard(review: EatReview, onLike: () -> Unit, onImage: (String) -> Unit) {
+private fun ReviewCard(
+    review: EatReview,
+    onLike: () -> Unit,
+    onSame: () -> Unit,
+    onImage: (String) -> Unit
+) {
     Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -319,8 +463,9 @@ private fun ReviewCard(review: EatReview, onLike: () -> Unit, onImage: (String) 
                     Text(review.user.displayName.ifBlank { "匿名" }, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     Text(eatTimeText(review.createdAt), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (review.rating != null) {
-                    Text("★".repeat(review.rating), fontSize = 12.sp, color = Color(0xFFF59E0B))
+                val rating = review.rating
+                if (rating != null) {
+                    Text("★".repeat(rating), fontSize = 12.sp, color = Color(0xFFF59E0B))
                 }
             }
 
@@ -352,7 +497,7 @@ private fun ReviewCard(review: EatReview, onLike: () -> Unit, onImage: (String) 
             if (review.guests.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "一起吃的：" + review.guests.joinToString("、") { it.displayName },
+                    "🍽️ 一起吃：" + review.guests.joinToString("、") { it.displayName },
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -377,6 +522,19 @@ private fun ReviewCard(review: EatReview, onLike: () -> Unit, onImage: (String) 
                         fontSize = 12.sp,
                         color = if (review.liked) BrandPink else MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+
+                Spacer(Modifier.width(6.dp))
+
+                Row(
+                    Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onSame).padding(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("💬 同评", fontSize = 12.sp, color = BrandPink)
+                    if (review.sameCount > 0) {
+                        Spacer(Modifier.width(4.dp))
+                        Text(review.sameCount.toString(), fontSize = 12.sp, color = BrandPink)
+                    }
                 }
             }
 
@@ -466,7 +624,13 @@ private fun FullImageDialog(url: String, onDismiss: () -> Unit) {
 // ---------------------------------------------------------------- 我的
 
 @Composable
-fun MinePage(token: String, stores: List<EatStore>, onNeedReload: () -> Unit) {
+fun MinePage(
+    token: String,
+    stores: List<EatStore>,
+    topInset: Dp,
+    refreshTick: Int,
+    onNeedReload: () -> Unit
+) {
     var period by remember { mutableStateOf("month") }
     var summary by remember { mutableStateOf<EatSummary?>(null) }
     var wall by remember { mutableStateOf<List<EatImageRef>>(emptyList()) }
@@ -477,16 +641,16 @@ fun MinePage(token: String, stores: List<EatStore>, onNeedReload: () -> Unit) {
     val scope = rememberCoroutineScope()
     val bottomInset = LocalBarInset.current + 20.dp
 
-    LaunchedEffect(token, period) {
+    LaunchedEffect(token, period, refreshTick) {
         loading = true
         runCatching { summary = EatApi.summary(token, period) }
-        if (wall.isEmpty()) runCatching { wall = EatApi.wall(token) }
+        runCatching { wall = EatApi.wall(token) }
         loading = false
     }
 
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = bottomInset),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = topInset + 6.dp, bottom = bottomInset),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
@@ -515,7 +679,7 @@ fun MinePage(token: String, stores: List<EatStore>, onNeedReload: () -> Unit) {
             Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
                 Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                     StatCell(summary?.count?.toString() ?: "0", "吃了（次）", Modifier.weight(1f))
-                    StatCell("¥" + String.format(java.util.Locale.US, "%.0f", summary?.spend ?: 0.0), "花掉的银子", Modifier.weight(1f))
+                    StatCell("¥" + String.format(Locale.US, "%.0f", summary?.spend ?: 0.0), "花掉的银子", Modifier.weight(1f))
                     StatCell(summary?.topDish?.ifBlank { "—" } ?: "—", "最常吃的菜", Modifier.weight(1f))
                 }
             }
@@ -523,12 +687,8 @@ fun MinePage(token: String, stores: List<EatStore>, onNeedReload: () -> Unit) {
 
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.weight(1f)) {
-                    OutlinedAddButton("＋ 添加店铺") { showAddStore = true }
-                }
-                Box(Modifier.weight(1f)) {
-                    OutlinedAddButton("＋ 添加菜品") { showAddDish = true }
-                }
+                Box(Modifier.weight(1f)) { OutlinedAddButton("＋ 添加店铺") { showAddStore = true } }
+                Box(Modifier.weight(1f)) { OutlinedAddButton("＋ 添加菜品") { showAddDish = true } }
             }
         }
 
@@ -594,7 +754,7 @@ fun MinePage(token: String, stores: List<EatStore>, onNeedReload: () -> Unit) {
 @Composable
 private fun StatCell(value: String, label: String, modifier: Modifier = Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(value, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(3.dp))
         Text(label, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -740,7 +900,7 @@ fun AddDishDialog(token: String, stores: List<EatStore>, onDismiss: () -> Unit, 
                     onValueChange = { price = it.filter { c -> c.isDigit() || c == '.' } },
                     label = { Text("价格（可空）") },
                     singleLine = true,
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(10.dp))
@@ -814,30 +974,47 @@ private fun PickerDialog(
     )
 }
 
-// ---------------------------------------------------------------- 发评价
+// ---------------------------------------------------------------- 发评价 / 同评
 
+/**
+ * 评价编辑器，与网页端一致：
+ * - parent == null：主评，可以选店铺/菜品、打分、写评语、传图、勾「一起吃」的小伙伴
+ * - parent != null：同评，目标锁定在父评价的店铺/菜品，隐藏「一起吃」
+ */
 @Composable
-fun ReviewEditor(token: String, onDismiss: () -> Unit, onDone: () -> Unit) {
+fun ReviewEditor(
+    token: String,
+    parent: EatReview?,
+    onDismiss: () -> Unit,
+    onDone: () -> Unit
+) {
+    val isSame = parent != null
     var stores by remember { mutableStateOf<List<EatStore>>(emptyList()) }
     var dishes by remember { mutableStateOf<List<EatDish>>(emptyList()) }
-    var storeId by remember { mutableStateOf(0) }
-    var dishId by remember { mutableStateOf(0) }
+    var users by remember { mutableStateOf<List<EatUser>>(emptyList()) }
+    var storeId by remember { mutableStateOf(parent?.storeId ?: 0) }
+    var dishId by remember { mutableStateOf(parent?.dishId ?: 0) }
     var rating by remember { mutableStateOf(0) }
     var comment by remember { mutableStateOf("") }
+    val guests = remember { mutableStateListOf<Int>() }
     val images = remember { mutableStateListOf<String>() }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var pickStore by remember { mutableStateOf(false) }
     var pickDish by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val myId = Session.state.value.userId
 
     LaunchedEffect(token) {
-        runCatching { stores = EatApi.stores(token) }
-        runCatching { dishes = EatApi.dishes(token) }
+        if (!isSame) {
+            runCatching { stores = EatApi.stores(token) }
+            runCatching { dishes = EatApi.dishes(token) }
+            runCatching { users = EatApi.users(token) }
+        }
     }
 
-    val storeName = stores.firstOrNull { it.id == storeId }?.name ?: "选择店铺"
-    val dishName = dishes.firstOrNull { it.id == dishId }?.name ?: "选择菜品"
+    val storeName = stores.firstOrNull { it.id == storeId }?.name ?: parent?.storeName.orEmpty()
+    val dishName = dishes.firstOrNull { it.id == dishId }?.name ?: parent?.dishName.orEmpty()
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
@@ -845,21 +1022,41 @@ fun ReviewEditor(token: String, onDismiss: () -> Unit, onDone: () -> Unit) {
                 Modifier
                     .fillMaxWidth()
                     .padding(20.dp)
-                    .heightIn(max = 560.dp)
+                    .heightIn(max = 580.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Text("✍️ 发评价", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(if (isSame) "💬 同评" else "✍️ 发评价", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "说说这一顿吃得怎么样～（都可以不填）",
+                    if (isSame) "同意这道菜？说说你的看法～打分、评语、图片都可留空"
+                    else "说说这一顿吃得怎么样～打分、评语、图片都可以留空",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(14.dp))
 
-                PickerRow(storeName) { pickStore = true }
-                Spacer(Modifier.height(8.dp))
-                PickerRow(dishName) { pickDish = true }
+                if (isSame) {
+                    // 同评锁定目标，不给改
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f))
+                            .padding(12.dp)
+                    ) {
+                        Text(dishName.ifBlank { "这道菜" }, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            "🍽️ ${storeName.ifBlank { "—" }}" + if ((parent?.price ?: 0.0) > 0) " · ${priceText(parent!!.price)}" else "",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    PickerRow(if (storeName.isBlank()) "选择店铺" else storeName) { pickStore = true }
+                    Spacer(Modifier.height(8.dp))
+                    PickerRow(if (dishName.isBlank()) "选择菜品" else dishName) { pickDish = true }
+                }
 
                 Spacer(Modifier.height(14.dp))
                 Text("打个分（可不填）", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -888,13 +1085,53 @@ fun ReviewEditor(token: String, onDismiss: () -> Unit, onDone: () -> Unit) {
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                if (!isSame) {
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        "一起吃的小伙伴（可多选，计入 TA 的月统计）",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    val candidates = users.filter { it.id != myId }
+                    if (candidates.isEmpty()) {
+                        Text("暂无其他用户", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        Column {
+                            candidates.chunked(3).forEach { row ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(bottom = 6.dp)) {
+                                    row.forEach { user ->
+                                        val on = user.id in guests
+                                        Box(
+                                            Modifier
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(if (on) BrandPink.copy(alpha = .16f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f))
+                                                .clickable {
+                                                    if (on) guests.remove(user.id) else guests.add(user.id)
+                                                }
+                                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            Text(
+                                                user.displayName,
+                                                fontSize = 12.sp,
+                                                color = if (on) BrandPink else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(12.dp))
                 Text("图片（最多 9 张，可不填）", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(6.dp))
                 ImagePickerRow(
                     token = token,
                     images = images.toList(),
-                    onPick = { url -> if (url.isNotBlank()) images.add(url) },
+                    onPick = { url -> if (url.isNotBlank() && images.size < 9) images.add(url) },
                     maxCount = 9
                 )
                 if (images.isNotEmpty()) {
@@ -921,7 +1158,9 @@ fun ReviewEditor(token: String, onDismiss: () -> Unit, onDone: () -> Unit) {
                                 dishId = dishId,
                                 rating = rating.takeIf { it > 0 },
                                 comment = comment.trim(),
-                                images = images.toList()
+                                images = images.toList(),
+                                guestIds = guests.toList(),
+                                parentId = parent?.id
                             )
                         }.onSuccess { onDone() }.onFailure { error = it.message ?: "提交失败" }
                         busy = false
@@ -935,12 +1174,18 @@ fun ReviewEditor(token: String, onDismiss: () -> Unit, onDone: () -> Unit) {
 
     if (pickStore) {
         PickerDialog("选择店铺", stores.map { it.id to it.name }, { pickStore = false }) {
-            storeId = it; pickStore = false
+            storeId = it
+            dishId = 0
+            pickStore = false
         }
     }
     if (pickDish) {
         val list = dishes.filter { storeId == 0 || it.storeId == storeId }
-        PickerDialog("选择菜品", list.map { it.id to (it.storeName.ifBlank { "" } + " " + it.name).trim() }, { pickDish = false }) { id ->
+        PickerDialog(
+            "选择菜品",
+            list.map { it.id to "${it.name}（${priceText(it.price)}）" },
+            { pickDish = false }
+        ) { id ->
             dishId = id
             pickDish = false
             if (storeId == 0) storeId = dishes.firstOrNull { it.id == id }?.storeId ?: 0
@@ -966,7 +1211,6 @@ private fun PickerRow(text: String, onClick: () -> Unit) {
 
 /**
  * 选图 + 上传到 /api/eat/upload，回调返回服务端相对地址。
- * 一次最多选 maxCount - 已选数量 张。
  */
 @Composable
 private fun ImagePickerRow(

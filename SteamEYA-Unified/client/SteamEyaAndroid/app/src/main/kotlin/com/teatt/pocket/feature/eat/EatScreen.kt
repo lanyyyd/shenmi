@@ -47,17 +47,27 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.vibrancy
 import com.teatt.pocket.data.EatApi
 import com.teatt.pocket.data.EatDish
 import com.teatt.pocket.data.EatStore
 import com.teatt.pocket.ui.BrandPink
 import com.teatt.pocket.ui.BrandViolet
 import com.teatt.pocket.ui.LocalBarInset
+import com.teatt.pocket.ui.luminanceIsDark
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -66,8 +76,9 @@ import java.util.Locale
 /**
  * 「今天吃点啥」原生版。
  *
- * 外层仍然是 App 的四段玻璃菜单栏，所以这里不再自建底部 bar，改用顶部胶囊分段：
- * 首页 / 转盘 / 评价 / 我的。数据统一提到这一层缓存，切分段不重复请求。
+ * 顶部标题栏用 Kyant0/AndroidLiquidGlass 的液态玻璃：内容层打 layerBackdrop，
+ * 标题栏浮在上面 drawBackdrop（vibrancy + blur），列表用 contentPadding 顶部留白，
+ * 滚动时内容会从玻璃下面穿过去，才有真实的折射感。
  */
 @Composable
 fun EatScreen(
@@ -79,6 +90,10 @@ fun EatScreen(
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var detail by remember { mutableStateOf<EatStore?>(null) }
+    var refreshTick by remember { mutableIntStateOf(0) }
+    var headerHeight by remember { mutableStateOf(120.dp) }
+    val backdrop = rememberLayerBackdrop()
+    val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
     suspend fun loadStores() {
@@ -89,25 +104,22 @@ fun EatScreen(
         loading = false
     }
 
-    LaunchedEffect(token) { loadStores() }
+    // 冷启动 / 登录 / 点右上角刷新，都走这里
+    LaunchedEffect(token, refreshTick) { loadStores() }
 
     BackHandler(enabled = detail != null || tab != 0) {
         if (detail != null) detail = null else tab = 0
     }
 
-    Column(modifier.fillMaxSize()) {
-        EatHeader(
-            tab = tab,
-            onSelect = { tab = it; detail = null },
-            onRefresh = { scope.launch { loadStores() } }
-        )
-
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+    Box(modifier.fillMaxSize()) {
+        // 内容层：打上 layerBackdrop，供顶部玻璃采样
+        Box(Modifier.fillMaxSize().layerBackdrop(backdrop)) {
             val store = detail
             when {
                 store != null -> StoreDetailPage(
                     token = token,
                     store = store,
+                    topInset = headerHeight,
                     onBack = { detail = null },
                     onEatHere = {
                         scope.launch {
@@ -123,34 +135,70 @@ fun EatScreen(
                     stores = stores,
                     loading = loading,
                     error = error,
+                    topInset = headerHeight,
                     onOpen = { detail = it },
-                    onReload = { scope.launch { loadStores() } }
+                    onReload = { refreshTick++ }
                 )
 
-                tab == 1 -> WheelPage(token = token)
+                tab == 1 -> WheelPage(token = token, topInset = headerHeight, refreshTick = refreshTick)
 
-                tab == 2 -> FeedPage(token = token)
+                tab == 2 -> FeedPage(token = token, topInset = headerHeight, refreshTick = refreshTick)
 
-                else -> MinePage(token = token, stores = stores, onNeedReload = { scope.launch { loadStores() } })
+                else -> MinePage(
+                    token = token,
+                    stores = stores,
+                    topInset = headerHeight,
+                    refreshTick = refreshTick,
+                    onNeedReload = { refreshTick++ }
+                )
             }
         }
+
+        EatGlassHeader(
+            backdrop = backdrop,
+            tab = tab,
+            onSelect = { tab = it; detail = null },
+            onRefresh = { refreshTick++ },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .onSizeChanged { headerHeight = with(density) { it.height.toDp() } }
+        )
     }
 }
 
+/** 顶部液态玻璃栏：标题 + 四段胶囊。 */
 @Composable
-private fun EatHeader(tab: Int, onSelect: (Int) -> Unit, onRefresh: () -> Unit) {
+private fun EatGlassHeader(
+    backdrop: Backdrop,
+    tab: Int,
+    onSelect: (Int) -> Unit,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val dark = MaterialTheme.colorScheme.background.luminanceIsDark()
+    val tint = if (dark) Color.Black.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.60f)
+
     Column(
-        Modifier
+        modifier
             .fillMaxWidth()
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = { RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp) },
+                effects = {
+                    vibrancy()
+                    blur(20.dp.toPx())
+                },
+                onDrawSurface = { drawRect(tint) }
+            )
             .statusBarsPadding()
-            .padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 6.dp)
+            .padding(start = 20.dp, end = 12.dp, top = 12.dp, bottom = 12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("今天吃点啥", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                Text("今天吃点啥", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text(
                     "按时吃饭，快乐干饭",
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -164,13 +212,13 @@ private fun EatHeader(tab: Int, onSelect: (Int) -> Unit, onRefresh: () -> Unit) 
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
 
         Row(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(14.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .background(if (dark) Color.White.copy(alpha = .08f) else Color.White.copy(alpha = .50f))
                 .padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -182,7 +230,7 @@ private fun EatHeader(tab: Int, onSelect: (Int) -> Unit, onRefresh: () -> Unit) 
                         .clip(RoundedCornerShape(11.dp))
                         .background(if (selected) BrandPink else Color.Transparent)
                         .clickable { onSelect(index) }
-                        .padding(vertical = 9.dp),
+                        .padding(vertical = 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -205,6 +253,7 @@ private fun StoreListPage(
     stores: List<EatStore>,
     loading: Boolean,
     error: String?,
+    topInset: Dp,
     onOpen: (EatStore) -> Unit,
     onReload: () -> Unit
 ) {
@@ -218,17 +267,14 @@ private fun StoreListPage(
             stores.isEmpty() -> CenterTip("还没有店铺，点下面按钮加一家吧", onReload)
             else -> LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = bottomInset),
+                contentPadding = PaddingValues(
+                    start = 20.dp,
+                    end = 20.dp,
+                    top = topInset + 6.dp,
+                    bottom = bottomInset
+                ),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                item {
-                    Text(
-                        "附近好店 · 就等你来",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
-                }
                 items(stores, key = { it.id }) { store ->
                     StoreCard(store) { onOpen(store) }
                 }
@@ -270,9 +316,7 @@ private fun StoreCard(store: EatStore, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    StarRow(rating = store.rating, count = store.ratingCount)
-                }
+                StarRow(rating = store.rating, count = store.ratingCount)
                 if (store.location.isNotBlank()) {
                     Spacer(Modifier.height(3.dp))
                     Text(
@@ -283,10 +327,12 @@ private fun StoreCard(store: EatStore, onClick: () -> Unit) {
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                // 畅销榜：服务端 recommend 已按被评价次数（销量）降序，取前 2 并带上价格
                 if (store.recommend.isNotEmpty()) {
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(5.dp))
                     Text(
-                        store.recommend.joinToString(" · ") { it.name },
+                        "🔥 " + store.recommend.take(2)
+                            .joinToString(" · ") { "${it.name} ${priceText(it.price)}" },
                         fontSize = 11.sp,
                         color = BrandPink,
                         maxLines = 1,
@@ -304,6 +350,7 @@ private fun StoreCard(store: EatStore, onClick: () -> Unit) {
 private fun StoreDetailPage(
     token: String,
     store: EatStore,
+    topInset: Dp,
     onBack: () -> Unit,
     onEatHere: () -> Unit
 ) {
@@ -323,11 +370,16 @@ private fun StoreDetailPage(
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = bottomInset)
+            contentPadding = PaddingValues(
+                start = 20.dp,
+                end = 20.dp,
+                top = topInset + 4.dp,
+                bottom = bottomInset
+            )
         ) {
             item {
                 Row(
-                    Modifier.fillMaxWidth().padding(top = 4.dp),
+                    Modifier.fillMaxWidth().padding(bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onBack) {
@@ -379,7 +431,11 @@ private fun StoreDetailPage(
                 )
             }
             if (loading) {
-                item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = BrandPink, strokeWidth = 2.dp) } }
+                item {
+                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = BrandPink, strokeWidth = 2.dp)
+                    }
+                }
             } else if (dishes.isEmpty()) {
                 item { Text("还没有菜品", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             } else {
