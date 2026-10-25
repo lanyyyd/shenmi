@@ -4,13 +4,17 @@ Cookie 在服务端以主密钥加密存储；检测逻辑（米哈游/完美世
 """
 from __future__ import annotations
 
+import json
+import os
 import time
+import uuid
 
 import requests
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from .. import security
-from ..db import execute, query_all, query_one
+from ..config import DATA_DIR
+from ..db import execute, execute_update, query_all, query_one
 from ..deps import get_current_user, require_admin
 
 router = APIRouter(prefix="/api/cloud", tags=["cloud"])
@@ -33,6 +37,115 @@ MIHOYO_CLOUD_WALLET = {
     "starrail": {"url": "https://cg-hkrpg-api.mihoyo.com/hkrpg_cn/cg/wallet/wallet/get?cost_method=0",
                  "host": "cg-hkrpg-api.mihoyo.com", "referer": "https://sr.mihoyo.com/", "origin": "https://sr.mihoyo.com"},
 }
+
+DEFAULT_GAME_KEY = "genshin"
+
+
+def _normalize_url(raw: str) -> str:
+    """补全协议：用户填 douyin.com 就补成 https://douyin.com。"""
+    url = (raw or "").strip()
+    if not url:
+        return ""
+    if not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url.lstrip("/")
+    return url[:500]
+
+
+def seed_builtin_games() -> None:
+    """把内置 4 个游戏同步进表（幂等），这样列表接口只需要查表。"""
+    now = security.now_s()
+    for key, cfg in GAMES.items():
+        execute(
+            "INSERT INTO cloud_games (game_key, name, url, vendor, biz, builtin, visible, created_at) "
+            "VALUES (?,?,?,?,?,1,1,?) "
+            "ON CONFLICT(game_key) DO UPDATE SET name=excluded.name, url=excluded.url, "
+            "vendor=excluded.vendor, biz=excluded.biz, builtin=1, visible=1",
+            (key, cfg["name"], cfg["url"], cfg["vendor"], cfg["biz"], now),
+        )
+
+
+def game_name_map() -> dict:
+    """game_key → 显示名。内置表优先，其次用户自定义游戏（cloud_games 表），都没有才回退 key。
+
+    之前 admin/账号列表直接 `GAMES.get(...) or key`，自定义游戏不在 GAMES 里，
+    于是后台和客户端的「我的账号」都显示成 custom_xxxxxxxx。
+    """
+    mapping = {k: v["name"] for k, v in GAMES.items()}
+    try:
+        for row in query_all("SELECT game_key, name FROM cloud_games"):
+            mapping.setdefault(row["game_key"], row["name"])
+    except Exception:
+        # 老库还没建表时不阻断列表接口，回退到内置表。
+        pass
+    return mapping
+
+
+def resolve_game_name(game_key: str) -> str:
+    if not game_key:
+        return ""
+    return game_name_map().get(game_key) or game_key
+
+
+def game_exists(game_key: str) -> bool:
+    if game_key in GAMES:
+        return True
+    return query_one("SELECT 1 FROM cloud_games WHERE game_key=?", (game_key,)) is not None
+
+
+@router.get("/games")
+def list_games(user: dict = Depends(get_current_user)):
+    """可见游戏 = 内置 + 已公开的自定义游戏 + 自己创建但还没公开的。"""
+    seed_builtin_games()
+    rows = query_all(
+        "SELECT game_key, name, url, vendor, builtin, visible, created_by FROM cloud_games "
+        "WHERE visible=1 OR created_by=? ORDER BY builtin DESC, id",
+        (user["id"],),
+    )
+    return {
+        "ok": True,
+        "games": [
+            {
+                "key": r["game_key"],
+                "name": r["name"],
+                "url": r["url"] or "",
+                "vendor": r["vendor"] or "custom",
+                "builtin": bool(r["builtin"]),
+                "visible": bool(r["visible"]),
+                "mine": r["created_by"] == user["id"],
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.post("/games")
+def create_game(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    """新增自定义游戏。创建后仅创建者可见，等他成功上传一次 Cookie 再对所有人公开。"""
+    name = (payload.get("name") or "").strip()[:40]
+    url = _normalize_url(str(payload.get("url") or ""))
+    if not name:
+        raise HTTPException(400, "游戏名不能为空")
+    if not url:
+        raise HTTPException(400, "请填写游戏地址")
+    if "://" not in url:
+        raise HTTPException(400, "地址格式不正确")
+
+    seed_builtin_games()
+
+    # 同名直接复用，避免同一个人或不同人把「抖音」建出十条。
+    existing = query_one("SELECT game_key, visible, created_by FROM cloud_games WHERE name=?", (name,))
+    if existing:
+        return {"ok": True, "key": existing["game_key"], "existing": True,
+                "visible": bool(existing["visible"])}
+
+    game_key = "custom_" + uuid.uuid4().hex[:12]
+    execute(
+        "INSERT INTO cloud_games (game_key, name, url, vendor, biz, builtin, visible, created_by, created_at) "
+        "VALUES (?,?,?,?,?,0,0,?,?)",
+        (game_key, name, url, "custom", "", user["id"], security.now_s()),
+    )
+    return {"ok": True, "key": game_key, "existing": False, "visible": False}
+
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -173,10 +286,13 @@ def _check_wanmei_valid(cookie_str: str) -> dict:
 
 
 def check_cookie_valid(cookies: list, game: str, combo_token: str = "") -> dict:
-    cfg = GAMES.get(game, GAMES["genshin"])
+    cfg = GAMES.get(game)
     cmap = {c.get("name"): c.get("value") for c in cookies if c.get("name")}
     if not cmap:
         return {"valid": None, "msg": "Cookie 为空"}
+    if cfg is None:
+        # 用户自定义游戏：没有对应的官方接口可查，只要 cookie 抓到了就当作可用。
+        return {"valid": True, "msg": "自定义游戏不做有效性校验", "nickname": "", "game_uid": ""}
     cookie_str = "; ".join(f"{k}={v}" for k, v in cmap.items())
     if cfg.get("vendor") == "wanmei":
         return _check_wanmei_valid(cookie_str)
@@ -200,12 +316,23 @@ def check_cookie_valid(cookies: list, game: str, combo_token: str = "") -> dict:
                   "role_count": len(roles)}
         if not roles:
             result["msg"] = "Cookie 有效（未查询到角色）"
-        if combo_token:
-            wr = _get_mihoyo_free_duration(combo_token, game)
-            if wr.get("ok"):
-                result["free_duration"] = wr["free_duration"]
-                if wr.get("free_duration") is not None:
-                    result["msg"] = f"有效，剩余免费时长 {wr['free_duration']} 分钟"
+        # 原神 / 星穹铁道：必须能查到剩余免费时长，查不到即判定 Cookie 无效
+        wr = _get_mihoyo_free_duration(combo_token, game)
+        if not wr.get("ok") or wr.get("free_duration") is None:
+            return {
+                "valid": False,
+                "msg": f"未获取到剩余免费时长，判定 Cookie 无效：{wr.get('msg') or '接口未返回时长'}",
+                "nickname": result.get("nickname", ""),
+                "game_uid": result.get("game_uid", ""),
+                "level": result.get("level"),
+                "region": result.get("region", ""),
+                "role_count": result.get("role_count", 0),
+                "free_duration": None,
+                "total_duration": None,
+            }
+        result["free_duration"] = wr["free_duration"]
+        result["total_duration"] = wr.get("total_duration")
+        result["msg"] = f"有效，剩余免费时长 {wr['free_duration']} 分钟"
         return result
     if retcode in (-100, -101, 10001, -110):
         return {"valid": False, "msg": data.get("message", "Cookie 已失效")}
@@ -219,37 +346,121 @@ def _client_ip(request: Request) -> str:
 
 @router.post("/upload")
 def upload(payload: dict = Body(...), user: dict = Depends(get_current_user)):
-    game = payload.get("game") or "genshin"
+    game = payload.get("game") or DEFAULT_GAME_KEY
     cookies = payload.get("cookies")
     combo_token = payload.get("combo_token") or ""
-    if game not in GAMES:
+    if not game_exists(game):
         raise HTTPException(400, "未知游戏")
     if not cookies:
         raise HTTPException(400, "Cookie 数据为空")
+    # 先检测：用 game_uid 区分同一用户下的多个游戏账号（同游戏可存多条）
+    result = check_cookie_valid(cookies, game, combo_token)
+    game_uid = str(result.get("game_uid") or "").strip()[:64]
     blob = security.encrypt_blob(cookies)
     now = security.now_s()
     execute(
-        "INSERT INTO cloud_cookies (user_id, game, data, combo_token, updated_at) VALUES (?,?,?,?,?) "
-        "ON CONFLICT(user_id, game) DO UPDATE SET data=excluded.data, combo_token=excluded.combo_token, "
-        "updated_at=excluded.updated_at, valid=NULL, checked_at=NULL",
-        (user["id"], game, blob, combo_token, now),
+        "INSERT INTO cloud_cookies (user_id, game, game_uid, data, combo_token, updated_at, "
+        "valid, checked_at, nickname, free_duration, total_duration) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(user_id, game, game_uid) DO UPDATE SET data=excluded.data, "
+        "combo_token=excluded.combo_token, updated_at=excluded.updated_at, valid=excluded.valid, "
+        "checked_at=excluded.checked_at, nickname=excluded.nickname, "
+        "free_duration=excluded.free_duration, total_duration=excluded.total_duration",
+        (user["id"], game, game_uid, blob, combo_token, now,
+         1 if result.get("valid") else 0, now, result.get("nickname", ""),
+         result.get("free_duration"), result.get("total_duration")),
     )
-    result = check_cookie_valid(cookies, game, combo_token)
-    execute(
-        "UPDATE cloud_cookies SET valid=?, checked_at=?, game_uid=?, nickname=?, free_duration=?, total_duration=? "
-        "WHERE user_id=? AND game=?",
-        (1 if result.get("valid") else 0, security.now_s(), result.get("game_uid", ""),
-         result.get("nickname", ""), result.get("free_duration"), result.get("total_duration"),
-         user["id"], game),
-    )
+    # 自定义游戏：首个成功上传的人让它对所有人可见，其他人就不用再自己建一遍。
+    execute_update("UPDATE cloud_games SET visible=1 WHERE game_key=? AND visible=0", (game,))
+
     return {"ok": True, "msg": "上传成功", "valid": result.get("valid"),
-            "nickname": result.get("nickname", ""), "detail": result.get("msg")}
+            "nickname": result.get("nickname", ""), "uid": game_uid,
+            "detail": result.get("msg")}
+
+
+# ---------------- 内部转发：让旧 6966 上号器服务跨库同步 ----------------
+# 仅允许本机调用，且必须携带共享密钥（文件 / 环境变量），不对外暴露。
+RELAY_KEY_FILE = DATA_DIR / "cloud_relay.key"
+CLOUD_USER_MAP_FILE = DATA_DIR / "cloud_user_map.json"
+
+
+def _relay_key() -> str:
+    key = (os.getenv("CLOUD_RELAY_KEY") or "").strip()
+    if key:
+        return key
+    try:
+        return RELAY_KEY_FILE.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
+def _load_user_map() -> dict:
+    try:
+        data = json.loads(CLOUD_USER_MAP_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _ensure_user(username: str, nickname: str = ""):
+    username = (username or "").strip()[:32]
+    if not username:
+        return None
+    row = query_one("SELECT * FROM users WHERE username = ?", (username,))
+    if row:
+        return dict(row)
+    uid = execute(
+        "INSERT INTO users (username, password_hash, nickname, created_at) VALUES (?,?,?,?)",
+        (username, security.gen_token(24), (nickname or username)[:20], security.now_ms()))
+    return dict(query_one("SELECT * FROM users WHERE id = ?", (uid,)))
+
+
+@router.post("/internal/relay")
+def internal_relay(request: Request, payload: dict = Body(...)):
+    """接收旧版 6966 服务转发来的 Cookie（仅本机 + 共享密钥）。"""
+    key = _relay_key()
+    if not key or request.headers.get("x-relay-key") != key:
+        raise HTTPException(403, "forbidden")
+    ip = request.client.host if request.client else ""
+    if ip not in ("127.0.0.1", "::1"):
+        raise HTTPException(403, "forbidden")
+    game = str(payload.get("game") or "")
+    if game not in GAMES:
+        raise HTTPException(400, "未知游戏")
+    cookies = payload.get("cookies")
+    if not isinstance(cookies, list) or not cookies:
+        raise HTTPException(400, "Cookie 数据为空")
+    src_user = str(payload.get("username") or "").strip()
+    target = str(_load_user_map().get(src_user) or src_user).strip()
+    user = _ensure_user(target, src_user)
+    if not user:
+        raise HTTPException(400, "无法确定目标用户")
+    valid = payload.get("valid")
+    valid_val = 1 if valid is True else (0 if valid is False else None)
+    game_uid = str(payload.get("game_uid") or "").strip()[:64]
+    now = security.now_s()
+    execute(
+        "INSERT INTO cloud_cookies (user_id, game, game_uid, data, combo_token, updated_at, valid, "
+        "checked_at, nickname, free_duration, total_duration) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(user_id, game, game_uid) DO UPDATE SET data=excluded.data, "
+        "combo_token=excluded.combo_token, updated_at=excluded.updated_at, valid=excluded.valid, "
+        "checked_at=excluded.checked_at, nickname=excluded.nickname, "
+        "free_duration=excluded.free_duration, total_duration=excluded.total_duration",
+        (user["id"], game, game_uid, security.encrypt_blob(cookies),
+         str(payload.get("combo_token") or ""), now, valid_val, now,
+         str(payload.get("nickname") or ""), payload.get("free_duration"),
+         payload.get("total_duration")))
+    return {"ok": True, "userId": user["id"], "username": user["username"], "uid": game_uid}
 
 
 @router.get("/download")
-def download(game: str = "genshin", user: dict = Depends(get_current_user)):
-    row = query_one("SELECT data, combo_token, updated_at FROM cloud_cookies WHERE user_id=? AND game=?",
-                    (user["id"], game))
+def download(game: str = "genshin", uid: str = "", user: dict = Depends(get_current_user)):
+    """下载 Cookie；传 uid 指定账号，缺省取最近上传的那个。"""
+    if uid:
+        row = query_one("SELECT data, combo_token, updated_at, game_uid FROM cloud_cookies "
+                        "WHERE user_id=? AND game=? AND game_uid=?", (user["id"], game, uid))
+    else:
+        row = query_one("SELECT data, combo_token, updated_at, game_uid FROM cloud_cookies "
+                        "WHERE user_id=? AND game=? ORDER BY updated_at DESC, id DESC LIMIT 1", (user["id"], game))
     if not row:
         raise HTTPException(404, "该账号尚未上传该游戏的 Cookie")
     try:
@@ -257,14 +468,15 @@ def download(game: str = "genshin", user: dict = Depends(get_current_user)):
     except Exception:
         raise HTTPException(500, "数据解密失败")
     return {"ok": True, "cookies": cookies, "combo_token": row["combo_token"] or "",
-            "updated_at": row["updated_at"]}
+            "game_uid": row["game_uid"] or "", "updated_at": row["updated_at"]}
 
 
 @router.post("/report_login")
 def report_login(request: Request, payload: dict = Body(...), user: dict = Depends(get_current_user)):
     game = payload.get("game") or "genshin"
     now = security.now_s()
-    execute("UPDATE users SET last_login_at=? WHERE id=?", (now, user["id"]))
+    # users.last_login_at 全站统一用毫秒；cloud_login_logs.login_at 仍用秒（后台按秒展示）
+    execute("UPDATE users SET last_login_at=? WHERE id=?", (security.now_ms(), user["id"]))
     execute("INSERT INTO cloud_login_logs (user_id, game, login_at, client_ip) VALUES (?,?,?,?)",
             (user["id"], game, now, _client_ip(request)))
     return {"ok": True}
@@ -273,18 +485,24 @@ def report_login(request: Request, payload: dict = Body(...), user: dict = Depen
 @router.post("/check")
 def check(payload: dict = Body(...), user: dict = Depends(get_current_user)):
     game = payload.get("game") or "genshin"
-    row = query_one("SELECT data, combo_token FROM cloud_cookies WHERE user_id=? AND game=?",
-                    (user["id"], game))
+    uid = str(payload.get("uid") or "").strip()
+    if uid:
+        row = query_one("SELECT id, data, combo_token, game_uid, nickname FROM cloud_cookies "
+                        "WHERE user_id=? AND game=? AND game_uid=?", (user["id"], game, uid))
+    else:
+        row = query_one("SELECT id, data, combo_token, game_uid, nickname FROM cloud_cookies "
+                        "WHERE user_id=? AND game=? ORDER BY updated_at DESC, id DESC LIMIT 1", (user["id"], game))
     if not row:
         raise HTTPException(404, "尚未上传该游戏 Cookie")
     cookies = security.decrypt_blob(row["data"])
     result = check_cookie_valid(cookies, game, row["combo_token"] or "")
     execute(
         "UPDATE cloud_cookies SET valid=?, checked_at=?, game_uid=?, nickname=?, free_duration=?, total_duration=? "
-        "WHERE user_id=? AND game=?",
+        "WHERE id=?",
         (1 if result.get("valid") else (0 if result.get("valid") is False else None),
-         security.now_s(), result.get("game_uid", ""), result.get("nickname", ""),
-         result.get("free_duration"), result.get("total_duration"), user["id"], game),
+         security.now_s(), result.get("game_uid") or row["game_uid"] or "",
+         result.get("nickname") or row["nickname"] or "",
+         result.get("free_duration"), result.get("total_duration"), row["id"]),
     )
     return {"ok": True, **result}
 
@@ -295,7 +513,13 @@ def my(user: dict = Depends(get_current_user)):
         "SELECT game, updated_at, valid, checked_at, nickname, game_uid, free_duration, total_duration "
         "FROM cloud_cookies WHERE user_id=?", (user["id"],),
     )
-    return {"ok": True, "games": [dict(r) for r in rows]}
+    names = game_name_map()
+    out = []
+    for row in rows:
+        item = dict(row)
+        item["game_name"] = names.get(item["game"]) or item["game"]
+        out.append(item)
+    return {"ok": True, "games": out}
 
 
 # ---------------- 管理员：云游戏账号管理 ----------------
@@ -316,9 +540,10 @@ def admin_accounts(admin: dict = Depends(require_admin)):
         "COALESCE(NULLIF(u.nickname,''), u.username, '（已注销用户）') AS user_name, u.username "
         "FROM cloud_cookies c LEFT JOIN users u ON u.id = c.user_id ORDER BY c.updated_at DESC")
     out = []
+    names = game_name_map()
     for r in rows:
         d = dict(r)
-        d["game_name"] = (GAMES.get(r["game"]) or {}).get("name", r["game"])
+        d["game_name"] = names.get(r["game"]) or r["game"]
         d["has_combo_token"] = bool(r["combo_token"])
         d.pop("combo_token", None)
         out.append(d)
@@ -337,7 +562,8 @@ def admin_check(payload: dict = Body(...), admin: dict = Depends(require_admin))
     execute(
         "UPDATE cloud_cookies SET valid=?, checked_at=?, game_uid=?, nickname=?, free_duration=?, total_duration=? "
         "WHERE id=?",
-        (valid_val, security.now_s(), result.get("game_uid", ""), result.get("nickname", ""),
+        (valid_val, security.now_s(), result.get("game_uid") or row["game_uid"] or "",
+         result.get("nickname") or row["nickname"] or "",
          result.get("free_duration"), result.get("total_duration"), row_id),
     )
     return {"ok": True, **result}
@@ -368,9 +594,10 @@ def admin_assign(row_id: int, payload: dict = Body(...), admin: dict = Depends(r
         raise HTTPException(400, "指定的用户不存在")
     if target["id"] == row["user_id"]:
         return {"ok": True, "user_id": target["id"], "username": target["username"]}
-    # cloud_cookies 对 (user_id, game) 唯一：目标用户已有同游戏记录时不允许直接改归属
-    if query_one("SELECT id FROM cloud_cookies WHERE user_id = ? AND game = ?", (target["id"], row["game"])):
-        raise HTTPException(409, "该用户已有同一游戏的云端账号，请先删除或合并后再分配")
+    # cloud_cookies 对 (user_id, game, game_uid) 唯一：目标用户已有同 UID 记录时不允许直接改归属
+    if query_one("SELECT id FROM cloud_cookies WHERE user_id = ? AND game = ? AND game_uid = ?",
+                 (target["id"], row["game"], row["game_uid"] or "")):
+        raise HTTPException(409, "该用户已有同一游戏、同一 UID 的云端账号，请先删除或合并后再分配")
     execute("UPDATE cloud_cookies SET user_id = ? WHERE id = ?", (target["id"], row_id))
     return {"ok": True, "user_id": target["id"], "username": target["username"]}
 

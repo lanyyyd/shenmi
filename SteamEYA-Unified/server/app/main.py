@@ -22,7 +22,8 @@ from . import ws as ws_module
 from .config import UPLOAD_DIR, WEB_DIR
 from .db import init_db
 from .lan import LanDiscovery
-from .routers import admin, auth, chat, cloud, eat, lan, lan_transfer, points, save, steam, sync, update
+from .routers import (admin, ai, ai_image, auth, chat, cloud, eat, gacha, lan, level, points, redpacket,
+                      save, steam, sync, tips, update)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("gateway")
@@ -55,6 +56,32 @@ def _startup():
         lan.set_discovery(discovery)
         log.info("局域网发现已启用：name=%s port=%d mode=%s", name, port, "lan" if lan_mode else "online")
 
+    # 红包到期结算：后台线程每分钟检查一次，把过期未领完的剩余退回发包者
+    import threading
+    import time as _time
+
+    def _redpacket_sweeper():
+        from . import redpacket as RP
+        while True:
+            try:
+                RP.expire_due()
+            except Exception:
+                pass
+            _time.sleep(60)
+
+    threading.Thread(target=_redpacket_sweeper, name="redpacket-sweeper", daemon=True).start()
+
+    # 「小火人」主动发言：后台线程每 30s 检查一次，仅在后台开关打开且群聊冷场时触发
+    from . import aicore
+    aicore.start_active_speak()
+
+    # AI 自动配图：新建无图店铺/菜品入队后，由这个后台线程逐条生成
+    from . import aigen
+    aigen.start_worker()
+
+    # 导航 tips：后台预热一言缓冲池（上游较慢，避免首批请求只拿到兜底句）
+    tips.start_prefetch()
+
 
 @app.get("/health")
 @app.get("/api/health")
@@ -69,12 +96,17 @@ app.include_router(cloud.router)
 app.include_router(sync.router)
 app.include_router(save.router)
 app.include_router(lan.router)
-app.include_router(lan_transfer.router)
 app.include_router(chat.router)
 app.include_router(admin.router)
 app.include_router(update.router)
+app.include_router(tips.router)
 app.include_router(points.router)
 app.include_router(eat.router)
+app.include_router(ai.router)
+app.include_router(ai_image.router)
+app.include_router(level.router)
+app.include_router(gacha.router)
+app.include_router(redpacket.router)
 app.include_router(ws_module.router)
 
 # 上传文件（聊天图片/文件/头像/表情）

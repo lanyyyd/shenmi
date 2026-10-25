@@ -99,6 +99,11 @@ html[data-theme="light"] #pUsers label{background:#F7F8FA}
     <button class="btn" onclick="location.href='/admin-cloud.html'">☁️ 云游戏账号</button>
     <button class="btn" onclick="location.href='/admin-update.html'">📦 更新管理</button>
     <button class="btn" onclick="location.href='/admin-points.html'">🎁 积分管理</button>
+    <button class="btn" onclick="location.href='/admin-level.html'">🏅 等级管理</button>
+    <button class="btn" onclick="location.href='/admin-gacha.html'">🎴 抽卡管理</button>
+    <button class="btn" onclick="location.href='/admin-ai.html'">🔥 AI 设置</button>
+    <button class="btn" onclick="location.href='/admin-ai-image.html'">🖼️ AI 生图</button>
+    <button class="btn" onclick="location.href='/admin-tips.html'">💬 导航 tips</button>
     <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
     <button class="btn" onclick="location.href='/'">← 返回聊天室</button>
     <button class="btn danger" onclick="logout()">退出</button>
@@ -129,7 +134,7 @@ html[data-theme="light"] #pUsers label{background:#F7F8FA}
       <div style="overflow-x:auto">
         <table class="tbl">
           <thead><tr>
-            <th>用户名</th><th>昵称</th><th>状态</th><th>注册时间</th><th>注册 IP</th><th>登录 IP</th><th>最后活跃</th><th>操作</th>
+            <th>用户名</th><th>昵称</th><th>状态</th><th>注册时间</th><th>注册 IP</th><th>登录 IP</th><th>最后活跃</th><th>积分</th><th>等级</th><th>操作</th>
           </tr></thead>
           <tbody id="tbody"></tbody>
         </table>
@@ -305,6 +310,42 @@ html[data-theme="light"] #pUsers label{background:#F7F8FA}
   </div>
 </div>
 
+<!-- 修改积分 -->
+<div class="modal" id="mPoints">
+  <div class="modal-c">
+    <h3>修改积分</h3>
+    <div class="field"><label>用户</label><input id="pUser" readonly></div>
+    <div class="field"><label>当前积分</label><input id="pNow" readonly></div>
+    <div class="field"><label>变动数量（正数增加 / 负数扣减）</label>
+      <input id="pDelta" type="number" step="1" placeholder="例如 100 或 -50"></div>
+    <div class="field"><label>备注（可选，会写入该用户的积分明细）</label>
+      <input id="pRemark" placeholder="例如 活动奖励 / 违规扣减" maxlength="50"></div>
+    <div class="form-msg" id="pMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mPoints')">取消</button>
+      <button class="btn pri" id="pSaveBtn" onclick="savePoints()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 修改经验 -->
+<div class="modal" id="mExp">
+  <div class="modal-c">
+    <h3>修改经验</h3>
+    <div class="field"><label>用户</label><input id="eUser" readonly></div>
+    <div class="field"><label>当前经验 / 等级</label><input id="eNow" readonly></div>
+    <div class="field"><label>变动数量（正数增加 / 负数扣减）</label>
+      <input id="eDelta" type="number" step="1" placeholder="例如 100 或 -50"></div>
+    <div class="field"><label>备注（可选，会写入该用户的经验明细）</label>
+      <input id="eRemark" placeholder="例如 活动奖励 / 违规扣减" maxlength="50"></div>
+    <div class="form-msg" id="eMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mExp')">取消</button>
+      <button class="btn pri" id="eSaveBtn" onclick="saveExp()">保存</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 <script>
 let ME = null, USERS = [], resetTarget = null, nickTarget = null, unameTarget = null;
@@ -347,8 +388,11 @@ function renderTable(){
   const list = USERS.filter(u => !kw || u.username.toLowerCase().includes(kw)
     || (u.nickname||'').toLowerCase().includes(kw)
     || (u.regIp||'').toLowerCase().includes(kw) || u.loginIps.some(i=>i.toLowerCase().includes(kw)));
-  if(!list.length){ $('tbody').innerHTML = `<tr><td colspan="8" class="empty">没有匹配的用户</td></tr>`; return; }
-  $('tbody').innerHTML = list.map(u=>`
+  if(!list.length){ $('tbody').innerHTML = `<tr><td colspan="10" class="empty">没有匹配的用户</td></tr>`; return; }
+  $('tbody').innerHTML = list.map(u=>{
+    const lv = Math.max(0, Math.min(6, Number(u.level)||0));
+    const exp = Number(u.exp||0);
+    return `
     <tr>
       <td data-l="用户名"><div class="uname"><span class="${u.online?'dot-on':'dot-off'}"></span>${esc(u.username)}
         ${u.isAdmin?'<span class="chip">管理员</span>':''}${u.banned?'<span class="chip red">已封禁</span>':''}</div></td>
@@ -358,14 +402,20 @@ function renderTable(){
       <td data-l="注册 IP"><span class="mono">${esc(u.regIp||'—')}</span></td>
       <td data-l="登录 IP"><span class="mono">${esc(u.loginIps.join(', ')||'—')}</span></td>
       <td data-l="最后活跃">${esc(relTime(u.lastSeen))}</td>
+      <td data-l="积分"><b style="color:#F59E0B">${esc(u.points ?? 0)}</b></td>
+      <td data-l="等级"><img class="lv-badge" src="/img/level/lv${lv}.svg" alt="" style="margin-right:5px">Lv${lv}
+        <span class="mono">(${esc(exp)})</span></td>
       <td data-l="操作"><div class="acts">
         <button onclick="openNick(${u.id})">改昵称</button>
         <button onclick="openReset(${u.id},'${esc(u.username)}')">改密码</button>
         <button onclick="openUname(${u.id})">改用户名</button>
+        <button onclick="openPoints(${u.id})">改积分</button>
+        <button onclick="openExp(${u.id})">改经验</button>
         ${u.isAdmin?'':`<button class="${u.banned?'':'dg'}" onclick="toggleBan(${u.id},${u.banned?0:1})">${u.banned?'解封':'封禁'}</button>`}
         ${u.isAdmin?'':`<button class="dg" onclick="delUser(${u.id},'${esc(u.username)}')">删除账号</button>`}
       </div></td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 async function toggleBan(id, banned){
   if(banned && !confirm('确定封禁该用户？其所有登录会话将被清除。')) return;
@@ -435,6 +485,64 @@ async function delUser(id, name){
   if(!r.ok || !d.ok){ toast(d.detail||d.error||'删除失败'); return; }
   toast('已删除账号'+(d.releasedAccounts?`，释放 ${d.releasedAccounts} 个 Steam 账号`:''));
   loadUsers(); loadPush(); loadInvites();
+}
+/* 改积分（正数增加 / 负数扣减，写入该用户的积分明细） */
+let pointsTarget = null;
+function openPoints(id){
+  const u = USERS.find(x=>x.id===id); if(!u) return;
+  pointsTarget = id;
+  $('pUser').value = u.username + (u.nickname ? '（' + u.nickname + '）' : '');
+  $('pNow').value = (u.points ?? 0);
+  $('pDelta').value = '';
+  $('pRemark').value = '';
+  $('pMsg').textContent = ''; $('pMsg').className = 'form-msg';
+  $('mPoints').classList.add('on');
+}
+async function savePoints(){
+  const v = $('pDelta').value.trim();
+  const delta = Number(v);
+  if(!v || !Number.isInteger(delta) || delta === 0){
+    $('pMsg').textContent = '请填写非 0 整数（正数增加、负数扣减）'; $('pMsg').className = 'form-msg err'; return;
+  }
+  const btn = $('pSaveBtn'); btn.disabled = true;
+  try{
+    const r = await fetch('/api/admin/points/adjust',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({userId:pointsTarget, delta, remark:$('pRemark').value.trim()})});
+    const d = await r.json();
+    if(!r.ok || !d.ok){ $('pMsg').textContent = (d.detail || d.error || '保存失败'); $('pMsg').className = 'form-msg err'; return; }
+    toast(`已调整 ${delta > 0 ? '+' : ''}${delta}，当前 ${d.balance} 积分`);
+    closeModal('mPoints'); loadUsers();
+  } catch(e){ $('pMsg').textContent = '保存失败：' + e.message; $('pMsg').className = 'form-msg err'; }
+  finally { btn.disabled = false; }
+}
+/* 改经验（正数增加 / 负数扣减，写入该用户的经验明细） */
+let expTarget = null;
+function openExp(id){
+  const u = USERS.find(x=>x.id===id); if(!u) return;
+  expTarget = id;
+  $('eUser').value = u.username + (u.nickname ? '（' + u.nickname + '）' : '');
+  $('eNow').value = '经验 ' + (u.exp ?? 0) + ' · Lv' + (u.level ?? 0);
+  $('eDelta').value = '';
+  $('eRemark').value = '';
+  $('eMsg').textContent = ''; $('eMsg').className = 'form-msg';
+  $('mExp').classList.add('on');
+}
+async function saveExp(){
+  const v = $('eDelta').value.trim();
+  const delta = Number(v);
+  if(!v || !Number.isInteger(delta) || delta === 0){
+    $('eMsg').textContent = '请填写非 0 整数（正数增加、负数扣减）'; $('eMsg').className = 'form-msg err'; return;
+  }
+  const btn = $('eSaveBtn'); btn.disabled = true;
+  try{
+    const r = await fetch('/api/admin/level-exp',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({userId:expTarget, delta, remark:$('eRemark').value.trim()})});
+    const d = await r.json();
+    if(!r.ok || !d.ok){ $('eMsg').textContent = (d.detail || d.error || '保存失败'); $('eMsg').className = 'form-msg err'; return; }
+    toast(`已调整 ${delta > 0 ? '+' : ''}${delta}，当前经验 ${d.exp}（Lv${d.level}）`);
+    closeModal('mExp'); loadUsers();
+  } catch(e){ $('eMsg').textContent = '保存失败：' + e.message; $('eMsg').className = 'form-msg err'; }
+  finally { btn.disabled = false; }
 }
 async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
 

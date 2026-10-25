@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>神秘の飞鸽传信</title>
-<link rel="stylesheet" href="/css/style.css?v=20">
+<link rel="stylesheet" href="/css/style.css?v=35">
 </head>
 <body>
 
@@ -65,12 +65,21 @@
         <div class="ch-name" id="chName">群聊大厅</div>
         <div class="ch-status" id="chStatus"><span class="live">连接中…</span></div>
       </div>
-<div style="display:flex;gap:5px">
+<div class="head-tools">
+  <button class="icon-btn" id="signinBtn" onclick="doSignin()" title="每日签到" style="display:none">
+    <svg viewBox="0 0 24 24"><path d="M19 3h-1V1h-2v2H8V1H6v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H5V9h14v10z"/><path d="M9.6 13.1 8.5 14.2l2.1 2.1 4.6-4.6-1.1-1.1-3.5 3.5-1-1z"/></svg>
+  </button>
   <button class="icon-btn" id="walletBtn" onclick="openWallet()" title="积分商城" style="display:none">
     <svg viewBox="0 0 24 24"><path d="M21 18v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v1h-9a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h9zm-9-2h10V8H12v8zm4-2.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>
   </button>
+  <button class="icon-btn" id="gachaBtn" onclick="openGacha()" title="抽卡" style="display:none">
+    <svg viewBox="0 0 24 24"><path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 14.3 7.2 16.9l.9-5.4L4.2 7.7l5.4-.8z"/></svg>
+  </button>
   <button class="icon-btn" onclick="openSearch()" title="搜索聊天记录">
     <svg viewBox="0 0 24 24"><path d="M15.5 14h-.8l-.3-.3a6.5 6.5 0 1 0-.7.7l.3.3v.8l5 5 1.5-1.5-5-5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z"/></svg>
+  </button>
+  <button class="icon-btn" onclick="location.href='/eat.html'" title="今天吃点啥">
+    <svg viewBox="0 0 24 24"><path d="M7 2v7a2 2 0 0 0 2 2h1v11h2V11h1a2 2 0 0 0 2-2V2h-2v6H11V2H9v6H7V2zm10 0a3 3 0 0 0-3 3v7h2v10h2V2z"/></svg>
   </button>
   <button class="icon-btn" onclick="openProfile()" title="个人中心">
     <svg viewBox="0 0 24 24"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 2c-3.1 0-9.5 1.6-9.5 4.7V21h19v-2.3c0-3.1-6.4-4.7-9.5-4.7z"/></svg>
@@ -78,7 +87,7 @@
         <button class="icon-btn" id="adminEntry" onclick="location.href='/admin.html'" title="管理后台" style="display:none">
           <svg viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.4 9.3-8 10-4.6-.7-8-5-8-10V6l8-4z"/></svg>
         </button>
-        <button class="icon-btn" onclick="openSidebar()" title="成员"><svg viewBox="0 0 24 24"><path d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm-8 0a3 3 0 1 0-3-3 3 3 0 0 0 3 3zm8 2c-2.7 0-8 1.3-8 4v3h16v-3c0-2.7-5.3-4-8-4zM8 13c-.4 0-.9 0-1.4.1A6.2 6.2 0 0 1 8 15v3H2v-2.5C2 13.6 5.6 13 8 13z"/></svg></button>
+        <button class="icon-btn" id="membersBtn" onclick="openSidebar()" title="成员"><svg viewBox="0 0 24 24"><path d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm-8 0a3 3 0 1 0-3-3 3 3 0 0 0 3 3zm8 2c-2.7 0-8 1.3-8 4v3h16v-3c0-2.7-5.3-4-8-4zM8 13c-.4 0-.9 0-1.4.1A6.2 6.2 0 0 1 8 15v3H2v-2.5C2 13.6 5.6 13 8 13z"/></svg></button>
       </div>
     </header>
 
@@ -95,10 +104,12 @@
         <button class="tool" onclick="document.getElementById('anyInput').click()" title="发送文件">
           <svg viewBox="0 0 24 24"><path d="M16.5 6v11.5a4 4 0 0 1-8 0V6a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V7H10v9.5a2.5 2.5 0 0 0 5 0V6a4 4 0 0 0-8 0v11.5a5.5 5.5 0 0 0 11 0V6h-1.5z"/></svg>
         </button>
+        <button class="tool rp-tool" id="rpBtn" onclick="openSendRP()" title="发红包（群聊）" style="display:none">🧧</button>
         <span id="upTip" style="font-size:11.5px;color:var(--hint);margin-left:6px"></span>
       </div>
       <div class="mention-pop" id="mentionPop"></div>
       <div class="at-menu" id="atMenu"></div>
+      <div class="ctx-menu" id="userMenu"></div>
       <div class="input-row">
         <textarea id="input" rows="1" placeholder="输入消息…（输入 @ 可提醒他人 · Ctrl+V 粘贴图片）" onkeydown="onKey(event)"></textarea>
         <button class="send-btn" onclick="send()"><svg viewBox="0 0 24 24"><path d="M2.5 21L23 12 2.5 3v7l15 2-15 2z"/></svg></button>
@@ -131,6 +142,14 @@
   <div class="profile-card">
     <div class="profile-head"><span>个人中心</span><button onclick="closeProfile()" title="关闭">&times;</button></div>
     <div class="profile-body">
+      <div class="pf-level-card" id="pfLevelCard" onclick="openLevel()" title="查看我的等级与经验">
+        <img class="pf-level-badge" id="pfLevelBadge" src="/img/level/lv0.svg" alt="">
+        <div class="pf-level-meta">
+          <div class="pf-level-t" id="pfLevelTitle">Lv0</div>
+          <div class="pf-level-s" id="pfLevelSub">经验 0 / 10</div>
+        </div>
+        <div class="pf-level-go">我的等级 ›</div>
+      </div>
       <div class="pf-item"><label>账号（不可修改）</label><div class="pf-val" id="pfUsername"></div></div>
       <div class="pf-item"><label>头像（点击选择图片，或直接 Ctrl+V 粘贴）</label>
         <div class="pf-avatar" id="pfAvatar" onclick="document.getElementById('avatarInput').click()" title="点击上传 / Ctrl+V 粘贴"></div>
@@ -157,6 +176,121 @@
       <button class="pf-btn" onclick="savePassword()">修改密码</button>
     </div>
   </div>
+</div>
+
+<!-- ================= 联系人备注 ================= -->
+<div id="noteModal" class="modal" onclick="if(event.target===this)closeNoteModal()">
+  <div class="note-card">
+    <div class="profile-head"><span>设置备注</span><button onclick="closeNoteModal()" title="关闭">&times;</button></div>
+    <div class="note-body">
+      <input id="noteInput" maxlength="30" placeholder="备注名（≤30 字，留空即清除）">
+      <div class="note-tip" id="noteTarget"></div>
+      <div class="note-actions">
+        <button class="f-btn" onclick="closeNoteModal()">取消</button>
+        <button class="pf-btn" onclick="saveNote()">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 我的等级 / 等级排行 ================= -->
+<div id="levelModal" class="modal" onclick="if(event.target===this)closeLevel()">
+  <div class="level-card">
+    <div class="profile-head"><span>我的等级</span><button onclick="closeLevel()" title="关闭">&times;</button></div>
+    <div class="level-tabs">
+      <button id="lvTabMe" class="on" onclick="switchLevelTab('me')">我的等级</button>
+      <button id="lvTabBoard" onclick="switchLevelTab('board')">等级排行</button>
+    </div>
+    <div class="level-body" id="lvBodyMe">
+      <div class="level-hero">
+        <img class="level-hero-badge" id="lvHeroBadge" src="/img/level/lv0.svg" alt="">
+        <div class="level-hero-t" id="lvHeroTitle">Lv0</div>
+        <div class="level-hero-s" id="lvHeroSub">经验 0 / 10</div>
+      </div>
+      <div class="level-bar"><i id="lvBar" style="width:0%"></i></div>
+      <div class="level-bar-meta"><span id="lvBarCur">0</span><span id="lvBarNext">10</span></div>
+      <div class="level-sec">经验怎么来</div>
+      <div class="level-rules" id="lvRules"></div>
+      <div class="level-sec">经验明细</div>
+      <div class="level-logs" id="lvLogs"><div class="search-empty">加载中…</div></div>
+    </div>
+    <div class="level-body hidden" id="lvBodyBoard">
+      <div class="level-sec" style="margin-top:0">等级排行 · Top 20</div>
+      <div class="board-list" id="lvBoard"><div class="search-empty">加载中…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 抽卡 ================= -->
+<div id="gachaModal" class="modal" onclick="if(event.target===this)closeGacha()">
+  <div class="gacha-card">
+    <div class="profile-head">
+      <span>抽卡</span>
+      <span class="gacha-bal">积分 <b id="gachaBalance">0</b></span>
+      <button onclick="closeGacha()" title="关闭">&times;</button>
+    </div>
+    <div class="gacha-tabs" id="gachaTabs"></div>
+    <div class="gacha-body" id="gachaBody">
+      <div id="gachaPoolPanel">
+        <div class="gacha-pity" id="gachaPity"></div>
+        <div class="gacha-pool-title">奖池一览</div>
+        <div id="gachaPrizes"></div>
+      </div>
+      <div id="gachaLogPanel" class="hidden">
+        <div class="gacha-logs-title">我的抽卡记录</div>
+        <div class="gacha-logs" id="gachaLogs"><div class="search-empty">加载中…</div></div>
+      </div>
+    </div>
+    <div class="gacha-foot" id="gachaFoot">
+      <button class="gacha-btn one" id="gachaOne" onclick="drawGacha(1)">抽一次 <small id="gachaOneCost"></small></button>
+      <button class="gacha-btn ten" id="gachaTen" onclick="drawGacha(10)">抽十连 <small id="gachaTenCost"></small></button>
+    </div>
+  </div>
+</div>
+
+<!-- 抽卡结果 -->
+<div id="gachaResult" class="gacha-result" onclick="closeGachaResult()">
+  <div class="gr-cards" id="grCards"></div>
+  <div class="gr-tip">点击任意处关闭</div>
+</div>
+
+<!-- ================= 发红包（群聊） ================= -->
+<div id="rpSendModal" class="modal" onclick="if(event.target===this)closeRpSend()">
+  <div class="search-card" style="max-width:440px">
+    <div class="profile-head"><span>发红包（群聊）</span><button onclick="closeRpSend()" title="关闭">&times;</button></div>
+    <div class="search-body" style="gap:12px">
+      <div class="rp-seg">
+        <button id="rpKindPoints" onclick="setRPKind('points')">积分</button>
+        <button id="rpKindExp" onclick="setRPKind('exp')">经验</button>
+      </div>
+      <div class="rp-seg">
+        <button id="rpModeRandom" onclick="setRPMode('random')">拼手气（随机）</button>
+        <button id="rpModeFixed" onclick="setRPMode('fixed')">固定金额</button>
+      </div>
+      <div class="pf-item" id="rpTotalWrap"><label>总数量（<span id="rpUnit1">积分</span>）</label>
+        <input id="rpTotal" type="number" min="1" step="1" placeholder="例如 100"></div>
+      <div class="pf-item" id="rpPerWrap"><label>单个数量（<span id="rpUnit2">积分</span>）</label>
+        <input id="rpPer" type="number" min="1" step="1" placeholder="例如 10"></div>
+      <div class="pf-item"><label>红包个数</label>
+        <input id="rpCount" type="number" min="1" step="1" placeholder="例如 10"></div>
+      <div class="pf-item"><label>祝福语（选填）</label>
+        <input id="rpRemark" maxlength="40" placeholder="恭喜发财，大吉大利"></div>
+      <div class="hint" id="rpCostHint"></div>
+      <button class="wallet-btn" id="rpSendBtn" onclick="submitRP()">塞进红包</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 红包详情 / 领取 ================= -->
+<div id="rpModal" class="modal" onclick="if(event.target===this)closeRP()">
+  <div class="search-card" style="max-width:440px">
+    <div class="profile-head"><span>红包</span><button onclick="closeRP()" title="关闭">&times;</button></div>
+    <div class="search-body" id="rpBody"><div class="search-empty">加载中…</div></div>
+  </div>
+</div>
+<div id="rpGrabPop" class="rp-grab-pop" onclick="hideRpPop()">
+  <div class="n" id="rpPopNum">+0</div>
+  <div class="t" id="rpPopTxt">已存入余额</div>
 </div>
 
 <!-- ================= 搜索聊天记录 ================= -->
@@ -201,15 +335,18 @@
 <input type="file" id="stkInput" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" class="hidden">
 <input type="file" id="avatarInput" accept="image/*" class="hidden">
 
-<!-- ================= 每日签到 ================= -->
+<!-- ================= 每日签到（签到成功 + 最近 7 天步骤条 + 总积分） ================= -->
 <div id="signinModal" class="modal" onclick="if(event.target===this)closeSignin()">
-  <div class="search-card" style="max-width:340px">
-    <div class="profile-head"><span>每日签到</span><button onclick="closeSignin()" title="关闭">&times;</button></div>
+  <div class="search-card" style="max-width:470px">
+    <div class="profile-head"><span id="signinTitle">签到成功</span><button onclick="closeSignin()" title="关闭">&times;</button></div>
     <div class="signin-body">
-      <div style="font-size:40px">🎁</div>
-      <div class="signin-tip">每日签到随机积分奖励已到账</div>
+      <div style="font-size:38px">🎁</div>
+      <div class="signin-tip" id="signinTip">每日签到随机积分奖励已到账</div>
+      <div class="signin-gain" id="signinPointsLabel">本次签到获得</div>
       <div class="signin-points" id="signinPoints">+0</div>
-      <div class="signin-balance">当前积分：<b id="signinBalance">0</b></div>
+      <div class="signin-week-title">最近 7 天签到</div>
+      <div class="steps" id="signinSteps"></div>
+      <div class="signin-balance">总积分：<b id="signinBalance">0</b></div>
       <button class="wallet-btn" style="width:100%;margin-top:14px" onclick="closeSignin()">开心收下</button>
     </div>
   </div>
@@ -220,7 +357,9 @@
   <div class="search-card" style="max-width:560px">
     <div class="profile-head"><span>积分商城</span><button onclick="closeWallet()" title="关闭">&times;</button></div>
     <div class="search-body wallet-body">
-      <div class="wallet-balance">我的积分：<b id="walletBalance">0</b></div>
+      <div class="wallet-balance">我的积分：<b id="walletBalance">0</b>
+        <button class="wallet-btn" style="margin-left:auto" onclick="openMyOrders()">我的订单</button>
+      </div>
 
       <div class="wallet-sec">积分明细</div>
       <div id="walletLogs" class="wallet-logs"><div class="search-empty">加载中…</div></div>
@@ -239,6 +378,18 @@
   </div>
 </div>
 
-<script src="/js/app.js?v=23"></script>
+<!-- ================= 我的订单（兑换记录 + 管理员兑现内容） ================= -->
+<div id="ordersModal" class="modal" onclick="if(event.target===this)closeOrders()">
+  <div class="search-card" style="max-width:560px">
+    <div class="profile-head"><span>我的订单</span>
+      <button onclick="refreshOrders()" title="刷新" style="margin-left:auto">↻</button>
+      <button onclick="closeOrders()" title="关闭">&times;</button></div>
+    <div class="search-body wallet-body">
+      <div id="ordersList" class="wallet-orders"><div class="search-empty">加载中…</div></div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js?v=35"></script>
 </body>
 </html>

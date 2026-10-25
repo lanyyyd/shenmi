@@ -22,9 +22,14 @@ function safeUrl(u) {
   return (u.indexOf('/uploads/') === 0 || u.indexOf('https://') === 0) ? u : '';
 }
 
-function imgTag(url, alt, cls) {
+function imgTag(url, alt, cls, status) {
   var s = safeUrl(url);
-  if (!s) return '<div class="img-ph ' + (cls || '') + '"></div>';
+  if (!s) {
+    var pending = (status === 'queued' || status === 'running');
+    return '<div class="img-ph' + (pending ? ' img-pending' : '') + ' ' + (cls || '') + '"' +
+      (pending ? ' data-ai-pending="1"' : '') + '>' +
+      (pending ? '<span class="img-pending-txt">AI 配图中…</span>' : '') + '</div>';
+  }
   return '<img src="' + esc(s) + '" alt="' + esc(alt || '') + '" loading="lazy" class="' + (cls || '') + '">';
 }
 
@@ -32,7 +37,7 @@ function initials(name) {
   var n = String(name || '?').trim();
   return (n.charAt(0) || '?').toUpperCase();
 }
-var AV_COLORS = ['#FF6B35', '#FFB347', '#FF8A5B', '#F4511E', '#FFA726', '#E08A5B'];
+var AV_COLORS = ['#FFB020', '#FF8A00', '#FFC53D', '#E06A00', '#FFA726', '#F0A34A'];
 function avColor(id) {
   var s = String(id || ''), h = 0;
   for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
@@ -121,21 +126,65 @@ async function API(path, opt) {
   return data;
 }
 
+/* 上传前压缩：转 webp、质量 0.7、最长边限制 1600px（等比）。失败/不支持则返回 null，回退原图。 */
+function compressImage(file, maxSide, quality) {
+  return new Promise(function (resolve) {
+    try {
+      if (!file || !/^image\//.test(file.type || '')) { resolve(null); return; }
+      var reader = new FileReader();
+      reader.onload = function () {
+        var im = new Image();
+        im.onload = function () {
+          try {
+            var w = im.naturalWidth || im.width;
+            var h = im.naturalHeight || im.height;
+            if (!w || !h) { resolve(null); return; }
+            var scale = Math.min(1, maxSide / Math.max(w, h));
+            var dw = Math.max(1, Math.round(w * scale));
+            var dh = Math.max(1, Math.round(h * scale));
+            var c = document.createElement('canvas');
+            c.width = dw; c.height = dh;
+            var g = c.getContext('2d');
+            g.drawImage(im, 0, 0, dw, dh);
+            c.toBlob(function (blob) {
+              resolve((blob && /webp/.test(blob.type)) ? blob : null);
+            }, 'image/webp', quality);
+          } catch (e) { resolve(null); }
+        };
+        im.onerror = function () { resolve(null); };
+        im.src = reader.result;
+      };
+      reader.onerror = function () { resolve(null); };
+      reader.readAsDataURL(file);
+    } catch (e) { resolve(null); }
+  });
+}
+
 async function uploadImage(file) {
+  var name = 'eat-' + Date.now() + '.webp';
+  var blob = await compressImage(file, 1600, 0.7);
+  var up = file;
+  if (blob) {
+    try { up = new File([blob], name, { type: 'image/webp' }); }
+    catch (e) { up = blob; }
+  } else {
+    name = file.name || ('eat-' + Date.now());
+  }
   var fd = new FormData();
-  fd.append('file', file);
+  fd.append('file', up, name);
   var r = await API('/api/eat/upload', { method: 'POST', body: fd });
   return r.url || '';
 }
 
 /* ============================ 状态 ============================ */
-var state = { me: null, stores: [], dishes: [], reviews: [], wall: [], task: null, overridden: false, period: 'month' };
+var state = { me: null, users: [], stores: [], dishes: [], reviews: [], wall: [], task: null, overridden: false, period: 'month' };
 var currentTab = 'home';
 var currentStore = null;
 var currentStoreDishes = [];
 var spinning = false;
 var wheelRotation = -Math.PI / 2;
-var reviewDraft = { parentId: null, storeId: null, dishId: null, rating: 0, image: '' };
+var reviewDraft = { parentId: null, storeId: null, dishId: null, rating: 0, image: '', images: [] };
+var RV_MAX_IMGS = 9;
 var formSave = null;
 var formData = {};
 var infoPrimaryFn = null;
@@ -154,6 +203,7 @@ function deviceId() {
 
 function needLogin() {
   state.me = null;
+  if (typeof stopImgPolling === 'function') stopImgPolling();
   $('#loginScreen').style.display = 'flex';
   $('#app').style.display = 'none';
 }
@@ -224,8 +274,18 @@ async function boot() {
     await loadStores();
     await loadDishes();
   } catch (e) { fail(e); }
+  loadUsers().catch(function () {});
   showTab('home');
   await popTaskOnLoad();
+}
+
+async function loadUsers() {
+  try {
+    var r = await API('/api/eat/users');
+    state.users = r.users || [];
+  } catch (e) {
+    state.users = [];
+  }
 }
 
 async function popTaskOnLoad() {
@@ -241,11 +301,54 @@ async function loadStores() {
   var r = await API('/api/eat/stores');
   state.stores = r.stores || [];
   renderHome();
+  if (hasPendingImages()) startImgPolling();
 }
 async function loadDishes() {
   var r = await API('/api/eat/dishes');
   state.dishes = r.dishes || [];
   drawWheel();
+  if (hasPendingImages()) startImgPolling();
+}
+
+/* ---------- AI 配图：排队/生成中时轮询刷新 ---------- */
+var imgPollTimer = null;
+var imgPollTicks = 0;
+
+function isImgPending(x) {
+  return !!x && (x.imageStatus === 'queued' || x.imageStatus === 'running');
+}
+function hasPendingImages() {
+  var i;
+  for (i = 0; i < (state.stores || []).length; i++) if (isImgPending(state.stores[i])) return true;
+  for (i = 0; i < (state.dishes || []).length; i++) if (isImgPending(state.dishes[i])) return true;
+  if (isImgPending(currentStore)) return true;
+  for (i = 0; i < (currentStoreDishes || []).length; i++) if (isImgPending(currentStoreDishes[i])) return true;
+  return false;
+}
+function startImgPolling() {
+  if (imgPollTimer) return;
+  imgPollTicks = 0;
+  imgPollTimer = setInterval(async function () {
+    imgPollTicks++;
+    try {
+      await loadStores();
+      await loadDishes();
+      if (currentStore && $('#page-store').classList.contains('active')) await refreshStore();
+    } catch (e) { /* 忽略：下一轮再试 */ }
+    if (imgPollTicks >= 40 || !hasPendingImages()) stopImgPolling();
+  }, 3000);
+}
+function stopImgPolling() {
+  if (imgPollTimer) { clearInterval(imgPollTimer); imgPollTimer = null; }
+}
+async function refreshStore() {
+  if (!currentStore) return;
+  try {
+    var r = await API('/api/eat/stores/' + encodeURIComponent(currentStore.id) + '/dishes');
+    currentStore = r.store;
+    currentStoreDishes = r.dishes || [];
+    renderStore();
+  } catch (e) { /* 忽略 */ }
 }
 async function loadReviews() {
   var r = await API('/api/eat/reviews?limit=50&offset=0');
@@ -255,6 +358,12 @@ async function loadReviews() {
 }
 
 /* ============================ 页面切换 ============================ */
+/* 手机返回键：把「首页 → 店铺 → 菜品」的层级写进浏览器历史，返回时逐级回退 */
+function navState() { return window.history.state || {}; }
+function pushPage(st) { try { window.history.pushState(st, ''); } catch (e) {} }
+function replacePage(st) { try { window.history.replaceState(st, ''); } catch (e) {} }
+replacePage({ page: 'home' });   // 记录首页这一层，店铺/菜品再往上叠
+
 function activatePage(name) {
   $$('.page').forEach(function (p) { p.classList.remove('active'); });
   var el = $('#page-' + name);
@@ -262,7 +371,7 @@ function activatePage(name) {
   window.scrollTo(0, 0);
 }
 
-function showTab(name) {
+function showTab(name, fromPop) {
   currentTab = name;
   activatePage(name);
   $$('#tabbar .tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
@@ -270,6 +379,7 @@ function showTab(name) {
   if (name === 'wheel') drawWheel();
   if (name === 'review') loadReviews().catch(fail);
   if (name === 'mine') loadMine().catch(fail);
+  if (!fromPop) replacePage({ page: name });
 }
 
 $$('#tabbar .tab').forEach(function (t) {
@@ -289,7 +399,7 @@ function renderHome() {
       ? rec.map(function (d) { return esc(d.name) + ' ¥' + money(d.price); }).join(' · ')
       : '暂无推荐';
     return '<div class="card store-card" data-store="' + s.id + '">' +
-      imgTag(s.image, s.name, 'store-thumb') +
+      imgTag(s.image, s.name, 'store-thumb', s.imageStatus) +
       '<div class="body">' +
         '<div class="row1"><div class="name">' + esc(s.name) + '</div><div>' + storeRatingHtml(s.rating) + '</div></div>' +
         '<div class="loc">📍 ' + esc(s.location || '') + '</div>' +
@@ -308,7 +418,7 @@ $('#storeList').addEventListener('click', function (e) {
 function canEditStore(s) { return !!(state.me && (state.me.isAdmin || s.ownerId === state.me.id)); }
 function canEditDish(d) { return !!(state.me && (state.me.isAdmin || d.ownerId === state.me.id)); }
 
-async function openStore(id) {
+async function openStore(id, fromPop) {
   try {
     var r = await API('/api/eat/stores/' + encodeURIComponent(id) + '/dishes');
     currentStore = r.store;
@@ -317,6 +427,11 @@ async function openStore(id) {
     activatePage('store');
     $$('#tabbar .tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === 'home'); });
     $('#storeAction').style.display = 'block';
+    var st = navState();
+    if (!fromPop && !(st.page === 'store' && String(st.storeId) === String(id))) {
+      pushPage({ page: 'store', storeId: String(id) });
+    }
+    if (hasPendingImages()) startImgPolling();
   } catch (e) { fail(e); }
 }
 
@@ -324,7 +439,7 @@ function renderStore() {
   var s = currentStore;
   if (!s) return;
   $('#storeHero').innerHTML =
-    imgTag(s.image, s.name, 'hero-img') +
+    imgTag(s.image, s.name, 'hero-img', s.imageStatus) +
     '<div class="hero-info"><h2>' + esc(s.name) + '</h2>' +
     '<p>' + storeRatingHtml(s.rating) + (s.ratingCount ? '（' + s.ratingCount + ' 条）' : '') + ' · 📍 ' + esc(s.location || '') + '</p></div>';
 
@@ -340,24 +455,29 @@ function renderStore() {
   }
 
   var list = $('#dishList');
-  if (!currentStoreDishes.length) {
-    list.innerHTML = '<div class="empty">这家店还没有菜品，去「我的」页添加吧～</div>';
-  } else {
-    list.innerHTML = currentStoreDishes.map(function (d) {
-      var editable = canEditDish(d);
-      return '<div class="dish">' + imgTag(d.image, d.name, 'dish-img') +
-        '<div class="d-info"><div class="d-name">' + esc(d.name) + '</div>' +
-        '<div class="d-price">¥' + money(d.price) + ' <small>· 吃过 ' + Number(d.eatCount || 0) + ' 次</small></div></div>' +
-        (editable
-          ? '<div class="d-acts"><button class="icon-btn" data-edit-dish="' + d.id + '" title="编辑">✏️</button>' +
-            '<button class="icon-btn" data-del-dish="' + d.id + '" title="删除">🗑️</button></div>'
-          : '') +
-      '</div>';
-    }).join('');
-  }
+  var dishesHtml = currentStoreDishes.length
+    ? currentStoreDishes.map(function (d) {
+        var editable = canEditDish(d);
+        return '<div class="dish" data-dish="' + d.id + '">' + imgTag(d.image, d.name, 'dish-img', d.imageStatus) +
+          '<div class="d-info"><div class="d-name">' + esc(d.name) + '</div>' +
+          '<div class="d-price">¥' + money(d.price) + ' <small>· 吃过 ' + Number(d.eatCount || 0) + ' 次</small></div></div>' +
+          (editable
+            ? '<div class="d-acts"><button class="icon-btn" data-edit-dish="' + d.id + '" title="编辑">✏️</button>' +
+              '<button class="icon-btn" data-del-dish="' + d.id + '" title="删除">🗑️</button></div>'
+            : '') +
+        '</div>';
+      }).join('')
+    : '<div class="empty">这家店还没有菜品，点下面按钮添加吧～</div>';
+  // 最后一个菜品下面：添加菜品按钮，且自动选中本店
+  list.innerHTML = dishesHtml +
+    '<button class="btn btn-soft store-add-dish" id="storeAddDishBtn">＋ 添加菜品</button>';
 }
 
-$('#backToList').addEventListener('click', function () { showTab('home'); });
+$('#backToList').addEventListener('click', function () {
+  var st = navState();
+  if (st.page === 'store' || st.page === 'dish') { window.history.back(); return; }
+  showTab('home');
+});
 
 $('#storeActions').addEventListener('click', function (e) {
   if (e.target.closest('[data-edit-store]')) editStore();
@@ -367,8 +487,76 @@ $('#dishList').addEventListener('click', function (e) {
   var ed = e.target.closest('[data-edit-dish]');
   if (ed) { editDish(ed.dataset.editDish); return; }
   var dl = e.target.closest('[data-del-dish]');
-  if (dl) deleteDish(dl.dataset.delDish);
+  if (dl) { deleteDish(dl.dataset.delDish); return; }
+  if (e.target.closest('#storeAddDishBtn')) { openDishForm(currentStore ? currentStore.id : null); return; }
+  var dish = e.target.closest('[data-dish]');
+  if (dish) { openDishDetail(dish.dataset.dish); return; }
 });
+
+/* ---------- 餐品详情（点开查看 + 「就吃这个了！」） ---------- */
+var dishDetail = null;
+
+function openDishDetail(id, fromPop) {
+  var d = null;
+  for (var i = 0; i < currentStoreDishes.length; i++) {
+    if (String(currentStoreDishes[i].id) === String(id)) { d = currentStoreDishes[i]; break; }
+  }
+  if (!d) { toast('菜品不存在'); return; }
+  dishDetail = d;
+  var s = currentStore || {};
+  $('#dishDetail').innerHTML =
+    imgTag(d.image, d.name, 'dd-img', d.imageStatus) +
+    '<div class="dd-name">' + esc(d.name) + '</div>' +
+    '<div class="dd-meta">' +
+      '🍽️ ' + esc(s.name || '') + '<br>' +
+      '📍 ' + esc(s.location || '') + '<br>' +
+      '价格 ¥' + money(d.price) + '<br>' +
+      '⭐ ' + ratingText(s.rating) + (s.ratingCount ? '（' + Number(s.ratingCount) + ' 条评价）' : '') + '<br>' +
+      '被吃过 ' + Number(d.eatCount || 0) + ' 次' +
+    '</div>';
+  $('#dishMask').classList.add('show');
+  if (!fromPop) pushPage({ page: 'dish', dishId: String(id) });
+}
+
+function closeDishDetail(noHistory) {
+  if (!noHistory) {
+    var st = navState();
+    if (st.page === 'dish') { window.history.back(); return; }
+  }
+  $('#dishMask').classList.remove('show');
+}
+
+window.addEventListener('popstate', function (e) {
+  var st = e.state || { page: 'home' };
+  if (st.page === 'dish') { return; }          // 前进回到菜品时保持当前弹层
+  $('#dishMask').classList.remove('show');
+  if (st.page === 'store') {
+    if (!currentStore || String(currentStore.id) !== String(st.storeId)) {
+      openStore(st.storeId, true);
+    } else {
+      activatePage('store');
+      $$('#tabbar .tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === 'home'); });
+      $('#storeAction').style.display = 'block';
+    }
+    return;
+  }
+  showTab(st.page || 'home', true);
+});
+
+async function eatThisDish() {
+  if (!state.me) { needLogin(); toast('请先登录'); return; }
+  if (!dishDetail) return;
+  try {
+    var r = await API('/api/eat/choose', { method: 'POST', json: { dishId: Number(dishDetail.id) } });
+    state.task = r.task || null;
+    state.overridden = !r.global;
+    closeDishDetail();
+    toast('已生成任务，快去吃吧！');
+  } catch (e) { fail(e); }
+}
+$('#eatThisDishBtn').addEventListener('click', eatThisDish);
+$('#dishCancel').addEventListener('click', function () { closeDishDetail(); });
+$('#dishMask').addEventListener('click', function (e) { if (e.target === this) closeDishDetail(); });
 
 /* 「就吃这家了！」 */
 $('#storeAction').addEventListener('click', pickFromStore);
@@ -428,7 +616,7 @@ function showConfirmTask(task) {
 }
 
 /* ============================ 转盘 ============================ */
-var WHEEL_COLORS = ['#FF6B35', '#FFB347', '#FF8A5B', '#FFC97A', '#FF9A62', '#FFB347'];
+var WHEEL_COLORS = ['#FFB020', '#FF8A00', '#FFC53D', '#FFD97A', '#FF9E2C', '#FFB84D'];
 
 function wheelItems() {
   return state.dishes.map(function (d) {
@@ -456,7 +644,7 @@ function drawWheel() {
     ctx.closePath();
     ctx.fillStyle = WHEEL_COLORS[i % WHEEL_COLORS.length];
     ctx.fill();
-    ctx.strokeStyle = '#FFF7EF';
+    ctx.strokeStyle = '#FFFFFF';
     ctx.lineWidth = 3;
     ctx.stroke();
 
@@ -475,12 +663,12 @@ function drawWheel() {
 
   ctx.beginPath();
   ctx.arc(R, R, 72, 0, Math.PI * 2);
-  ctx.fillStyle = '#FFF7EF';
+  ctx.fillStyle = '#FFFFFF';
   ctx.fill();
-  ctx.strokeStyle = '#FF6B35';
+  ctx.strokeStyle = '#FF8A00';
   ctx.lineWidth = 10;
   ctx.stroke();
-  ctx.fillStyle = '#FF6B35';
+  ctx.fillStyle = '#E06A00';
   ctx.font = '900 26px system-ui';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -532,7 +720,7 @@ function spinToIndex(idx, total, done) {
 function showResult(task) {
   if (!task) return;
   $('#resultArea').innerHTML = '<div class="result-card">' +
-    '<div class="big">🎉 抽到了：' + esc(task.dishName) + '</div>' +
+    '<div class="big">🎉 抽到了：<em>' + esc(task.dishName) + '</em></div>' +
     '<div class="line">🍽️ ' + esc(task.storeName) + ' · ¥' + money(task.price) + '</div>' +
     '<div class="line">📍 ' + esc(task.location || '') + '</div>' +
     '<div class="line">⭐ ' + ratingText(task.rating) + '</div>' +
@@ -557,7 +745,14 @@ $('#againBtn').addEventListener('click', async function () {
 /* ============================ 评价 feed ============================ */
 function reviewCardHtml(r, isSame) {
   var u = r.user || {};
-  var imgUrl = safeUrl(r.image);
+  var imgs = (r.images && r.images.length) ? r.images : (r.image ? [r.image] : []);
+  var imgsHtml = imgs.length
+    ? '<div class="review-imgs' + (imgs.length === 1 ? ' one' : '') + '">' + imgs.map(function (url) {
+        var s = safeUrl(url);
+        if (!s) return '';
+        return '<img class="rv-img-cell" data-view="' + esc(s) + '" src="' + esc(s) + '" loading="lazy" alt="">';
+      }).join('') + '</div>'
+    : '';
   var sames = (!isSame && r.sames && r.sames.length)
     ? '<div class="same-list">' + r.sames.map(function (k) { return reviewCardHtml(k, true); }).join('') + '</div>'
     : '';
@@ -569,10 +764,15 @@ function reviewCardHtml(r, isSame) {
     '</div>' +
     (r.rating ? '<div class="rv-stars">' + reviewStars(r.rating) + '</div>' : '') +
     (r.comment ? '<div class="rv-comment">' + esc(r.comment) + '</div>' : '') +
-    (imgUrl ? '<img class="rv-img" data-view="' + esc(imgUrl) + '" src="' + esc(imgUrl) + '" loading="lazy" alt="">' : '') +
+    (r.guests && r.guests.length
+      ? '<div class="rv-guests">🍽️ 一起吃：' + r.guests.map(function (g) { return esc(g.nickname || g.username || ''); }).join('、') + '</div>'
+      : '') +
+    imgsHtml +
     '<div class="rv-actions">' +
       '<button class="rv-act like' + (r.liked ? ' on' : '') + '" data-like="' + r.id + '">' + (r.liked ? '♥' : '♡') + ' <span>' + Number(r.likeCount || 0) + '</span></button>' +
-      '<button class="rv-act same-btn" data-same="' + r.id + '">💬 同评 <span>' + Number(r.sameCount || 0) + '</span></button>' +
+      (isSame ? '' : '<button class="rv-act same-btn" data-same="' + r.id + '">💬 同评 <span>' + Number(r.sameCount || 0) + '</span></button>') +
+      (canEditReview(r) ? '<button class="rv-act edit" data-edit-review="' + r.id + '" title="编辑评价">✏️</button>' : '') +
+      (canDelReview(r) ? '<button class="rv-act del" data-del-review="' + r.id + '" title="删除评价">🗑️</button>' : '') +
     '</div>' +
     sames +
   '</div>';
@@ -613,7 +813,57 @@ async function toggleLike(btn) {
   } catch (e) { fail(e); }
 }
 
+function canDelReview(r) {
+  return !!(state.me && r && r.user && (state.me.isAdmin || String(r.user.id) === String(state.me.id)));
+}
+
+function canEditReview(r) {
+  return !!(state.me && r && r.user && String(r.user.id) === String(state.me.id));
+}
+
+function editReview(id) {
+  var r = findReview(id);
+  if (!r) { toast('评价不存在'); return; }
+  if (!canEditReview(r)) { toast('只能编辑自己发布的评价'); return; }
+  openReviewEditor({
+    editId: r.id,
+    parentId: r.parentId || null,
+    storeId: r.storeId, dishId: r.dishId,
+    storeName: r.storeName, dishName: r.dishName,
+    rating: r.rating, comment: r.comment, image: r.image, images: r.images,
+    guestIds: (r.guests || []).map(function (g) { return g.id; })
+  });
+}
+
+async function deleteReview(id) {
+  if (!state.me) { needLogin(); toast('请先登录'); return; }
+  var r = findReview(id);
+  var sameN = (r && r.sames && r.sames.length) ? r.sames.length : 0;
+  showInfo({
+    title: '删除评价',
+    sub: sameN
+      ? '这条评价下有 ' + sameN + ' 条同评：删除后第一条同评会自动升为主评，其余同评跟随过来。'
+      : '删除后，这条消费记录会从店铺评分、我的评价、月度/年度总结和图片墙中一并去掉。',
+    body: r ? '<div class="target-box"><b>' + esc(r.dishName || '评价') + '</b><span>' + esc(r.comment || '（没有写评语）') + '</span></div>' : '',
+    primaryText: '确认删除',
+    onPrimary: async function () {
+      try {
+        await API('/api/eat/reviews/' + encodeURIComponent(id), { method: 'DELETE' });
+        toast('评价已删除');
+        await loadReviews();
+        loadStores().catch(function () {});
+        if (currentTab === 'mine') loadMine().catch(fail);
+      } catch (e) { fail(e); }
+    },
+    secondaryText: '取消'
+  });
+}
+
 $('#reviewFeed').addEventListener('click', function (e) {
+  var del = e.target.closest('[data-del-review]');
+  if (del) { deleteReview(del.dataset.delReview); return; }
+  var ed = e.target.closest('[data-edit-review]');
+  if (ed) { editReview(ed.dataset.editReview); return; }
   var like = e.target.closest('[data-like]');
   if (like) { toggleLike(like); return; }
   var same = e.target.closest('[data-same]');
@@ -644,17 +894,42 @@ function fillDishSelect(storeId) {
     : '<option value="">（该店暂无菜品）</option>';
 }
 
+function renderGuestPicker(selected) {
+  var box = $('#rvGuests');
+  if (!box) return;
+  var sel = {};
+  (selected || []).forEach(function (x) { sel[String(x)] = 1; });
+  var list = (state.users || []).filter(function (u) {
+    return !state.me || String(u.id) !== String(state.me.id);
+  });
+  box.innerHTML = list.length
+    ? list.map(function (u) {
+        var nick = u.nickname || u.username || ('用户' + u.id);
+        return '<label class="guest-chip"><input type="checkbox" value="' + esc(u.id) + '"' +
+          (sel[String(u.id)] ? ' checked' : '') + '><span>' + esc(nick) + '</span></label>';
+      }).join('')
+    : '<div class="guest-empty">暂无其他用户</div>';
+}
+
 function openReviewEditor(opts) {
   opts = opts || {};
+  var editing = opts.editId != null;
+  var imgs = [];
+  if (opts.images && opts.images.length) imgs = opts.images.slice(0, RV_MAX_IMGS);
+  else if (opts.image) imgs = [opts.image];
   reviewDraft = {
+    editId: editing ? opts.editId : null,
     parentId: opts.parentId || null,
     storeId: opts.storeId != null ? opts.storeId : null,
     dishId: opts.dishId != null ? opts.dishId : null,
-    rating: 0,
-    image: ''
+    rating: Number(opts.rating || 0),
+    image: imgs[0] || '',
+    images: imgs
   };
 
-  $('#reviewTitle').textContent = opts.parentId ? '💬 同评' : '✍️ 发评价';
+  $('#reviewTitle').textContent = editing
+    ? (opts.parentId ? '✏️ 编辑同评' : '✏️ 编辑评价')
+    : (opts.parentId ? '💬 同评' : '✍️ 发评价');
 
   var hasTarget = (reviewDraft.storeId != null || reviewDraft.dishId != null);
   if (hasTarget) {
@@ -673,16 +948,21 @@ function openReviewEditor(opts) {
     fillDishSelect($('#rvStore').value);
   }
 
-  $('#reviewSub').textContent = opts.parentId
-    ? '同意这道菜？说说你的看法～打分、评语、图片都可留空'
-    : '说说这一顿吃得怎么样～打分、评语、图片都可以留空';
+  $('#reviewSub').textContent = editing
+    ? '修改评分、评语或图片后保存'
+    : (opts.parentId
+      ? '同意这道菜？说说你的看法～打分、评语、图片都可留空'
+      : '说说这一顿吃得怎么样～打分、评语、图片都可以留空');
 
-  reviewDraft.rating = 0;
+  // 同评没有「一起吃」，只有主评（新建或编辑）才显示
+  $('#reviewGuestsField').style.display = opts.parentId ? 'none' : 'block';
+
   updateReviewStars();
-  $('#rvComment').value = '';
+  renderGuestPicker(editing ? opts.guestIds : []);
+  $('#rvComment').value = opts.comment || '';
   $('#rvFile').value = '';
-  $('#rvPreview').style.display = 'none';
-  $('#rvPreview').src = '';
+  renderReviewImgs();
+  $('#rvSubmit').textContent = editing ? '保存修改' : '提交';
   $('#reviewMask').classList.add('show');
 }
 
@@ -700,17 +980,46 @@ $$('#rvStars span').forEach(function (s) {
 
 $('#rvStore').addEventListener('change', function () { fillDishSelect($('#rvStore').value); });
 
+function renderReviewImgs() {
+  var box = $('#rvPreview');
+  if (!box) return;
+  var list = reviewDraft.images || [];
+  box.innerHTML = list.map(function (url, i) {
+    return '<div class="rv-thumb">' + imgTag(safeUrl(url), '', 'rv-thumb-img') +
+      '<button type="button" class="rm" data-rm-thumb="' + i + '" title="移除">×</button></div>';
+  }).join('');
+}
+
+$('#rvPreview').addEventListener('click', function (e) {
+  var rm = e.target.closest('[data-rm-thumb]');
+  if (rm) {
+    reviewDraft.images.splice(Number(rm.dataset.rmThumb), 1);
+    reviewDraft.image = reviewDraft.images[0] || '';
+    renderReviewImgs();
+    return;
+  }
+  var im = e.target.closest('.rv-thumb-img');
+  if (im && safeUrl(im.getAttribute('src'))) openViewer(im.getAttribute('src'));
+});
+
 $('#rvFile').addEventListener('change', async function (e) {
-  var f = e.target.files && e.target.files[0];
-  if (!f) return;
-  try {
-    toast('图片上传中…');
-    var url = await uploadImage(f);
-    reviewDraft.image = url;
-    $('#rvPreview').src = url;
-    $('#rvPreview').style.display = 'block';
-    toast('图片已上传');
-  } catch (err) { fail(err); }
+  var files = e.target.files ? Array.prototype.slice.call(e.target.files) : [];
+  e.target.value = '';
+  if (!files.length) return;
+  var over = false;
+  for (var i = 0; i < files.length; i++) {
+    if (reviewDraft.images.length >= RV_MAX_IMGS) { over = true; break; }
+    try {
+      toast('图片上传中…');
+      var url = await uploadImage(files[i]);
+      if (url && reviewDraft.images.indexOf(url) < 0 && reviewDraft.images.length < RV_MAX_IMGS) {
+        reviewDraft.images.push(url);
+      }
+    } catch (err) { fail(err); }
+  }
+  reviewDraft.image = reviewDraft.images[0] || '';
+  renderReviewImgs();
+  toast(over ? '最多 9 张图片' : '图片已上传');
 });
 
 async function submitReview() {
@@ -720,18 +1029,34 @@ async function submitReview() {
     dishId = $('#rvDish').value ? Number($('#rvDish').value) : null;
     if (!dishId) { toast('请选择菜品'); return; }
   }
+  var editing = reviewDraft.editId != null;
+  var guestIds = $$('#rvGuests input:checked').map(function (x) { return Number(x.value); })
+    .filter(function (x) { return !!x; });
+  var images = reviewDraft.images || [];
   var payload = {
-    parentId: reviewDraft.parentId,
-    storeId: storeId,
-    dishId: dishId,
     rating: reviewDraft.rating || null,
     comment: $('#rvComment').value.trim(),
-    image: reviewDraft.image || ''
+    image: images[0] || '',
+    images: images
   };
+  if (editing) {
+    // 同评没有「一起吃」，只有主评才提交成员
+    if (!reviewDraft.parentId) payload.guestIds = guestIds;
+  } else {
+    payload.parentId = reviewDraft.parentId;
+    payload.storeId = storeId;
+    payload.dishId = dishId;
+    payload.guestIds = guestIds;
+  }
   try {
-    await API('/api/eat/reviews', { method: 'POST', json: payload });
+    var r = editing
+      ? await API('/api/eat/reviews/' + encodeURIComponent(reviewDraft.editId), { method: 'PUT', json: payload })
+      : await API('/api/eat/reviews', { method: 'POST', json: payload });
     $('#reviewMask').classList.remove('show');
-    toast(reviewDraft.parentId ? '同评已发布' : '评价已发布');
+    if (editing) toast('评价已更新');
+    else toast(reviewDraft.parentId
+      ? (r.taskCompleted ? '跟评已发布，任务完成 ✅' : '跟评已发布')
+      : '评价已发布');
     await loadReviews();
     if (currentTab === 'mine') loadMine().catch(fail);
   } catch (e) { fail(e); }
@@ -792,7 +1117,10 @@ $$('.seg-btn').forEach(function (b) {
 function renderMyReviews() {
   var box = $('#mineRecords');
   if (!state.me) { box.innerHTML = ''; return; }
-  var mine = state.reviews.filter(function (r) { return r.user && String(r.user.id) === String(state.me.id); });
+  var mine = state.reviews.filter(function (r) {
+    if (r.user && String(r.user.id) === String(state.me.id)) return true;
+    return (r.guests || []).some(function (g) { return String(g.id) === String(state.me.id); });
+  });
   if (!mine.length) { box.innerHTML = '<div class="empty">还没有评价，快去抽一个任务吧～</div>'; return; }
   box.innerHTML = mine.map(function (r) {
     return '<div class="rec-item">' + imgTag(r.dishImage, r.dishName, 'rec-img') +
@@ -853,7 +1181,7 @@ async function exportWall() {
   var c = document.createElement('canvas');
   c.width = W; c.height = H;
   var g = c.getContext('2d');
-  g.fillStyle = '#FFF7EF';
+  g.fillStyle = '#FFFFFF';
   g.fillRect(0, 0, W, H);
 
   imgs.forEach(function (im, i) {
@@ -888,13 +1216,13 @@ async function exportWall() {
 $('#exportWallBtn').addEventListener('click', function () { exportWall().catch(fail); });
 
 /* ============================ 通用表单弹窗 ============================ */
-function openForm(title, sub, fields, onSave) {
+function openForm(title, sub, fields, onSave, ai) {
   formSave = onSave;
   formData = {};
   $('#formTitle').textContent = title;
   $('#formSub').textContent = sub || '';
   $('#formSub').style.display = sub ? 'block' : 'none';
-  $('#formFields').innerHTML = fields.map(function (f) {
+  var html = fields.map(function (f) {
     if (f.type === 'select') {
       var opts = (f.options || []).map(function (o) {
         return '<option value="' + esc(o.value) + '"' + (String(o.value) === String(f.value) ? ' selected' : '') + '>' + esc(o.label) + '</option>';
@@ -913,9 +1241,96 @@ function openForm(title, sub, fields, onSave) {
     return '<div class="field"><label>' + esc(f.label) + '</label>' +
       '<input type="text" data-k="' + f.key + '" value="' + esc(f.value == null ? '' : f.value) + '" placeholder="' + esc(f.placeholder || '') + '"></div>';
   }).join('');
+  if (ai && ai.id != null) html += aiImageBoxHtml(ai);
+  $('#formFields').innerHTML = html;
   fields.forEach(function (f) { formData[f.key] = f.value == null ? '' : f.value; });
   $('#formMask').classList.add('show');
 }
+
+/* ---------- AI 重新生图：原有提示词 + 用户补充词 ---------- */
+function aiImageBoxHtml(ai) {
+  var img = safeUrl(ai.image);
+  return '<div class="ai-img-box" data-ai-kind="' + esc(ai.kind) + '" data-ai-id="' + esc(ai.id) + '">' +
+    '<div class="ai-img-title">🖼️ AI 重新生图</div>' +
+    '<div class="ai-img-hint">补充提示词会追加到原有提示词后面，点「重新生图」后台生成，完成后自动替换并删除旧图。</div>' +
+    '<div class="ai-img-body">' +
+      (img
+        ? '<img class="ai-img-preview" src="' + esc(img) + '" alt="">'
+        : '<div class="ai-img-preview ai-img-empty">暂无图片</div>') +
+      '<div class="ai-img-side">' +
+        '<textarea class="ai-img-prompt" rows="3" maxlength="300" placeholder="例如：加一杯冰可乐、背景换成木质餐桌、暖色调"></textarea>' +
+        '<div class="ai-img-row"><button type="button" class="btn btn-soft btn-sm" data-ai-regen>重新生图</button>' +
+        '<span class="ai-img-status"></span></div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+async function pollAiImage(kind, id, box, btn, st) {
+  var tries = 0;
+  var timer = setInterval(async function () {
+    tries++;
+    try {
+      var r = await API('/api/eat/image-status?kind=' + encodeURIComponent(kind) + '&id=' + encodeURIComponent(id));
+      if (r.status === 'ok') {
+        clearInterval(timer);
+        btn.disabled = false;
+        st.textContent = '✅ 已生成';
+        var img = box.querySelector('.ai-img-preview');
+        if (r.image) {
+          if (img && img.tagName === 'IMG') {
+            img.src = r.image + '?t=' + Date.now();
+          } else if (img) {
+            var ni = document.createElement('img');
+            ni.className = 'ai-img-preview';
+            ni.src = r.image + '?t=' + Date.now();
+            img.replaceWith(ni);
+          }
+        }
+        loadStores().catch(function () {});
+        loadDishes().catch(function () {});
+        if (kind === 'dish' && currentStore) refreshStore().catch(function () {});
+        return;
+      }
+      if (r.status === 'failed') {
+        clearInterval(timer);
+        btn.disabled = false;
+        st.textContent = '生成失败：' + (r.error || '未知错误');
+        return;
+      }
+      if (tries >= 40) {
+        clearInterval(timer);
+        btn.disabled = false;
+        st.textContent = '仍在生成，可关闭窗口稍后查看';
+      }
+    } catch (e) { /* 网络抖动继续轮询 */ }
+  }, 3000);
+}
+
+async function regenImage(btn) {
+  var box = btn.closest('.ai-img-box');
+  if (!box) return;
+  var kind = box.getAttribute('data-ai-kind');
+  var id = box.getAttribute('data-ai-id');
+  var extra = (box.querySelector('.ai-img-prompt').value || '').trim();
+  var st = box.querySelector('.ai-img-status');
+  btn.disabled = true;
+  st.textContent = '提交中…';
+  try {
+    await API('/api/eat/' + (kind === 'store' ? 'stores' : 'dishes') + '/' +
+      encodeURIComponent(id) + '/regen-image', { method: 'POST', json: { extraPrompt: extra } });
+    st.textContent = 'AI 生成中…（约 30–60 秒）';
+    pollAiImage(kind, id, box, btn, st);
+  } catch (e) {
+    st.textContent = (e && e.message) ? e.message : '提交失败';
+    btn.disabled = false;
+  }
+}
+
+$('#formFields').addEventListener('click', function (e) {
+  var btn = e.target.closest('[data-ai-regen]');
+  if (btn) regenImage(btn);
+});
 
 $('#formFields').addEventListener('change', async function (e) {
   var fk = e.target.getAttribute('data-fk');
@@ -947,7 +1362,7 @@ $('#formSave').addEventListener('click', async function () {
 $('#formCancel').addEventListener('click', function () { $('#formMask').classList.remove('show'); });
 
 /* ---- 添加店铺 ---- */
-$('#addStoreBtn').addEventListener('click', function () {
+function openAddStore() {
   if (!state.me) { needLogin(); toast('请先登录'); return; }
   openForm('＋ 添加店铺', '填写店铺信息，把它加入附近好店', [
     { key: 'name', label: '店铺名称', type: 'text', placeholder: '比如：巷口小笼包' },
@@ -962,14 +1377,18 @@ $('#addStoreBtn').addEventListener('click', function () {
     toast('✅ 店铺已添加');
     await loadStores();
   });
-});
+}
+$('#addStoreBtn').addEventListener('click', openAddStore);
+var uploadTip = $('#storeUploadTip');
+if (uploadTip) uploadTip.addEventListener('click', openAddStore);
 
-/* ---- 添加菜品 ---- */
-$('#addDishBtn').addEventListener('click', function () {
+/* ---- 添加菜品（支持预选店铺：店铺详情页最后一个菜品下面的按钮会带上该店） ---- */
+function openDishForm(presetStoreId) {
   if (!state.me) { needLogin(); toast('请先登录'); return; }
   if (!state.stores.length) { toast('先添加一家店铺吧～'); return; }
+  var sid = (presetStoreId != null) ? presetStoreId : state.stores[0].id;
   openForm('＋ 添加菜品', '给店里加一道菜，它会出现在转盘上', [
-    { key: 'storeId', label: '所属店铺', type: 'select', value: state.stores[0].id, options: state.stores.map(function (s) { return { value: s.id, label: s.name }; }) },
+    { key: 'storeId', label: '所属店铺', type: 'select', value: sid, options: state.stores.map(function (s) { return { value: s.id, label: s.name }; }) },
     { key: 'name', label: '菜品名称', type: 'text', placeholder: '比如：鲜肉小笼' },
     { key: 'price', label: '价格（元）', type: 'number', placeholder: '比如：18' },
     { key: 'image', label: '图片（可选，可留空）', type: 'file' }
@@ -982,8 +1401,10 @@ $('#addDishBtn').addEventListener('click', function () {
     });
     toast('✅ 菜品已添加');
     await loadDishes();
+    if (currentStore && String(currentStore.id) === String(fd.storeId)) await openStore(currentStore.id);
   });
-});
+}
+$('#addDishBtn').addEventListener('click', function () { openDishForm(null); });
 
 /* ---- 编辑 / 删除店铺 ---- */
 function editStore() {
@@ -1001,7 +1422,7 @@ function editStore() {
     toast('已保存');
     await loadStores();
     await openStore(s.id);
-  });
+  }, { kind: 'store', id: s.id, image: s.image });
 }
 function deleteStore() {
   var s = currentStore;
@@ -1041,7 +1462,7 @@ function editDish(id) {
     toast('已保存');
     await openStore(currentStore.id);
     await loadDishes();
-  });
+  }, { kind: 'dish', id: d.id, image: d.image });
 }
 function deleteDish(id) {
   var d = null;

@@ -96,6 +96,8 @@ html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c
     <button class="btn" onclick="location.href='/admin-steam.html'">Steam 账号</button>
     <button class="btn" onclick="location.href='/admin-cloud.html'">云游戏账号</button>
     <button class="btn" onclick="location.href='/admin-update.html'">更新管理</button>
+    <button class="btn" onclick="location.href='/admin-level.html'">🏅 等级管理</button>
+    <button class="btn" onclick="location.href='/admin-gacha.html'">🎴 抽卡管理</button>
     <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
     <button class="btn danger" onclick="logout()">退出</button>
   </div>
@@ -143,6 +145,32 @@ html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c
         </table>
       </div>
     </div>
+
+    <!-- 兑换订单 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>兑换订单</h2>
+        <span class="chip gray" id="oPending"></span>
+        <div class="spacer"></div>
+        <select id="oStatus" onchange="loadOrders()"
+          style="padding:8px 10px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);color:var(--text);font-size:13px">
+          <option value="">全部状态</option>
+          <option value="redeemed">待兑现</option>
+          <option value="issued">已兑现</option>
+        </select>
+        <input id="oKeyword" placeholder="搜索用户/商品…" oninput="renderOrders()"
+          style="padding:8px 12px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);font-size:13px;color:var(--text)">
+        <button class="btn" onclick="loadOrders()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr>
+            <th>订单</th><th>用户</th><th>商品</th><th>花费积分</th><th>兑换时间</th><th>状态</th><th>兑现内容</th><th>操作</th>
+          </tr></thead>
+          <tbody id="oBody"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -163,6 +191,25 @@ html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c
     <div class="modal-f">
       <button class="btn" onclick="closeModal('mItem')">取消</button>
       <button class="btn pri" id="itemSaveBtn" onclick="saveItem()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 兑现订单（文字 + 图片/视频，随订单下发给用户） -->
+<div class="modal" id="mFulfill">
+  <div class="modal-c" style="max-width:560px">
+    <h3 id="fTitle">订单兑现</h3>
+    <input type="hidden" id="fId">
+    <div class="hint" id="fInfo" style="margin-bottom:14px"></div>
+    <div class="field"><label>文字说明（用户可在「我的订单」查看）</label>
+      <textarea id="fText" rows="4" placeholder="例如：已按订单发放，激活码 XXXX-XXXX；或填写领取方式、联系方式等"></textarea></div>
+    <div class="field"><label>图片 / 视频（可多选，单个 ≤ 50MB，可多次追加）</label>
+      <input type="file" id="fFiles" accept="image/*,video/*" multiple></div>
+    <div id="fExisting" style="margin-bottom:8px"></div>
+    <div class="form-msg" id="fMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mFulfill')">取消</button>
+      <button class="btn pri" id="fSaveBtn" onclick="saveFulfill()">确定并标记已兑现</button>
     </div>
   </div>
 </div>
@@ -296,6 +343,101 @@ async function deleteItem(id){
 function closeModal(id){ $(id).classList.remove('on'); }
 async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
 
+/* ---------- 兑换订单（谁 / 何时 / 兑换了什么 / 已兑现） ---------- */
+let ORDERS = [];
+async function loadOrders(){
+  const st = $('oStatus') ? $('oStatus').value : '';
+  const r = await fetch('/api/admin/orders?limit=200' + (st ? '&status=' + encodeURIComponent(st) : ''));
+  const d = await r.json().catch(()=>({}));
+  if(!d.ok){ toast(d.error || d.detail || '加载订单失败'); return; }
+  ORDERS = d.orders || [];
+  $('oPending').textContent = '待兑现 ' + (d.pending ?? 0);
+  renderOrders();
+}
+function renderOrders(){
+  const kw = ($('oKeyword').value || '').trim().toLowerCase();
+  const list = ORDERS.filter(o => !kw
+    || (o.username||'').toLowerCase().includes(kw)
+    || (o.nickname||'').toLowerCase().includes(kw)
+    || (o.itemName||'').toLowerCase().includes(kw));
+  if(!list.length){ $('oBody').innerHTML = '<tr><td colspan="8" class="empty">没有匹配的订单</td></tr>'; return; }
+  $('oBody').innerHTML = list.map(o=>{
+    const reply = o.reply || {};
+    const files = reply.files || [];
+    const txt = reply.text || '';
+    const done = o.status === 'issued';
+    const summary = (txt || files.length)
+      ? `${txt ? esc(txt.slice(0,20)) + (txt.length > 20 ? '…' : '') : ''}${files.length ? (txt ? ' · ' : '') + files.length + ' 个图片/视频' : ''}`
+      : '<span style="color:var(--hint)">—</span>';
+    return `<tr>
+      <td data-l="订单">#${o.id}</td>
+      <td data-l="用户">${esc(o.username || '（已注销用户）')}${o.nickname ? `<div class="mono">${esc(o.nickname)}</div>` : ''}</td>
+      <td data-l="商品"><b>${esc(o.itemName || '商品')}</b></td>
+      <td data-l="花费积分"><b style="color:var(--primary)">${esc(o.price)}</b></td>
+      <td data-l="兑换时间"><span class="mono">${fmtTime(o.createdAt)}</span></td>
+      <td data-l="状态">${done ? '<span class="chip">已兑现</span>' : '<span class="chip gray">待兑现</span>'}</td>
+      <td data-l="兑现内容">${summary}</td>
+      <td data-l="操作"><div class="acts">
+        <button onclick="openFulfill(${o.id})">${done ? '修改兑现' : '已兑现'}</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+function openFulfill(id){
+  const o = ORDERS.find(x=>x.id===id); if(!o) return;
+  $('fId').value = id;
+  $('fTitle').textContent = (o.status === 'issued' ? '修改兑现内容' : '订单兑现') + ' · #' + id;
+  $('fInfo').textContent = `用户：${o.username || '（已注销用户）'}${o.nickname ? '（' + o.nickname + '）' : ''} · 商品：${o.itemName || '商品'} · 花费 ${o.price} 积分 · 兑换于 ${fmtTime(o.createdAt)}`;
+  $('fText').value = (o.reply && o.reply.text) || '';
+  $('fFiles').value = '';
+  $('fMsg').textContent = ''; $('fMsg').className = 'form-msg';
+  renderExistingFiles(o);
+  $('mFulfill').classList.add('on');
+}
+function renderExistingFiles(o){
+  const files = (o.reply && o.reply.files) || [];
+  const box = $('fExisting');
+  if(!files.length){ box.innerHTML = '<div class="hint">该订单还没有兑现的图片/视频。</div>'; return; }
+  box.innerHTML = '<div class="hint" style="margin-bottom:8px">已上传的兑现文件（可删除）：</div>' +
+    files.map(f=>{
+      const prev = f.kind === 'video'
+        ? `<video src="${esc(f.url)}" controls preload="metadata" style="width:88px;height:66px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:#000"></video>`
+        : `<img src="${esc(f.url)}" alt="" style="width:88px;height:66px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">`;
+      return `<div style="display:inline-flex;flex-direction:column;gap:5px;align-items:center;margin:0 10px 8px 0">
+        ${prev}
+        <button class="btn" style="padding:3px 9px;font-size:11.5px" onclick="delOrderFile(${f.id},${o.id})">删除</button>
+      </div>`;
+    }).join('');
+}
+async function delOrderFile(fid, oid){
+  if(!confirm('删除该兑现文件？用户端将不再显示。')) return;
+  const r = await fetch('/api/admin/orders/files/' + fid, { method:'DELETE' });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ toast(d.detail || d.error || '删除失败'); return; }
+  toast('已删除');
+  await loadOrders();
+  const o = ORDERS.find(x=>x.id===oid);
+  if(o) renderExistingFiles(o);
+}
+async function saveFulfill(){
+  const id = $('fId').value; if(!id) return;
+  const fd = new FormData();
+  fd.append('redemptionId', id);
+  fd.append('text', $('fText').value.trim());
+  for(const f of ($('fFiles').files || [])) fd.append('files', f);
+  const btn = $('fSaveBtn'); btn.disabled = true;
+  try{
+    const r = await fetch('/api/admin/orders/fulfill', { method:'POST', body: fd });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ fMsg('保存失败：' + (d.detail || d.error || '未知错误'), true); return; }
+    toast('已兑现' + (d.savedFiles ? `（新增 ${d.savedFiles} 个文件）` : ''));
+    closeModal('mFulfill');
+    loadOrders();
+  } catch(e){ fMsg('保存失败：' + e.message, true); }
+  finally { btn.disabled = false; }
+}
+function fMsg(t, err){ const el=$('fMsg'); el.textContent = t || ''; el.className = 'form-msg ' + (err ? 'err' : 'ok'); }
+
 /* 启动 */
 (async function(){
   const r = await fetch('/api/me'); const d = await r.json();
@@ -304,6 +446,7 @@ async function logout(){ await fetch('/api/logout',{method:'POST'}); location.hr
   $('main').classList.remove('hidden');
   loadSigninConfig();
   loadItems();
+  loadOrders();
 })();
 </script>
 </body>

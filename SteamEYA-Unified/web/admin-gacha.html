@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-mode="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>抽卡管理 · 管理后台</title>
+<link rel="stylesheet" href="/css/style.css?v=31">
+<style>
+body{overflow:auto}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:26px 18px 60px}
+.top{display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.top h1{font-size:21px;font-weight:800;letter-spacing:-.3px}
+.top .spacer{flex:1}
+.btn{padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;transition:.2s;
+  background:var(--panel);border:1px solid var(--line);color:var(--text)}
+html[data-theme="light"] .btn:not(.pri){background:#fff}
+.btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn.pri{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;border:none}
+.btn.pri:hover{filter:brightness(1.08);color:#fff}
+.btn.danger{color:#EF4444}
+.btn.danger:hover{border-color:#EF4444}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur)}
+html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
+.card-h{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.card-h h2{font-size:15px;font-weight:700}
+.card-h .spacer{flex:1}
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl th{text-align:left;padding:11px 14px;font-size:11.5px;font-weight:700;color:var(--hint);
+  border-bottom:1px solid var(--line);white-space:nowrap;letter-spacing:.4px}
+.tbl td{padding:12px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:var(--panel-soft)}
+html[data-theme="light"] .tbl tr:hover td{background:#FAFBFC}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
+.chip{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:6px;font-weight:700;
+  background:var(--primary-l);color:var(--primary)}
+.chip.gray{background:var(--panel-soft);color:var(--hint);border:1px solid var(--line)}
+.chip.r-normal{background:rgba(156,163,175,.16);color:#9CA3AF}
+.chip.r-premium{background:rgba(139,92,246,.16);color:#8B5CF6}
+.chip.r-rare{background:rgba(245,158,11,.18);color:#F59E0B}
+.chip.r-limited{background:rgba(239,68,68,.16);color:#EF4444}
+.chip.red{background:rgba(239,68,68,.12);color:#EF4444}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts button{font-size:12px;padding:5px 10px;border-radius:7px;background:var(--panel-soft);
+  border:1px solid var(--line);transition:.15s;color:var(--muted)}
+html[data-theme="light"] .acts button{background:#F7F8FA}
+.acts button:hover{border-color:var(--primary);color:var(--primary)}
+.acts button.dg:hover{border-color:#EF4444;color:#EF4444}
+.thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;border:1px solid var(--line);display:block;background:var(--panel-soft)}
+.thumb-ph{width:44px;height:44px;border-radius:8px;border:1px dashed var(--line);display:flex;align-items:center;
+  justify-content:center;font-size:16px;background:var(--panel-soft)}
+.form{padding:16px 18px}
+.fld{margin-bottom:14px}
+.fld>label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:7px}
+.fld input,.fld select,.fld textarea{width:100%;padding:10px 13px;border-radius:10px;font-size:13.5px;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+.fld input:focus,.fld select:focus,.fld textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-l)}
+.inline{display:flex;gap:14px;flex-wrap:wrap}
+.inline .fld{flex:1;min-width:130px;margin:0}
+.hint{font-size:12px;color:var(--hint);margin-top:6px;line-height:1.7}
+.form-msg{font-size:12.5px;min-height:16px;margin-top:8px}
+.form-msg.ok{color:#10B981}.form-msg.err{color:#EF4444}
+.modal{position:fixed;inset:0;z-index:150;background:var(--mask);display:none;align-items:center;justify-content:center;padding:20px}
+.modal.on{display:flex}
+.modal-c{width:100%;max-width:520px;max-height:90vh;overflow:auto;background:var(--panel);border:1px solid var(--line);
+  border-radius:18px;padding:26px 24px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+html[data-theme="light"] .modal-c{background:#fff;box-shadow:var(--shadow-lg)}
+.modal-c h3{font-size:17px;font-weight:700;margin-bottom:16px}
+.modal-c .field{margin-bottom:13px}
+.modal-c .field label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px}
+.modal-c .field input,.modal-c .field select,.modal-c .field textarea{width:100%;padding:11px 13px;border-radius:10px;font-size:14px;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c .field select,html[data-theme="light"] .modal-c .field textarea{background:#FAFBFC}
+.modal-c .field input:focus,.modal-c .field select:focus{border-color:var(--primary);box-shadow:0 0 0 3.5px var(--primary-l)}
+.modal-f{display:flex;gap:10px;margin-top:18px}
+.modal-f .btn{flex:1;text-align:center}
+.deny{text-align:center;padding:80px 20px}.deny h2{font-size:19px;margin-bottom:10px}
+.deny p{color:var(--muted);font-size:13.5px;margin-bottom:20px}
+.empty{text-align:center;color:var(--hint);padding:32px 0;font-size:13.5px}
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(20px);z-index:300;
+  padding:11px 20px;border-radius:11px;font-size:13.5px;font-weight:600;color:#fff;
+  background:linear-gradient(135deg,var(--primary),var(--primary-2));opacity:0;pointer-events:none;transition:.25s}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+@media(max-width:760px){
+  .tbl thead{display:none}
+  .tbl tr{display:block;border-bottom:1px solid var(--line);padding:10px 4px}
+  .tbl td{display:flex;justify-content:space-between;gap:10px;border:none;padding:5px 12px}
+  .tbl td::before{content:attr(data-l);color:var(--hint);font-size:11.5px;font-weight:700;flex-shrink:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>🎴 抽卡管理</h1>
+    <span id="whoami" class="mono"></span>
+    <div class="spacer"></div>
+    <button class="btn" onclick="location.href='/admin.html'">← 聊天管理</button>
+    <button class="btn" onclick="location.href='/admin-steam.html'">Steam 账号</button>
+    <button class="btn" onclick="location.href='/admin-cloud.html'">云游戏账号</button>
+    <button class="btn" onclick="location.href='/admin-update.html'">更新管理</button>
+    <button class="btn" onclick="location.href='/admin-points.html'">积分管理</button>
+    <button class="btn" onclick="location.href='/admin-level.html'">🏅 等级管理</button>
+    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
+    <button class="btn danger" onclick="logout()">退出</button>
+  </div>
+
+  <div id="deny" class="deny hidden">
+    <h2>需要管理员权限</h2>
+    <p>请用管理员账号登录后再访问本页</p>
+    <button class="btn pri" onclick="location.href='/'">去登录</button>
+  </div>
+
+  <div id="main" class="hidden">
+    <!-- 概率 / 保底配置 -->
+    <div class="card">
+      <div class="card-h">
+        <h2>概率 / 保底配置</h2>
+        <div class="spacer"></div>
+        <label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">
+          <input type="checkbox" id="cEnabled" style="width:auto"> 启用抽卡
+        </label>
+        <button class="btn pri" id="cSaveBtn" onclick="saveConfig()">保存配置</button>
+        <button class="btn" onclick="loadConfig()">重新加载</button>
+      </div>
+      <div class="form">
+        <div class="inline">
+          <div class="fld"><label>稀有基础概率（%）</label><input type="number" id="f5base" step="0.001" min="0" max="100"></div>
+          <div class="fld"><label>软保底起始抽数</label><input type="number" id="f5soft" step="1" min="1"></div>
+          <div class="fld"><label>软保底每抽递增（%）</label><input type="number" id="f5step" step="0.1" min="0" max="100"></div>
+          <div class="fld"><label>硬保底抽数（必出）</label><input type="number" id="f5hard" step="1" min="1"></div>
+        </div>
+        <div class="inline" style="margin-top:14px">
+          <div class="fld"><label>精品基础概率（%）</label><input type="number" id="f4base" step="0.001" min="0" max="100"></div>
+          <div class="fld"><label>精品保底抽数（必出，紫色以上）</label><input type="number" id="f4hard" step="1" min="1"></div>
+          <div class="fld"><label>限定概率（%）</label><input type="number" id="limRate" step="1" min="0" max="100"></div>
+        </div>
+        <div class="form-msg" id="cMsg"></div>
+        <div class="hint">说明：稀有概率 = 基础概率；从「软保底起始抽数」起每抽 +递增%，到「硬保底抽数」必出；出稀有后计数归零。精品按基础概率，到保底抽数必出（保证每十抽至少一个紫色以上）。限定概率=命中稀有时直接出「限定五星」的概率，未命中则歪到「稀有」档；歪过一次后，下次稀有必为限定（大保底）。保底按「用户 × 卡池」永久累计。</div>
+      </div>
+    </div>
+
+    <!-- 卡池 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>卡池</h2>
+        <div class="spacer"></div>
+        <button class="btn pri" onclick="openPool()">＋ 新增卡池</button>
+        <button class="btn" onclick="loadPools()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr><th>卡池</th><th>单抽（积分）</th><th>十连（积分）</th><th>奖品数</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody id="poolBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 奖品 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>奖品</h2>
+        <select id="pPool" onchange="loadPrizes()"
+          style="padding:8px 10px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);color:var(--text);font-size:13px"></select>
+        <div class="spacer"></div>
+        <button class="btn pri" onclick="openPrize()">＋ 新增奖品</button>
+        <button class="btn" onclick="loadPrizes()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr><th>图片</th><th>类型</th><th>稀有度</th><th>奖品 / 数量</th><th>库存</th><th>权重</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody id="prizeBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 抽卡记录 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>抽卡记录</h2>
+        <span class="mono" id="logStats"></span>
+        <div class="spacer"></div>
+        <select id="lPool" onchange="loadLogs()" style="padding:8px 10px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);color:var(--text);font-size:13px"></select>
+        <select id="lRarity" onchange="loadLogs()" style="padding:8px 10px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);color:var(--text);font-size:13px">
+          <option value="">全部稀有度</option><option value="normal">普通</option><option value="premium">精品</option>
+          <option value="rare">稀有</option><option value="limited">限定五星</option>
+        </select>
+        <select id="lKind" onchange="loadLogs()" style="padding:8px 10px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);color:var(--text);font-size:13px">
+          <option value="">全部类型</option><option value="points">积分</option><option value="exp">经验</option><option value="physical">实物</option>
+        </select>
+        <input id="lKw" placeholder="搜索用户/奖品…" oninput="loadLogs()"
+          style="padding:8px 12px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);font-size:13px;color:var(--text)">
+        <button class="btn" onclick="loadLogs()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr><th>时间</th><th>用户</th><th>卡池</th><th>稀有度</th><th>奖品</th><th>第几抽</th></tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 卡池编辑 -->
+<div class="modal" id="mPool">
+  <div class="modal-c">
+    <h3 id="poolTitle">新增卡池</h3>
+    <input type="hidden" id="poolId">
+    <div class="field"><label>卡池名称</label><input id="poolName" maxlength="30" placeholder="例如 新手池"></div>
+    <div class="field"><label>单抽消耗（积分）</label><input type="number" id="poolC1" min="0" step="1" placeholder="例如 3"></div>
+    <div class="field"><label>十连消耗（积分）</label><input type="number" id="poolC10" min="0" step="1" placeholder="例如 30"></div>
+    <div class="field" id="poolActiveWrap" style="display:none">
+      <label>状态</label>
+      <label style="display:inline-flex;align-items:center;gap:7px;font-size:13.5px;cursor:pointer">
+        <input type="checkbox" id="poolActive" style="width:auto"> 启用该卡池
+      </label>
+    </div>
+    <div class="form-msg" id="poolMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mPool')">取消</button>
+      <button class="btn pri" id="poolSaveBtn" onclick="savePool()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 奖品编辑 -->
+<div class="modal" id="mPrize">
+  <div class="modal-c">
+    <h3 id="prizeTitle">新增奖品</h3>
+    <input type="hidden" id="prizeId">
+    <div class="field"><label>类型</label>
+      <select id="prKind" onchange="togglePrizeFields()">
+        <option value="points">积分（填数量）</option>
+        <option value="exp">经验（填数量）</option>
+        <option value="physical">实物（填名称/图片/描述/库存）</option>
+      </select>
+    </div>
+    <div class="field"><label>稀有度</label>
+      <select id="prRarity">
+        <option value="normal">普通</option><option value="premium">精品</option>
+        <option value="rare">稀有</option><option value="limited">限定五星</option>
+      </select>
+    </div>
+    <div class="field" id="prValueWrap"><label>数量（积分 / 经验）</label>
+      <input type="number" id="prValue" min="1" step="1" placeholder="例如 100"></div>
+    <div id="prPhysicalWrap">
+      <div class="field"><label>奖品名</label><input id="prName" maxlength="60" placeholder="例如 限定手办 / 京东卡"></div>
+      <div class="field"><label>奖品描述</label><textarea id="prDesc" rows="3" placeholder="奖品说明，中奖后用户可在「我的订单」查看"></textarea></div>
+      <div class="field"><label>奖品图片（≤2MB）</label><input type="file" id="prFile" accept="image/*">
+        <div class="hint" id="prImgHint"></div></div>
+      <div class="field"><label>库存（-1 = 不限；设为具体数字则抽完即止）</label>
+        <input type="number" id="prStock" step="1" placeholder="例如 10，填 -1 不限"></div>
+    </div>
+    <div class="field"><label>权重（同稀有度内的相对概率，默认 1）</label>
+      <input type="number" id="prWeight" min="1" step="1" placeholder="1"></div>
+    <div class="form-msg" id="prizeMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mPrize')">取消</button>
+      <button class="btn pri" id="prizeSaveBtn" onclick="savePrize()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script>
+let POOLS = [], PRIZES = [], CURPOOL = 0, EDITPRIZE = null;
+const RARITY_CN = { normal:'普通', premium:'精品', rare:'稀有', limited:'限定五星' };
+const KIND_CN = { points:'积分', exp:'经验', physical:'实物' };
+const $ = (id) => document.getElementById(id);
+let tTimer; function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(tTimer); tTimer=setTimeout(()=>t.classList.remove('on'),2200); }
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtTime(ts){ if(!ts) return '—'; const d=new Date(ts); if(isNaN(d)) return '—'; const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function cMsg(t, err){ const el=$('cMsg'); el.textContent = t || ''; el.className = 'form-msg ' + (err ? 'err' : 'ok'); }
+function msg(id, t, err){ const el=$(id); el.textContent = t || ''; el.className = 'form-msg ' + (err ? 'err' : 'ok'); }
+function closeModal(id){ $(id).classList.remove('on'); }
+function imgUrl(v){ const s = String(v||''); return /^\/uploads\/[A-Za-z0-9._\/-]+$/.test(s) ? s : ''; }
+
+/* 主题 */
+const ICONS={auto:'🌗 自动',light:'☀️ 浅色',dark:'🌙 深色'};
+function resolveTheme(mode){ if(mode==='light')return 'light'; if(mode==='dark')return 'dark';
+  const h=new Date().getHours(); return (h>=6&&h<18)?'light':'dark'; }
+function applyTheme(mode){ document.documentElement.dataset.mode=mode; document.documentElement.dataset.theme=resolveTheme(mode);
+  try{localStorage.setItem('chat_theme_mode',mode)}catch(e){} const b=$('themeBtn'); if(b) b.textContent=ICONS[mode]; }
+function cycleTheme(){ const o=['auto','light','dark']; const cur=document.documentElement.dataset.mode||'auto';
+  applyTheme(o[(o.indexOf(cur)+1)%o.length]); }
+(function(){ let s='auto'; try{s=localStorage.getItem('chat_theme_mode')||'auto'}catch(e){} applyTheme(s); })();
+
+/* ---------- 概率配置 ---------- */
+async function loadConfig(){
+  const r = await fetch('/api/admin/gacha-config'); const d = await r.json().catch(()=>({}));
+  if(!d.ok){ toast(d.error||'加载失败'); return; }
+  const c = d.config || {}, f5 = c.fiveStar || {}, f4 = c.fourStar || {};
+  $('cEnabled').checked = !!c.enabled;
+  $('f5base').value = (f5.base!=null ? (f5.base*100) : 0.6);
+  $('f5soft').value = f5.softStart || 74;
+  $('f5step').value = (f5.step!=null ? (f5.step*100) : 6);
+  $('f5hard').value = f5.hard || 90;
+  $('f4base').value = (f4.base!=null ? (f4.base*100) : 5.1);
+  $('f4hard').value = f4.hard || 10;
+  $('limRate').value = Math.round((c.limitedRate!=null ? c.limitedRate : 0.5)*100);
+}
+async function saveConfig(){
+  const body = {
+    enabled: $('cEnabled').checked,
+    fiveStar: { base: Number($('f5base').value)/100, softStart: Number($('f5soft').value),
+                step: Number($('f5step').value)/100, hard: Number($('f5hard').value) },
+    fourStar: { base: Number($('f4base').value)/100, hard: Number($('f4hard').value) },
+    limitedRate: Number($('limRate').value)/100,
+  };
+  if(body.fiveStar.softStart > body.fiveStar.hard){ return cMsg('软保底起始抽数不能大于硬保底抽数', true); }
+  const btn = $('cSaveBtn'); btn.disabled = true;
+  try{
+    const r = await fetch('/api/admin/gacha-config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ cMsg('保存失败：' + (d.detail || d.error || '未知错误'), true); return; }
+    cMsg('✅ 已保存'); toast('概率配置已保存'); loadConfig();
+  } catch(e){ cMsg('保存失败：' + e.message, true); }
+  finally { btn.disabled = false; }
+}
+
+/* ---------- 卡池 ---------- */
+async function loadPools(){
+  const r = await fetch('/api/admin/gacha-pools'); const d = await r.json().catch(()=>({}));
+  if(!d.ok){ toast(d.error||'加载失败'); return; }
+  POOLS = d.pools || [];
+  renderPools();
+  const sel = $('pPool'), lsel = $('lPool');
+  const opts = POOLS.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  sel.innerHTML = opts || '<option value="">（暂无卡池）</option>';
+  lsel.innerHTML = '<option value="">全部卡池</option>' + opts;
+  if(!CURPOOL || !POOLS.some(p=>p.id===CURPOOL)) CURPOOL = POOLS[0] ? POOLS[0].id : 0;
+  sel.value = String(CURPOOL);
+  loadPrizes();
+}
+function renderPools(){
+  if(!POOLS.length){ $('poolBody').innerHTML = '<tr><td colspan="6" class="empty">还没有卡池</td></tr>'; return; }
+  $('poolBody').innerHTML = POOLS.map(p=>`
+    <tr>
+      <td data-l="卡池"><b>${esc(p.name)}</b></td>
+      <td data-l="单抽（积分）"><b style="color:#F59E0B">${esc(p.cost1)}</b></td>
+      <td data-l="十连（积分）"><b style="color:#F59E0B">${esc(p.cost10)}</b></td>
+      <td data-l="奖品数">${esc(p.prizeCount ?? 0)}</td>
+      <td data-l="状态">${p.active ? '<span class="chip">启用</span>' : '<span class="chip gray">停用</span>'}</td>
+      <td data-l="操作"><div class="acts">
+        <button onclick="openPool(${p.id})">编辑</button>
+        <button onclick="togglePool(${p.id})">${p.active ? '停用' : '启用'}</button>
+      </div></td>
+    </tr>`).join('');
+}
+function openPool(id){
+  const p = id ? POOLS.find(x=>x.id===id) : null;
+  $('poolTitle').textContent = p ? '编辑卡池' : '新增卡池';
+  $('poolId').value = p ? p.id : '';
+  $('poolName').value = p ? p.name : '';
+  $('poolC1').value = p ? p.cost1 : '';
+  $('poolC10').value = p ? p.cost10 : '';
+  $('poolActiveWrap').style.display = p ? '' : 'none';
+  $('poolActive').checked = p ? !!p.active : true;
+  $('poolMsg').textContent = ''; $('poolMsg').className = 'form-msg';
+  $('mPool').classList.add('on');
+}
+async function savePool(){
+  const id = $('poolId').value;
+  const name = $('poolName').value.trim();
+  if(!name) return msg('poolMsg', '请填写卡池名称', true);
+  const c1 = Number($('poolC1').value), c10 = Number($('poolC10').value);
+  if(!Number.isInteger(c1) || c1 < 0 || !Number.isInteger(c10) || c10 < 0) return msg('poolMsg', '价格需为非负整数', true);
+  const btn = $('poolSaveBtn'); btn.disabled = true;
+  const body = id ? { id: Number(id), name, cost1: c1, cost10: c10, active: $('poolActive').checked }
+                  : { name, cost1: c1, cost10: c10 };
+  try{
+    const r = await fetch('/api/admin/gacha-pools' + (id ? '/update' : ''), {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ msg('poolMsg', (d.detail || d.error || '保存失败'), true); return; }
+    toast(id ? '卡池已更新' : '已新增卡池'); closeModal('mPool'); loadPools();
+  } catch(e){ msg('poolMsg', '保存失败：' + e.message, true); }
+  finally { btn.disabled = false; }
+}
+async function togglePool(id){
+  const p = POOLS.find(x=>x.id===id); if(!p) return;
+  const r = await fetch('/api/admin/gacha-pools/update', {method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ id, active: !p.active })});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ toast(d.detail || d.error || '操作失败'); return; }
+  toast(p.active ? '已停用' : '已启用'); loadPools();
+}
+
+/* ---------- 奖品 ---------- */
+async function loadPrizes(){
+  CURPOOL = Number($('pPool').value) || CURPOOL;
+  const r = await fetch('/api/admin/gacha-prizes?poolId=' + CURPOOL); const d = await r.json().catch(()=>({}));
+  if(!d.ok){ toast(d.error||'加载失败'); return; }
+  PRIZES = d.prizes || [];
+  renderPrizes();
+}
+function prizeLabel(p){
+  if(p.kind === 'points') return p.value + ' 积分';
+  if(p.kind === 'exp') return p.value + ' 经验';
+  return p.name || '实物奖品';
+}
+function renderPrizes(){
+  if(!PRIZES.length){ $('prizeBody').innerHTML = '<tr><td colspan="8" class="empty">该卡池还没有奖品，点右上角「＋ 新增奖品」</td></tr>'; return; }
+  $('prizeBody').innerHTML = PRIZES.map(p=>{
+    const u = imgUrl(p.image);
+    const thumb = u ? `<img class="thumb" src="${esc(u)}" alt="">`
+      : `<div class="thumb-ph">${p.kind==='exp'?'✨':(p.kind==='points'?'💎':'🎁')}</div>`;
+    const stock = p.kind === 'physical' ? (p.stock === -1 ? '<span class="chip gray">不限</span>' : esc(p.stock)) : '<span class="mono">—</span>';
+    return `<tr>
+      <td data-l="图片">${thumb}</td>
+      <td data-l="类型">${esc(KIND_CN[p.kind]||p.kind)}</td>
+      <td data-l="稀有度"><span class="chip r-${p.rarity}">${esc(p.rarityName||'')}</span></td>
+      <td data-l="奖品 / 数量"><b>${esc(prizeLabel(p))}</b>${p.description?`<div class="mono">${esc(p.description)}</div>`:''}</td>
+      <td data-l="库存">${stock}</td>
+      <td data-l="权重">${esc(p.weight)}</td>
+      <td data-l="状态">${p.active ? '<span class="chip">上架</span>' : '<span class="chip gray">已下架</span>'}</td>
+      <td data-l="操作"><div class="acts">
+        <button onclick="openPrize(${p.id})">编辑</button>
+        ${p.active ? `<button class="dg" onclick="delPrize(${p.id})">下架</button>` : ''}
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+function togglePrizeFields(){
+  const kind = $('prKind').value;
+  $('prValueWrap').style.display = kind === 'physical' ? 'none' : '';
+  $('prPhysicalWrap').style.display = kind === 'physical' ? '' : 'none';
+}
+function openPrize(id){
+  const p = id ? PRIZES.find(x=>x.id===id) : null;
+  EDITPRIZE = p || null;
+  $('prizeTitle').textContent = p ? '编辑奖品' : '新增奖品';
+  $('prizeId').value = p ? p.id : '';
+  $('prKind').value = p ? p.kind : 'points';
+  $('prRarity').value = p ? p.rarity : 'normal';
+  $('prValue').value = p && p.kind !== 'physical' ? p.value : '';
+  $('prName').value = p ? (p.name||'') : '';
+  $('prDesc').value = p ? (p.description||'') : '';
+  $('prStock').value = p ? p.stock : '';
+  $('prWeight').value = p ? p.weight : 1;
+  $('prFile').value = '';
+  $('prImgHint').textContent = p && p.image ? '当前已有图片，选择新文件将替换；不选则保留原图。' : '支持 png/jpg/gif/webp/bmp，≤2MB。';
+  $('prizeMsg').textContent = ''; $('prizeMsg').className = 'form-msg';
+  togglePrizeFields();
+  $('mPrize').classList.add('on');
+}
+async function savePrize(){
+  const id = $('prizeId').value;
+  const kind = $('prKind').value, rarity = $('prRarity').value;
+  const fd = new FormData();
+  if(id) fd.append('id', id);
+  fd.append('poolId', String(CURPOOL));
+  fd.append('kind', kind);
+  fd.append('rarity', rarity);
+  fd.append('weight', String(Number($('prWeight').value) || 1));
+  if(kind === 'physical'){
+    const name = $('prName').value.trim();
+    if(!name) return msg('prizeMsg', '实物奖品请填写奖品名', true);
+    fd.append('name', name);
+    fd.append('description', $('prDesc').value.trim());
+    const stock = Number($('prStock').value);
+    fd.append('stock', String(Number.isInteger(stock) ? stock : -1));
+    fd.append('value', '0');
+    const f = $('prFile').files[0];
+    if(f) fd.append('file', f);
+  } else {
+    const v = Number($('prValue').value);
+    if(!Number.isInteger(v) || v <= 0) return msg('prizeMsg', '请填写大于 0 的数量', true);
+    fd.append('value', String(v));
+    fd.append('stock', '-1');
+    fd.append('name', '');
+    fd.append('description', '');
+  }
+  if(id) fd.append('active', EDITPRIZE && EDITPRIZE.active ? '1' : '0');
+  const btn = $('prizeSaveBtn'); btn.disabled = true;
+  try{
+    const r = await fetch('/api/admin/gacha-prizes' + (id ? '/update' : ''), {method:'POST', body: fd});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ msg('prizeMsg', (d.detail || d.error || '保存失败'), true); return; }
+    toast(id ? '已更新奖品' : '已新增奖品'); closeModal('mPrize'); loadPools();
+  } catch(e){ msg('prizeMsg', '保存失败：' + e.message, true); }
+  finally { btn.disabled = false; }
+}
+async function delPrize(id){
+  const p = PRIZES.find(x=>x.id===id);
+  if(!confirm('确定下架奖品「' + prizeLabel(p||{}) + '」？\n\n下架后不再参与抽卡（不会删除数据，抽卡记录仍可追溯）。')) return;
+  const r = await fetch('/api/admin/gacha-prizes/' + id, {method:'DELETE'});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ toast(d.detail || d.error || '下架失败'); return; }
+  toast('已下架'); loadPools();
+}
+
+/* ---------- 抽卡记录 ---------- */
+async function loadLogs(){
+  const q = new URLSearchParams();
+  if($('lPool').value) q.set('poolId', $('lPool').value);
+  if($('lRarity').value) q.set('rarity', $('lRarity').value);
+  if($('lKind').value) q.set('kind', $('lKind').value);
+  const kw = $('lKw').value.trim(); if(kw) q.set('keyword', kw);
+  q.set('limit', '200');
+  const r = await fetch('/api/admin/gacha-logs?' + q.toString()); const d = await r.json().catch(()=>({}));
+  if(!d.ok){ toast(d.error||'加载失败'); return; }
+  $('logStats').textContent = `记录 ${d.total} 条 · 稀有及以上 ${d.rareTotal} · 限定 ${d.limitedTotal}`;
+  const logs = d.logs || [];
+  if(!logs.length){ $('logBody').innerHTML = '<tr><td colspan="6" class="empty">没有匹配的记录</td></tr>'; return; }
+  $('logBody').innerHTML = logs.map(l=>`
+    <tr>
+      <td data-l="时间"><span class="mono">${fmtTime(l.createdAt)}</span></td>
+      <td data-l="用户">${esc(l.username)}${l.nickname?`<div class="mono">${esc(l.nickname)}</div>`:''}</td>
+      <td data-l="卡池">${esc(l.poolName||'—')}</td>
+      <td data-l="稀有度"><span class="chip r-${l.rarity}">${esc(l.rarityName||'')}</span></td>
+      <td data-l="奖品"><b>${esc(l.kind==='physical' ? (l.name||'实物') : (l.kind==='points'? l.value+' 积分' : l.value+' 经验'))}</b>${l.isLimited?' <span class="chip r-limited">限定</span>':''}</td>
+      <td data-l="第几抽">${l.pullNo ? esc(l.pullNo) : '<span class="mono">—</span>'}</td>
+    </tr>`).join('');
+}
+async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
+
+/* 启动 */
+(async function(){
+  const r = await fetch('/api/me'); const d = await r.json();
+  if(!d.ok || !d.user || !d.user.isAdmin){ $('deny').classList.remove('hidden'); return; }
+  $('whoami').textContent = '@' + d.user.username;
+  $('main').classList.remove('hidden');
+  loadConfig();
+  loadPools().then(loadLogs);
+})();
+</script>
+</body>
+</html>

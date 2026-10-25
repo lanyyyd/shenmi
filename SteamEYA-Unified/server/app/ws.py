@@ -12,6 +12,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from . import chat_logic as CL
 from . import lan
+from . import levelcore as LV
 from . import push
 from . import security
 from .db import execute, query_one
@@ -131,6 +132,20 @@ async def ws_endpoint(ws: WebSocket):
             mention_str = CL.norm_mentions(m.get("mentions")) if to_id is None else ""
             payload = CL.insert_chat(me["id"], msg_type, content, file, to_id, mention_str)
             await CL.broadcast_chat(payload)
+            # 「小火人」AI 助手：私聊直接回；群聊被 @ 才回。失败静默，不阻塞聊天。
+            try:
+                from . import aicore
+                await aicore.maybe_reply(me, payload, to_id)
+            except Exception:
+                pass
+            # 发言经验：群聊 / 私聊分别计数，每天各有上限（失败静默，不影响聊天）。
+            try:
+                if to_id is None:
+                    LV.grant(me["id"], "group_msg", remark="群聊发言")
+                else:
+                    LV.grant(me["id"], "pm_msg", remark="私聊发言")
+            except Exception:
+                pass
             # 局域网互传：把本机新消息（群聊）异步转发给同网段已发现实例，失败静默、不阻塞聊天。
             lan.forward_to_peers(payload)
             # 命中管理后台推送配置时，异步尽力推送（PushPlus），失败静默、不阻塞聊天。

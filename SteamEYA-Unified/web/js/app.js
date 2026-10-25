@@ -49,17 +49,21 @@ function cycleTheme() {
 
 /* ---------------- 状态 ---------------- */
 const COLORS = ['#10B981','#3B82F6','#F59E0B','#EF4444','#8B5CF6','#EC4899','#06B6D4','#84CC16','#F97316','#14B8A6'];
-const PAGE_SIZE = 80;        // 每页消息数（首屏 + 上滑加载）
+const PAGE_SIZE = 500;       // 每页消息数（首屏 500 条，上滑到顶再加载更早的 500 条）
 let ME = null;
 let WS = null;
 let onlineUsers = [];
 let allUsers = [];          // 全部用户（含离线）
+let AI_INFO = null;         // 小火人配置：{ id, name, avatar, enabled }
+let CONTACTS = { notes: {}, pinned: [], aiId: 0 };   // 联系人：备注 / 置顶缓存
+let CUR_LV = {};            // 当前列表渲染用的等级表（供 contactRowHTML 复用）
 let currentRoom = 'group';
 let currentPeer = null;
 let unread = {};             // { group: 3, 'pm:1:2': 1 }
 let readState = {};          // { userId: { username, lastReadId } } —— 当前房间的已读状态
 let oldestId = null, hasMore = false, loadingMore = false, autoStick = true;
 let reconnectTimer = null, pingTimer = null;
+const aiStreams = new Map();                  // 流式回复临时气泡：streamId -> { el, text }
 let mentionGroup = false;                    // 群聊是否有未读的 @我
 let mentionPick = new Map();                 // 已选中的 @对象：显示名 -> id | 'all'
 let mentionItems = [], mentionIdx = -1;      // @选择框当前候选与高亮下标
@@ -86,6 +90,24 @@ function avatarHTML(name, avatar, withStatus) {
 }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function dn(u) { return (u && (u.displayName || u.nickname || u.username)) || ''; }
+
+/* ---------------- 等级 / 经验 ---------------- */
+const LV_ASSET_MAX = 6;                 // 现有徽章图 lv0.svg … lv6.svg
+const LV_DEFAULT_TH = [0, 10, 20, 150, 450, 1080, 2880];
+let LVINFO = null;                      // 缓存 /api/level/me 的规则（阈值 / 来源）
+function lvImg(level) {
+  const n = Math.max(0, Math.min(LV_ASSET_MAX, Number(level) || 0));
+  return '/img/level/lv' + n + '.svg';
+}
+function levelBadge(level) {
+  const n = Math.max(0, Math.min(LV_ASSET_MAX, Number(level) || 0));
+  return `<img class="lv-badge" src="${lvImg(n)}" alt="Lv${n}" title="Lv${n}">`;
+}
+function lvThresholds() {
+  const th = (LVINFO && Array.isArray(LVINFO.thresholds)) ? LVINFO.thresholds : LV_DEFAULT_TH;
+  return (th && th.length > 1) ? th : LV_DEFAULT_TH;
+}
+function nextTh(lv) { const th = lvThresholds(); return (lv + 1 < th.length) ? th[lv + 1] : null; }
 function fmtSize(b) { if (!b) return ''; const u = ['B','KB','MB','GB']; let i = 0, n = b; while (n >= 1024 && i < 3) { n /= 1024; i++; } return n.toFixed(n < 10 && i > 0 ? 1 : 0) + ' ' + u[i]; }
 function fmtTime(ts) {
   const d = new Date(ts);
@@ -163,6 +185,8 @@ function openProfile() {
   $('pfNew').value = '';
   renderPfAvatar();
   renderNotifyUI();
+  renderPfLevel();
+  refreshMyLevel();
   $('profileModal').classList.add('on');
 }
 function renderPfAvatar() {
@@ -314,6 +338,8 @@ function renderSearchResults(list) {
     el.className = 'sr-item';
     const preview = m.type === 'text'
       ? esc(m.content)
+      : m.type === 'redpacket'
+        ? '<span class="sr-file">🧧 红包</span>'
       : m.type === 'video'
         ? `<span class="sr-file">🎬 ${esc(m.fileName || '视频')}</span>`
       : m.type === 'file'
@@ -328,13 +354,31 @@ function renderSearchResults(list) {
       <div class="sr-content">${preview}</div>`;
     el.onclick = () => {
       closeSearch();
-      if (m.room !== currentRoom) {
-        if (m.room === 'group') openRoom('group');
-        else openRoom('pm', m.peerId, m.peerName || '私聊');
-      }
+      jumpToMessage(m);
     };
     res.appendChild(el);
   });
+}
+
+/* 搜索结果点击：切到对应会话并定位到那条消息 */
+function roomPeerOf(m) {
+  if (!m || !m.room || m.room === 'group') return null;
+  const parts = String(m.room).split(':');
+  if (parts.length !== 3) return null;
+  const a = Number(parts[1]), b = Number(parts[2]);
+  if (!ME || !a || !b) return null;
+  return a === ME.id ? b : a;
+}
+function jumpToMessage(m) {
+  if (!m || !m.id) return;
+  const peerId = roomPeerOf(m);
+  if (m.room !== currentRoom) {
+    if (m.room === 'group') openRoom('group', null, null, m.id);
+    else openRoom('pm', peerId, m.fromName || '私聊', m.id);
+    return;
+  }
+  // 已在当前会话：能直接找到就定位，否则按这条消息为锚点重新加载附近的一页
+  if (!focusMessage(m.id)) loadHistory(currentRoom, m.id);
 }
 
 $('searchKw').addEventListener('input', e => {
@@ -641,6 +685,9 @@ function mentionMembers() {
   };
   (onlineUsers || []).forEach(u => add(u, true));
   (allUsers || []).forEach(u => add(u, false));
+  // 小火人不在 allUsers 时（接口异常）也补进候选，保证群聊里能 @ 到它
+  const aiId = getAiId();
+  if (aiId && !seen.has(aiId) && !(ME && ME.id === aiId)) out.push({ id: aiId, name: getAiName(), avatar: (AI_INFO && AI_INFO.avatar) || '', online: true });
   out.sort((a, b) => (b.online ? 1 : 0) - (a.online ? 1 : 0) || a.name.localeCompare(b.name, 'zh'));
   return out;
 }
@@ -771,10 +818,13 @@ function enterApp() {
   connectWS();
   loadUnread();
   initNotify();                        // 默认开启：打开页面就申请系统通知权限
-  loadUsers();
+  loadUsers();                         // 用户列表（含 isAi）
+  initContacts();                      // 小火人配置 + 联系人缓存（备注/置顶），随后刷新列表
   setInterval(loadUsers, 60000);      // 定期刷新用户列表（新注册/离线变化）
   openRoom('group');
   initPoints();                        // 每日签到 + 显示钱包入口（离线模式自动跳过）
+  initGacha();                         // 抽卡入口（离线模式自动跳过）
+  initRedPacket();                     // 群红包入口（离线模式自动跳过）
 }
 
 /* ---------------- WebSocket ---------------- */
@@ -796,6 +846,8 @@ function connectWS() {
       return;
     }
     if (m.type === 'chat') { onIncoming(m); return; }
+    if (m.type === 'ai_stream') { onAiStream(m); return; }
+    if (m.type === 'redpacket') { patchRPCard(m.packetId, m.grabbedCount, m.status); return; }
     if (m.type === 'recall') { applyRecall(m); return; }
     if (m.type === 'recall_fail') { toast(m.reason || '撤回失败'); return; }
     if (m.type === 'ready') { ME = { ...ME, id: m.userId, username: m.username, nickname: m.nickname }; return; }
@@ -876,6 +928,93 @@ function fmtAgo(ts) {
   return new Date(ts).toLocaleDateString('zh-CN');
 }
 
+/* ---------------- 小火人 / 联系人（备注 · 置顶） ---------------- */
+async function loadAiConfig() {
+  try {
+    const r = await fetch('/api/ai/config'); const d = await r.json();
+    if (d && d.ok) AI_INFO = { id: Number(d.userId) || 0, name: d.name || '小火人', avatar: d.avatar || '', enabled: !!d.enabled };
+  } catch (e) {}
+}
+async function loadContacts() {
+  try {
+    const r = await fetch('/api/contacts'); const d = await r.json();
+    if (d && d.ok) {
+      CONTACTS = {
+        notes: d.notes || {},
+        pinned: Array.isArray(d.pinned) ? d.pinned.map(Number) : [],
+        aiId: Number(d.aiId) || 0,
+      };
+    }
+  } catch (e) {}
+}
+/* 进入应用后：取小火人配置与联系人缓存（备注/置顶）后重绘列表 */
+async function initContacts() {
+  await Promise.all([loadAiConfig(), loadContacts()]);
+  renderUsers();
+}
+function getAiId() {
+  if (AI_INFO && AI_INFO.id) return Number(AI_INFO.id);
+  if (CONTACTS && CONTACTS.aiId) return Number(CONTACTS.aiId);
+  const u = (allUsers || []).find(x => x.isAi);
+  return u ? u.id : 0;
+}
+function getAiName() {
+  const id = getAiId();
+  const u = id ? (allUsers || []).find(x => x.id === id) : null;
+  return (AI_INFO && AI_INFO.name) || (u && dn(u)) || '小火人';
+}
+function isAiUser(u) { if (!u) return false; return !!u.isAi || (getAiId() && u.id === getAiId()); }
+/* 联系人的原始昵称（不含备注）；用于头像、备注弹窗标题 */
+function baseNameForId(id) {
+  if (!id) return '该联系人';
+  if (id === getAiId()) return getAiName();
+  const u = (onlineUsers || []).find(x => x.id === id) || (allUsers || []).find(x => x.id === id);
+  if (u && dn(u)) return dn(u);
+  if (currentPeer && currentPeer.id === id && currentPeer.username) return currentPeer.username;
+  return '该联系人';
+}
+const noteOf = (id) => (CONTACTS && CONTACTS.notes && CONTACTS.notes[id] != null) ? String(CONTACTS.notes[id]) : '';
+/* 显示名：有备注优先显示备注，否则昵称（小火人用 AI_INFO.name） */
+function contactName(u) {
+  const id = u ? u.id : 0;
+  return noteOf(id) || baseNameForId(id);
+}
+function displayNameForId(id, fallback) {
+  const note = noteOf(id);
+  if (note) return note;
+  const base = baseNameForId(id);
+  return base !== '该联系人' ? base : (fallback || '');
+}
+function aiBadge() { return '<span class="ai-badge">AI</span>'; }
+/* 生成一条私聊联系人条目 HTML（在线/离线/小火人通用） */
+function contactRowHTML(u, opt) {
+  const o = opt || {};
+  const isAi = !!o.ai;
+  const isOnline = isAi ? true : !!o.online;
+  const nm = contactName(u);
+  const room = ME ? pmRoom(ME.id, u.id) : '';
+  const on = currentPeer && currentPeer.id === u.id;
+  const n = unreadOf(room);
+  const self = !!o.self;
+  let sub;
+  if (isAi) sub = '在线';
+  else if (isOnline) {
+    const d = u.devices || [];
+    sub = d.length > 1 ? `${d.length} 台设备` : ((d[0] && d[0].ip) ? d[0].ip : '在线');
+  } else sub = fmtAgo(u.lastSeen);
+  let tail = '';
+  if (n > 0) tail = dotHTML(n);
+  else if (self) tail = '<span class="self-tag">我</span>';
+  else if (!isOnline) tail = '<span class="u-badge gray">离线</span>';
+  else if (o.sharedIp) tail = '<span class="u-badge">同IP</span>';
+  const cls = 'user-item' + (isOnline ? '' : ' offline') + (on ? ' on' : '') + (isAi ? ' ai-item' : '');
+  return `<div class="${cls}" data-peer="${u.id}" onclick="openRoom('pm', ${u.id}, '${esc(nm)}')">
+    ${avatarHTML(nm, u.avatar, isOnline)}
+    <div class="u-meta"><div class="u-name">${isAi ? aiBadge() : ''}${esc(nm)}${isAi ? '' : levelBadge(CUR_LV[u.id])}</div><div class="u-sub">${esc(sub)}</div></div>
+    ${tail}
+  </div>`;
+}
+
 /* ---------------- 在线列表 ---------------- */
 function renderOnline(snap) {
   if (snap) {
@@ -893,55 +1032,73 @@ function renderUsers() {
   const ipCount = {};
   onlineUsers.forEach(u => u.devices.forEach(d => { if (d.ip) ipCount[d.ip] = (ipCount[d.ip] || 0) + 1; }));
   const onlineIds = new Set(onlineUsers.map(u => u.id));
+  // 等级徽章：/api/users 与在线快照任一带 level 即可
+  const lvMap = {};
+  allUsers.forEach(u => { if (u.level != null) lvMap[u.id] = u.level; });
+  onlineUsers.forEach(u => { if (u.level != null) lvMap[u.id] = u.level; });
+  if (ME && ME.level != null) lvMap[ME.id] = ME.level;
+  CUR_LV = lvMap;
 
-  let html = `<div class="user-item ${currentRoom === 'group' ? 'on' : ''}" onclick="openRoom('group')">
+  const aiId = getAiId();
+  const pinIds = Array.isArray(CONTACTS.pinned) ? CONTACTS.pinned.map(Number) : [];
+  const aiPinned = !!aiId && pinIds.indexOf(aiId) >= 0;
+  // /api/users 一定会带 isAi 的那条；万一没有（接口异常）也用配置兜一条，保证小火人始终可见
+  let aiUser = aiId ? (allUsers.find(u => u.id === aiId) || null) : null;
+  if (aiId && !aiUser) aiUser = { id: aiId, username: getAiName(), nickname: getAiName(), avatar: (AI_INFO && AI_INFO.avatar) || '', isAi: true };
+
+  // ---------- 置顶（排在「群聊大厅」之上）：小火人优先，其余按 pinned 顺序 ----------
+  let html = '';
+  const pinRows = [];
+  if (aiPinned && aiUser) pinRows.push(aiUser);
+  pinIds.forEach(id => {
+    if (id === aiId) return;
+    const u = allUsers.find(x => x.id === id);
+    if (u && !pinRows.some(r => r.id === u.id)) pinRows.push(u);
+  });
+  if (pinRows.length) {
+    html += `<div class="sb-group">置顶</div>`;
+    pinRows.forEach(u => {
+      const snap = onlineUsers.find(x => x.id === u.id);
+      const rowUser = snap ? Object.assign({}, u, snap) : u;   // 在线时并入 devices 以显示设备/IP
+      html += contactRowHTML(rowUser, { ai: u.id === aiId, online: !!snap });
+    });
+  }
+
+  // ---------- 群聊大厅 ----------
+  html += `<div class="user-item ${currentRoom === 'group' ? 'on' : ''}" onclick="openRoom('group')">
     <div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-2))">群</div>
     <div class="u-meta"><div class="u-name">群聊大厅</div>
       <div class="u-sub">${mentionGroup ? '<span class="mention-me">[有人@我]</span>' : '所有在线用户'}</div></div>
     ${dotHTML(unreadOf('group')) || `<span class="u-badge">${onlineUsers.length}</span>`}</div>`;
 
-  // ---------- 在线用户 ----------
-  const onlineList = onlineUsers.filter(u => !kw || dn(u).toLowerCase().includes(kw));
-  html += `<div class="sb-group">在线用户 · ${onlineUsers.length}</div>`;
+  // ---------- 小火人未置顶：单独一条放在群聊大厅下方（可私聊） ----------
+  if (aiUser && !aiPinned) html += contactRowHTML(aiUser, { ai: true, online: true });
+
+  // ---------- 在线用户（排除小火人）----------
+  const onlineReal = onlineUsers.filter(u => !isAiUser(u));
+  const onlineList = onlineReal.filter(u => !kw || dn(u).toLowerCase().includes(kw) || contactName(u).toLowerCase().includes(kw));
+  html += `<div class="sb-group">在线用户 · ${onlineReal.length}</div>`;
   if (!onlineList.length) html += `<div class="empty-tip" style="padding:14px 0;font-size:12.5px">${kw ? '没有匹配的在线用户' : '暂无其他人在线'}</div>`;
   onlineList.forEach(u => {
-    const self = ME && u.id === ME.id;
-    const multiDev = u.devices.length > 1;
+    const self = !!(ME && u.id === ME.id);
     const sharedIp = u.devices.some(d => d.ip && ipCount[d.ip] > 1);
-    const room = ME ? pmRoom(ME.id, u.id) : '';
-    const on = currentPeer && currentPeer.id === u.id;
-    const devTxt = multiDev ? `${u.devices.length} 台设备` : (u.devices[0]?.ip || '在线');
-    const n = unreadOf(room);
-    const nm = dn(u);
-    html += `<div class="user-item ${on ? 'on' : ''}" onclick="openRoom('pm', ${u.id}, '${esc(nm)}')">
-      ${avatarHTML(nm, u.avatar, true)}
-      <div class="u-meta"><div class="u-name">${esc(nm)}</div><div class="u-sub">${esc(devTxt)}</div></div>
-      ${n > 0 ? dotHTML(n) : (self ? '<span class="self-tag">我</span>' : (sharedIp ? '<span class="u-badge">同IP</span>' : ''))}
-    </div>`;
+    html += contactRowHTML(u, { online: true, self: self, sharedIp: sharedIp });
   });
 
-  // ---------- 离线用户 ----------
-  const offlineList = allUsers.filter(u => !onlineIds.has(u.id) && (!kw || dn(u).toLowerCase().includes(kw)));
-  const offlineTotal = allUsers.filter(u => !onlineIds.has(u.id)).length;
+  // ---------- 离线用户（排除小火人）----------
+  const offlineList = allUsers.filter(u => !isAiUser(u) && !onlineIds.has(u.id) && (!kw || dn(u).toLowerCase().includes(kw) || contactName(u).toLowerCase().includes(kw)));
+  const offlineTotal = allUsers.filter(u => !isAiUser(u) && !onlineIds.has(u.id)).length;
   html += `<div class="sb-group">离线用户 · ${offlineTotal}</div>`;
   if (!offlineList.length) html += `<div class="empty-tip" style="padding:14px 0;font-size:12.5px">${kw ? '没有匹配的离线用户' : '暂无离线用户'}</div>`;
   offlineList.forEach(u => {
-    const room = ME ? pmRoom(ME.id, u.id) : '';
-    const on = currentPeer && currentPeer.id === u.id;
-    const n = unreadOf(room);
-    const nm = dn(u);
-    html += `<div class="user-item offline ${on ? 'on' : ''}" onclick="openRoom('pm', ${u.id}, '${esc(nm)}')">
-      ${avatarHTML(nm, u.avatar, false)}
-      <div class="u-meta"><div class="u-name">${esc(nm)}</div><div class="u-sub">${esc(fmtAgo(u.lastSeen))}</div></div>
-      ${n > 0 ? dotHTML(n) : '<span class="u-badge gray">离线</span>'}
-    </div>`;
+    html += contactRowHTML(u, { online: false });
   });
 
   $('userList').innerHTML = html;
 }
 
 /* ---------------- 房间 & 历史（含上滑加载） ---------------- */
-function openRoom(kind, peerId, peerName) {
+function openRoom(kind, peerId, peerName, anchorId) {
   if (kind === 'group') { currentRoom = 'group'; currentPeer = null; }
   else {
     if (ME && peerId === ME.id) { toast('不能和自己私聊'); return; }
@@ -949,7 +1106,7 @@ function openRoom(kind, peerId, peerName) {
     currentPeer = { id: peerId, username: peerName };
   }
   updateHead();
-  loadHistory(currentRoom);
+  loadHistory(currentRoom, anchorId);
   loadReadState(currentRoom);
   markRead(currentRoom);
   renderUsers();
@@ -964,19 +1121,29 @@ function updateHead() {
   } else {
     const onU = onlineUsers.find(x => x.id === currentPeer?.id);        // 在线项（含 devices）
     const anyU = onU || allUsers.find(x => x.id === currentPeer?.id);    // 离线项：仅用于取头像
-    const pu = currentPeer?.username || '?';
+    const uid = currentPeer?.id;
+    const uName = (anyU && dn(anyU)) || currentPeer?.username || '?';     // 头像/配色用原始昵称
+    const label = displayNameForId(uid, uName);                           // 显示名：备注优先
     const uAv = avUrlOf(anyU && anyU.avatar);
     if (uAv) { av.textContent = ''; av.style.background = ''; av.style.backgroundImage = `url('${uAv}')`; av.classList.add('avatar-pic'); }
-    else { av.classList.remove('avatar-pic'); av.style.backgroundImage = ''; av.textContent = initial(pu); av.style.background = colorOf(pu); }
-    nm.textContent = currentPeer?.username || '私聊';
-    st.innerHTML = onU ? `<span class="live">在线</span> · ${esc(onU.devices[0]?.ip || '')}` : '对方已离线（消息仍会保存）';
+    else { av.classList.remove('avatar-pic'); av.style.backgroundImage = ''; av.textContent = initial(uName); av.style.background = colorOf(uName); }
+    const isAiPeer = !!uid && uid === getAiId();
+    nm.innerHTML = esc(label) + (anyU && anyU.level != null ? levelBadge(anyU.level) : '');
+    st.innerHTML = isAiPeer ? '<span class="live">在线</span> · AI 助手'
+      : (onU ? `<span class="live">在线</span> · ${esc(onU.devices[0]?.ip || '')}` : '对方已离线（消息仍会保存）');
   }
 }
-async function loadHistory(room) {
+/* anchorId：定位到某条消息（搜索结果点击），加载该消息前后的一页而不是最新一页 */
+async function loadHistory(room, anchorId) {
   $('msgs').innerHTML = '<div class="empty-tip">加载中…</div>';
+  aiStreams.clear();
   oldestId = null; hasMore = false; loadingMore = false;
+  const anchor = Number(anchorId) || 0;
   try {
-    const r = await fetch(`/api/history?room=${encodeURIComponent(room)}&limit=${PAGE_SIZE}`);
+    const url = anchor
+      ? `/api/history?room=${encodeURIComponent(room)}&before=${anchor + 1}&limit=${PAGE_SIZE}`
+      : `/api/history?room=${encodeURIComponent(room)}&limit=${PAGE_SIZE}`;
+    const r = await fetch(url);
     const d = await r.json();
     if (!d.ok) { $('msgs').innerHTML = `<div class="empty-tip">${esc(d.error || '加载失败')}</div>`; return; }
     const box = $('msgs'); box.innerHTML = '';
@@ -984,11 +1151,50 @@ async function loadHistory(room) {
     else d.messages.forEach(m => box.appendChild(buildMsgEl(m)));
     oldestId = d.messages[0]?.id || null;
     hasMore = !!d.hasMore;
-    autoStick = true;
-    scrollBottom();
-    // 图片尺寸逐步就绪后再贴一次底（防止高度变化把位置顶上去）
-    setTimeout(() => { if (autoStick) scrollBottom(); }, 300);
+    if (anchor) {
+      autoStick = false;
+      if (!focusMessage(anchor)) {
+        $('msgs').insertAdjacentHTML('afterbegin',
+          '<div class="empty-tip">这条消息已不存在或已被删除</div>');
+      }
+      appendJumpLatest();
+    } else {
+      autoStick = true;
+      scrollBottom();
+      // 图片尺寸逐步就绪后再贴一次底（防止高度变化把位置顶上去）
+      setTimeout(() => { if (autoStick) scrollBottom(); }, 300);
+    }
   } catch (e) { $('msgs').innerHTML = '<div class="empty-tip">加载失败</div>'; }
+}
+
+/* 把视口滚到指定消息并闪烁提示；消息不在当前 DOM 里返回 false */
+function focusMessage(id) {
+  const box = $('msgs');
+  const el = box && box.querySelector(`.msg[data-id="${Number(id)}"]`);
+  if (!el) return false;
+  const center = () => {
+    const r = el.getBoundingClientRect(), br = box.getBoundingClientRect();
+    box.scrollTop += (r.top - br.top) - (box.clientHeight - r.height) / 2;
+  };
+  requestAnimationFrame(center);
+  // 图片/视频高度就绪后再校正一次，避免定位偏掉
+  setTimeout(center, 260);
+  el.classList.remove('flash');
+  void el.offsetWidth;
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 2200);
+  return true;
+}
+
+/* 从历史定位返回最新一页（定位后页面底部放一个可点提示，避免困在旧记录里） */
+function appendJumpLatest() {
+  const box = $('msgs');
+  if (!box) return;
+  const bar = document.createElement('div');
+  bar.className = 'day-divider jump-latest';
+  bar.innerHTML = '<span>已定位到历史消息 · 点此回到最新</span>';
+  bar.onclick = () => loadHistory(currentRoom);
+  box.appendChild(bar);
 }
 
 /* 上滑加载更早的消息（保持滚动位置） */
@@ -1044,6 +1250,8 @@ function buildMsgEl(m) {
     inner = `<a class="bubble file-bubble" href="${esc(m.filePath)}" download="${esc(m.fileName || '')}" target="_blank">
       <div class="file-ico"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 7V3.5L18.5 9H13z"/></svg></div>
       <div><div class="file-name">${esc(m.fileName || '文件')}</div><div class="file-size">${fmtSize(m.fileSize)}</div></div></a>`;
+  } else if (mtype === 'redpacket') {
+    inner = rpCardHTML(m);
   } else {
     inner = `<div class="bubble">${renderContent(m)}</div>`;
   }
@@ -1063,7 +1271,7 @@ function buildMsgEl(m) {
   el.innerHTML = `
     ${avatarHTML(m.fromName || '?', m.fromAvatar)}
     <div class="msg-body">
-      ${showName ? `<div class="msg-sender">${esc(m.fromName)}</div>` : ''}
+      ${showName ? `<div class="msg-sender">${esc(m.fromName)}${levelBadge(m.fromLevel)}</div>` : ''}
       ${inner}
       <div class="msg-time">${time}${isSelf ? `<span class="msg-read">${readLabelFor(m.id)}</span>` : ''}</div>
     </div>`;
@@ -1083,6 +1291,7 @@ function previewOf(m, max) {
   if (t === 'video') return '[视频]';
   if (t === 'sticker') return '[表情]';
   if (t === 'file') return isPlayableVideo(m) ? '[视频]' : '[文件]';   // 旧消息：视频存在 file 里
+  if (t === 'redpacket') return '[红包]';
   return String(m.content || '').slice(0, n);
 }
 /* 这条群消息是否 @了我（含 @所有人） */
@@ -1090,7 +1299,49 @@ function mentionHitsMe(m) {
   const ms = Array.isArray(m.mentions) ? m.mentions : [];
   return ms.some(x => x === 'all' || (ME && Number(x) === ME.id));
 }
+/* ---------------- 小火人流式回复 ---------------- */
+function onAiStream(m) {
+  const sid = m.streamId;
+  if (!sid) return;
+  if (m.phase === 'start') {
+    if (m.room !== currentRoom) return;
+    const box = $('msgs');
+    const empty = box.querySelector('.empty-tip'); if (empty) empty.remove();
+    const el = buildMsgEl({
+      id: 'stream-' + sid,
+      fromId: m.fromId, fromName: m.fromName || getAiName(),
+      fromAvatar: m.fromAvatar || (AI_INFO && AI_INFO.avatar) || '',
+      fromLevel: 0, msgType: 'text', content: '', createdAt: m.createdAt || Date.now()
+    });
+    el.classList.add('streaming');
+    el.dataset.streamId = sid;
+    const bubble = el.querySelector('.bubble');
+    if (bubble) bubble.innerHTML = '<span class="stream-thinking">正在思考…</span>';
+    box.appendChild(el);
+    aiStreams.set(sid, { el, text: '' });
+    scrollBottom();
+    return;
+  }
+  const rec = aiStreams.get(sid);
+  if (!rec) return;
+  if (m.phase === 'delta') {
+    rec.text += m.text || '';
+    const bubble = rec.el.querySelector('.bubble');
+    if (bubble) bubble.innerHTML = renderContent({ content: rec.text });
+    if (autoStick) scrollBottom();
+  } else if (m.phase === 'error') {
+    const bubble = rec.el.querySelector('.bubble');
+    if (bubble) bubble.innerHTML = renderContent({ content: m.text || '（出错了）' });
+    rec.el.classList.remove('streaming');
+  }
+}
+
 function onIncoming(m) {
+  if (m.streamId && aiStreams.has(m.streamId)) {
+    const rec = aiStreams.get(m.streamId);
+    aiStreams.delete(m.streamId);
+    rec.el.remove();
+  }
   const mine = ME && m.fromId === ME.id;
   if (!mine && document.hidden) bgBump();      // 标签页在后台 → 计数并闪烁标题
   notifyIncoming(m);                           // 页面级系统通知（内部自行判断是否正在看该房间）
@@ -1225,6 +1476,120 @@ $('msgs').addEventListener('touchstart', e => {
 $('msgs').addEventListener('touchmove', () => clearTimeout(atLpTimer), { passive: true });
 $('msgs').addEventListener('touchend', () => clearTimeout(atLpTimer));
 $('msgs').addEventListener('touchcancel', () => clearTimeout(atLpTimer));
+
+/* ---------------- 联系人条目：右键 / 长按 → 备注 · 置顶 ---------------- */
+let userCtxAt = 0, userLpTimer = null;
+function showUserMenu(x, y, peerId) {
+  const m = $('userMenu'); if (!m || !peerId) return;
+  const pins = Array.isArray(CONTACTS.pinned) ? CONTACTS.pinned.map(Number) : [];
+  const isPinned = pins.indexOf(Number(peerId)) >= 0;
+  m.innerHTML = '';
+  const add = (label, fn, cls) => {
+    const b = document.createElement('button');
+    b.className = 'ctx-item' + (cls ? ' ' + cls : '');
+    b.textContent = label;
+    b.addEventListener('click', () => { hideUserMenu(); fn(); });
+    m.appendChild(b);
+  };
+  add('备注', () => openNoteModal(peerId));
+  add(isPinned ? '取消置顶' : '置顶', () => togglePin(peerId, !isPinned), isPinned ? 'danger' : 'primary');
+  m.style.left = Math.max(6, Math.min(x, window.innerWidth - 150)) + 'px';
+  m.style.top = Math.max(6, Math.min(y, window.innerHeight - 108)) + 'px';
+  m.classList.add('on');
+  userCtxAt = Date.now();
+}
+function hideUserMenu() { const m = $('userMenu'); if (m) m.classList.remove('on'); }
+
+$('userList').addEventListener('contextmenu', e => {
+  const item = e.target.closest('.user-item');
+  if (!item || !item.dataset.peer) return;          // 群聊大厅无 data-peer
+  e.preventDefault();
+  showUserMenu(e.clientX, e.clientY, Number(item.dataset.peer));
+});
+/* 移动端长按 */
+$('userList').addEventListener('touchstart', e => {
+  const item = e.target.closest('.user-item');
+  if (!item || !item.dataset.peer) return;
+  const t = e.touches[0] || {};
+  clearTimeout(userLpTimer);
+  userLpTimer = setTimeout(() => {
+    showUserMenu(t.clientX || 0, t.clientY || 0, Number(item.dataset.peer));
+    try { if (navigator.vibrate) navigator.vibrate(15); } catch (er) {}
+  }, 500);
+}, { passive: true });
+$('userList').addEventListener('touchmove', () => clearTimeout(userLpTimer), { passive: true });
+$('userList').addEventListener('touchend', () => clearTimeout(userLpTimer));
+$('userList').addEventListener('touchcancel', () => clearTimeout(userLpTimer));
+/* 长按后紧跟的 click 吞掉，避免顺带打开会话 */
+$('userList').addEventListener('click', e => {
+  if (Date.now() - userCtxAt < 600) { e.preventDefault(); e.stopPropagation(); }
+}, true);
+/* 点击其它地方 / 空白处右键 → 自动关闭菜单 */
+document.addEventListener('click', e => {
+  const m = $('userMenu'); if (!m || !m.classList.contains('on')) return;
+  if (e.target.closest('#userMenu')) return;
+  if (Date.now() - userCtxAt < 400) return;
+  hideUserMenu();
+});
+document.addEventListener('contextmenu', e => {
+  const m = $('userMenu'); if (!m || !m.classList.contains('on')) return;
+  if (!e.target.closest('#userList')) hideUserMenu();
+});
+
+/* ---- 备注弹窗 ---- */
+let notePeerId = 0;
+function openNoteModal(peerId) {
+  notePeerId = Number(peerId) || 0;
+  const inp = $('noteInput');
+  if (inp) inp.value = noteOf(notePeerId);
+  const t = $('noteTarget');
+  if (t) t.textContent = '给「' + baseNameForId(notePeerId) + '」设置备注；留空并保存即清除备注';
+  const mo = $('noteModal'); if (mo) mo.classList.add('on');
+  setTimeout(() => { if (inp) { try { inp.focus(); inp.select(); } catch (e) {} } }, 40);
+}
+function closeNoteModal() { const mo = $('noteModal'); if (mo) mo.classList.remove('on'); }
+async function saveNote() {
+  const inp = $('noteInput'); if (!inp) return;
+  const note = (inp.value || '').trim().slice(0, 30);
+  try {
+    const r = await fetch('/api/contacts/note', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ peerId: notePeerId, note }),
+    });
+    const d = await r.json();
+    if (!d.ok) return toast(d.error || '保存失败');
+    CONTACTS.notes = CONTACTS.notes || {};
+    if (note) CONTACTS.notes[notePeerId] = note; else delete CONTACTS.notes[notePeerId];
+    closeNoteModal();
+    renderUsers();
+    if (currentPeer && currentPeer.id === notePeerId) updateHead();
+    toast('✅ 备注已保存');
+  } catch (e) { toast('❌ 网络错误'); }
+}
+/* ---- 置顶 / 取消置顶 ---- */
+async function togglePin(peerId, pinned) {
+  const id = Number(peerId);
+  try {
+    const r = await fetch('/api/contacts/pin', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ peerId: id, pinned: !!pinned }),
+    });
+    const d = await r.json();
+    if (!d.ok) return toast(d.error || '操作失败');
+    const pins = Array.isArray(CONTACTS.pinned) ? CONTACTS.pinned.map(Number) : [];
+    const i = pins.indexOf(id);
+    if (pinned && i < 0) pins.push(id);
+    if (!pinned && i >= 0) pins.splice(i, 1);
+    CONTACTS.pinned = pins;
+    renderUsers();
+    toast(pinned ? '📌 已置顶' : '已取消置顶');
+  } catch (e) { toast('❌ 网络错误'); }
+}
+/* 备注输入框回车即保存 */
+(function bindNoteInput() {
+  const inp = $('noteInput'); if (!inp) return;
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveNote(); } });
+})();
 /* ---- 「重新编辑」---- */
 $('msgs').addEventListener('click', e => {
   const b = e.target.closest('.recall-edit'); if (!b) return;
@@ -1259,10 +1624,11 @@ function openSidebar() { $('sidebar').classList.add('open'); $('mask').classList
 function closeSidebar() { $('sidebar').classList.remove('open'); $('mask').classList.remove('on'); }
 
 /* ---------------- 积分：每日签到 + 积分商城 + 转账 ---------------- */
-let POINTS = { enabled: false, balance: 0 };
+let POINTS = { enabled: false, balance: 0, signedToday: false, days: [] };
 let WALLET_ITEMS = [];
 
 // 进入聊天室时：离线（局域网）模式下积分只在在线服务器生效 → 隐藏钱包、不签到。
+// 签到由顶部「每日签到」图标按钮（积分商城图标左边）手动触发，initPoints 只读状态。
 async function initPoints() {
   try {
     const info = await (await fetch('/api/lan/info')).json();
@@ -1270,21 +1636,77 @@ async function initPoints() {
   } catch (e) { /* 老网关无此接口，继续尝试 */ }
 
   try {
-    const r = await fetch('/api/points/signin', { method: 'POST' });
+    const r = await fetch('/api/points/me');
     if (!r.ok) return;                       // 服务端未部署积分功能
     const d = await r.json();
     if (!d.ok) return;
     POINTS.enabled = true;
     POINTS.balance = d.balance;
+    POINTS.signedToday = !!d.signedToday;
+    POINTS.days = d.days || [];
     const btn = $('walletBtn'); if (btn) btn.style.display = 'flex';
-    if (!d.already && d.points > 0) showSignin(d.points, d.balance);
+    const sbtn = $('signinBtn'); if (sbtn) sbtn.style.display = 'flex';
+    updateSigninBtn();
   } catch (e) { /* 服务端不可用则静默跳过 */ }
 }
 
-function showSignin(points, balance) {
-  $('signinPoints').textContent = '+' + points;
-  $('signinBalance').textContent = balance;
+/* 顶部「每日签到」图标按钮（在积分商城图标左边）：签过当天图标变金色 */
+function updateSigninBtn(){
+  const b = $('signinBtn'); if (!b) return;
+  b.title = POINTS.signedToday ? '今日已签到' : '每日签到';
+  b.classList.toggle('done', !!POINTS.signedToday);
+}
+
+async function doSignin(){
+  const b = $('signinBtn');
+  if (b) b.disabled = true;
+  try {
+    const r = await fetch('/api/points/signin', { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok || !d.ok) return toast('❌ ' + (d.error || d.detail || '签到失败'));
+    POINTS.enabled = true;
+    POINTS.balance = d.balance;
+    POINTS.signedToday = true;
+    POINTS.days = d.days || [];
+    if ($('walletBalance')) $('walletBalance').textContent = d.balance;
+    updateSigninBtn();
+    showSignin(d);
+    if ($('walletModal').classList.contains('on')) refreshWallet();
+    refreshMyLevel();                                   // 签到也涨经验 → 刷新等级卡
+    if ($('levelModal').classList.contains('on')) loadLevelMe();
+  } catch (e) { toast('❌ 签到失败'); }
+  finally { if (b) b.disabled = false; }
+}
+
+function showSignin(d){
+  const already = !!d.already;
+  const days = d.days || [];
+  const today = days.length ? days[days.length - 1] : null;
+  // 今天已签过时不再显示 +0，而是显示「今天实际拿到的积分」
+  const got = already ? ((today && today.status === 'signed') ? today.points : 0) : (d.points || 0);
+  $('signinTitle').textContent = already ? '今日已签到' : '签到成功';
+  if ($('signinPointsLabel')) $('signinPointsLabel').textContent = already ? '今日已获得' : '本次签到获得';
+  let tip = already ? '今天已经签过啦，明天记得再来～' : '每日签到随机积分奖励已到账';
+  if (d.streak > 0) tip += `（已连续签到 ${d.streak} 天）`;
+  $('signinTip').textContent = tip;
+  $('signinPoints').textContent = '+' + got;
+  $('signinBalance').textContent = d.balance;
+  renderSigninSteps(days);
   $('signinModal').classList.add('on');
+}
+
+/* 最近 7 天签到步骤条：已签到=实心（显示当日积分）、断签=灰底、未签=空心 */
+function renderSigninSteps(days){
+  const box = $('signinSteps');
+  if (!box) return;
+  if (!days.length) { box.innerHTML = '<div class="search-empty">暂无签到数据</div>'; return; }
+  box.innerHTML = days.map(x => {
+    const txt = x.status === 'signed' ? '+' + x.points : (x.status === 'missed' ? '断' : '');
+    return `<div class="step${x.today ? ' is-today' : ''}" data-status="${esc(x.status)}">
+      <div class="step-dot">${esc(txt)}</div>
+      <div class="step-label">${esc(x.label)}<br>${esc(x.weekday)}</div>
+    </div>`;
+  }).join('');
 }
 function closeSignin() { $('signinModal').classList.remove('on'); }
 
@@ -1331,11 +1753,11 @@ function renderWalletItems(items) {
 
 function renderWalletLogs(logs) {
   const box = $('walletLogs');
-  if (!logs.length) { box.innerHTML = '<div class="search-empty">暂无积分明细</div>'; return; }
+  if (!logs.length) { box.innerHTML = '<div class="search-empty">暂无积分明细（签到、兑换、转账、系统调整都会记录在这里）</div>'; return; }
   const typeName = { signin: '每日签到', redeem: '兑换商品', transfer_in: '收到转账', transfer_out: '转出积分', admin: '系统调整' };
   box.innerHTML = logs.map(l => {
     const plus = l.delta > 0;
-    const label = typeName[l.type] || '积分变动';
+    const label = l.title || typeName[l.type] || '积分变动';
     const main = esc(label + (l.ref ? '（' + l.ref + '）' : '') + (l.remark && l.remark !== label ? ' · ' + l.remark : ''));
     const t = new Date(l.createdAt);
     const time = `${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')} ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
@@ -1383,6 +1805,575 @@ async function submitTransfer() {
     refreshWallet();
   } catch (e) { toast('❌ 转账失败'); }
 }
+
+/* ---------------- 我的订单（兑换记录 + 管理员兑现内容） ---------------- */
+let MY_ORDERS = [];
+
+function openMyOrders() {
+  $('ordersModal').classList.add('on');
+  refreshOrders();
+}
+function closeOrders() { $('ordersModal').classList.remove('on'); }
+
+function fmtDT(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function refreshOrders() {
+  const box = $('ordersList');
+  box.innerHTML = '<div class="search-empty">加载中…</div>';
+  try {
+    const r = await fetch('/api/points/orders?limit=100');
+    const d = await r.json();
+    if (!r.ok || !d.ok) { box.innerHTML = '<div class="search-empty">加载失败，请稍后重试</div>'; return; }
+    MY_ORDERS = d.orders || [];
+    renderOrders();
+  } catch (e) { box.innerHTML = '<div class="search-empty">加载失败，请稍后重试</div>'; }
+}
+
+function renderOrders() {
+  const box = $('ordersList');
+  if (!MY_ORDERS.length) { box.innerHTML = '<div class="search-empty">还没有兑换记录，去积分商城兑换试试～</div>'; return; }
+  box.innerHTML = MY_ORDERS.map(o => {
+    const reply = o.reply || {};
+    const files = reply.files || [];
+    const text = reply.text || '';
+    const media = files.map(f => f.kind === 'video'
+      ? `<video class="order-media" src="${esc(f.url)}" controls preload="metadata"></video>`
+      : `<img class="order-media" src="${esc(f.url)}" alt="${esc(f.name || '')}" onclick="window.open(this.src)">`).join('');
+    const body = (text || files.length)
+      ? `<div class="order-reply">
+           ${text ? `<div class="order-text">${esc(text).replace(/\n/g, '<br>')}</div>` : ''}
+           ${media ? `<div class="order-media-box">${media}</div>` : ''}
+           <div class="order-hint">兑现内容更新于 ${esc(fmtDT(reply.updatedAt))}</div>
+         </div>`
+      : '<div class="order-hint">管理员尚未兑现，请耐心等待</div>';
+    return `<div class="order-card">
+      <div class="order-head">
+        <span class="order-name">${esc(o.itemName || '商品')}</span>
+        <span class="order-status${o.status === 'issued' ? ' ok' : ''}">${esc(o.statusText || '待兑现')}</span>
+      </div>
+      <div class="order-sub">订单号 #${o.id} · 花费 ${esc(o.price)} 积分 · ${esc(fmtDT(o.createdAt))}</div>
+      ${body}
+    </div>`;
+  }).join('');
+}
+
+/* ---------------- 我的等级 / 等级排行 ---------------- */
+let LV_BOARD_LOADED = false;
+let LV_LOGS_CACHE = false;
+
+/* 个人中心顶部的等级入口卡 */
+function renderPfLevel() {
+  const badge = $('pfLevelBadge'); if (!badge) return;
+  const lv = Number((ME && ME.level) || 0);
+  const exp = Number((ME && ME.exp) || 0);
+  const nxt = nextTh(lv);
+  badge.src = lvImg(lv);
+  $('pfLevelTitle').textContent = 'Lv' + lv;
+  $('pfLevelSub').textContent = (nxt == null) ? ('经验 ' + exp + ' · 已满级') : ('经验 ' + exp + ' / ' + nxt);
+}
+async function refreshMyLevel() {
+  try {
+    const d = await (await fetch('/api/level/me')).json();
+    if (!d.ok) return;
+    LVINFO = d;
+    if (ME) { ME.level = d.level; ME.exp = d.exp; }
+    renderPfLevel();
+  } catch (e) {}
+}
+
+function openLevel() {
+  if (!ME) return;
+  $('levelModal').classList.add('on');
+  switchLevelTab('me');
+}
+function closeLevel() { $('levelModal').classList.remove('on'); }
+function switchLevelTab(tab) {
+  const isMe = tab !== 'board';
+  $('lvTabMe').classList.toggle('on', isMe);
+  $('lvTabBoard').classList.toggle('on', !isMe);
+  $('lvBodyMe').classList.toggle('hidden', !isMe);
+  $('lvBodyBoard').classList.toggle('hidden', isMe);
+  if (isMe) loadLevelMe(); else loadLevelBoard();
+}
+
+async function loadLevelMe() {
+  const logs = $('lvLogs');
+  if (!LV_LOGS_CACHE) logs.innerHTML = '<div class="search-empty">加载中…</div>';
+  try {
+    const [meR, logsR] = await Promise.all([
+      fetch('/api/level/me'),
+      fetch('/api/level/logs?limit=50'),
+    ]);
+    const d = await meR.json();
+    if (d.ok) {
+      LVINFO = d;
+      if (ME) { ME.level = d.level; ME.exp = d.exp; }
+      renderLevelHero(d);
+      renderLevelRules(d.sources || []);
+      renderPfLevel();
+      renderUsers();
+    }
+    const lg = await logsR.json();
+    if (lg.ok) { renderLevelLogs(lg.logs || []); LV_LOGS_CACHE = true; }
+  } catch (e) {
+    logs.innerHTML = '<div class="search-empty">加载失败，请稍后重试</div>';
+  }
+}
+
+function renderLevelHero(d) {
+  $('lvHeroBadge').src = lvImg(d.level);
+  $('lvHeroTitle').textContent = 'Lv' + d.level;
+  const nxt = d.nextThreshold;
+  $('lvHeroSub').textContent = d.isMax
+    ? ('经验 ' + d.exp + ' · 已满级')
+    : ('经验 ' + d.exp + ' / ' + nxt + '（再攒 ' + d.remain + ' 升级）');
+  $('lvBar').style.width = Math.round((Number(d.ratio) || 0) * 100) + '%';
+  $('lvBarCur').textContent = d.curThreshold;
+  $('lvBarNext').textContent = (nxt == null) ? 'MAX' : nxt;
+}
+
+function capText(s) {
+  const parts = [];
+  if (s.oncePerDay) parts.push('每天 1 次');
+  else if (s.dailyCountCap > 0) parts.push('每天最多 ' + s.dailyCountCap + ' 次');
+  if (s.dailyCap > 0) parts.push('每天最多 ' + s.dailyCap + ' 经验');
+  if (s.streakDays > 0 && s.streakMultiplier > 1) parts.push('连签 ' + s.streakDays + ' 天 ×' + s.streakMultiplier);
+  return parts.join(' · ');
+}
+function renderLevelRules(sources) {
+  const box = $('lvRules');
+  if (!sources.length) { box.innerHTML = '<div class="search-empty">暂无规则</div>'; return; }
+  box.innerHTML = sources.map(s => {
+    const cap = capText(s);
+    return `<div class="level-rule${s.enabled ? '' : ' off'}">
+      <span class="lr-name">${esc(s.name)}${cap ? `<span class="lr-cap">${esc(cap)}</span>` : ''}</span>
+      <span class="lr-exp">${s.enabled ? '+' + s.exp : '已关闭'}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderLevelLogs(logs) {
+  const box = $('lvLogs');
+  if (!logs.length) { box.innerHTML = '<div class="search-empty">还没有经验记录，去签到 / 聊天赚经验吧～</div>'; return; }
+  box.innerHTML = logs.map(l => {
+    const plus = l.delta > 0;
+    const main = l.title + (l.ref ? '（' + l.ref + '）' : '') + (l.remark && l.remark !== l.title ? ' · ' + l.remark : '');
+    const d = new Date(l.createdAt);
+    const p = n => String(n).padStart(2, '0');
+    const time = `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    return `<div class="level-log">
+      <span class="ll-main">${esc(main)}</span>
+      <span class="ll-time">${esc(time)}</span>
+      <span class="ll-d ${plus ? 'd-plus' : 'd-minus'}">${plus ? '+' : ''}${l.delta}</span>
+    </div>`;
+  }).join('');
+}
+
+async function loadLevelBoard() {
+  const box = $('lvBoard');
+  if (!LV_BOARD_LOADED) box.innerHTML = '<div class="search-empty">加载中…</div>';
+  try {
+    const d = await (await fetch('/api/level/board?limit=20')).json();
+    if (!d.ok) { box.innerHTML = '<div class="search-empty">加载失败</div>'; return; }
+    const list = d.board || [];
+    if (!list.length) { box.innerHTML = '<div class="search-empty">还没有排行数据</div>'; return; }
+    LV_BOARD_LOADED = true;
+    box.innerHTML = list.map(b => {
+      const nm = b.nickname || b.username || '?';
+      const u = avUrlOf(b.avatar);
+      const av = u
+        ? `<div class="board-av" style="background-image:url('${u}')"></div>`
+        : `<div class="board-av" style="background:${colorOf(nm)}">${esc(initial(nm))}</div>`;
+      return `<div class="board-row${b.isMe ? ' me' : ''}${b.rank <= 3 ? ' top' + b.rank : ''}">
+        <div class="board-rank">${b.rank}</div>
+        ${av}
+        <div class="board-name">${esc(nm)}${b.isMe ? ' <span class="self-tag">我</span>' : ''}</div>
+        ${levelBadge(b.level)}
+        <div class="board-exp">${b.exp}</div>
+      </div>`;
+    }).join('');
+  } catch (e) { box.innerHTML = '<div class="search-empty">加载失败</div>'; }
+}
+
+/* ---------------- 抽卡 ---------------- */
+const RARITY_CN = { normal: '普通', premium: '精品', rare: '稀有', limited: '限定五星' };
+const RARITY_RANK = { normal: 0, premium: 1, rare: 2, limited: 3 };
+let GACHA = { enabled: false, pools: [], curId: 0, balance: 0, rates: null, tab: 'pool' };
+
+async function initGacha() {
+  try {
+    const info = await (await fetch('/api/lan/info')).json();
+    if (info && info.lan_mode) return;              // 离线模式下积分不生效，抽卡同理
+  } catch (e) {}
+  try {
+    const d = await (await fetch('/api/gacha/info')).json();
+    if (!d.ok || !d.enabled || !(d.pools || []).length) return;
+    GACHA.enabled = true;
+    GACHA.pools = d.pools; GACHA.balance = d.balance; GACHA.rates = d.rates;
+    if (!GACHA.curId) GACHA.curId = d.pools[0].id;
+    const b = $('gachaBtn'); if (b) b.style.display = 'flex';
+  } catch (e) {}
+}
+
+function curPool() { return GACHA.pools.find(p => p.id === GACHA.curId) || GACHA.pools[0] || null; }
+function limitedPct() { const r = GACHA.rates && GACHA.rates.limitedRate; return Math.round((r == null ? 0.5 : r) * 100); }
+
+async function openGacha() {
+  if (!GACHA.enabled) return;
+  $('gachaModal').classList.add('on');
+  await refreshGacha();
+  selectGachaTab(GACHA.tab);
+}
+function closeGacha() { $('gachaModal').classList.remove('on'); }
+
+async function refreshGacha() {
+  try {
+    const d = await (await fetch('/api/gacha/info')).json();
+    if (!d.ok) return;
+    GACHA.pools = d.pools || []; GACHA.balance = d.balance; GACHA.rates = d.rates;
+    if (!GACHA.pools.some(p => p.id === GACHA.curId)) GACHA.curId = GACHA.pools[0] ? GACHA.pools[0].id : 0;
+    $('gachaBalance').textContent = d.balance;
+    renderGachaTabs();
+  } catch (e) {}
+}
+
+function renderGachaTabs() {
+  const poolTabs = GACHA.pools.map(p =>
+    `<button class="${GACHA.tab !== 'logs' && p.id === GACHA.curId ? 'on' : ''}" onclick="pickPool(${p.id})">${esc(p.name)}</button>`).join('');
+  $('gachaTabs').innerHTML = poolTabs +
+    `<button class="${GACHA.tab === 'logs' ? 'on' : ''}" onclick="selectGachaTab('logs')">我的记录</button>`;
+}
+function pickPool(id) { GACHA.curId = id; GACHA.tab = 'pool'; selectGachaTab('pool'); }
+
+function selectGachaTab(tab) {
+  GACHA.tab = tab === 'logs' ? 'logs' : 'pool';
+  renderGachaTabs();
+  const isLogs = GACHA.tab === 'logs';
+  $('gachaPoolPanel').classList.toggle('hidden', isLogs);
+  $('gachaLogPanel').classList.toggle('hidden', !isLogs);
+  $('gachaFoot').classList.toggle('hidden', isLogs);
+  if (isLogs) loadGachaLogs(); else renderGachaPool();
+}
+
+function gachaPrizeHTML(p) {
+  const u = avUrlOf(p.image);
+  const img = u ? `<img src="${esc(u)}" alt="" loading="lazy">`
+    : `<div class="gp-ph">${p.kind === 'exp' ? '✨' : (p.kind === 'points' ? '💎' : '🎁')}</div>`;
+  const label = p.kind === 'physical' ? esc(p.name || '实物奖品')
+    : (p.kind === 'points' ? (p.value + ' 积分') : (p.value + ' 经验'));
+  const stock = (p.kind === 'physical' && p.stock >= 0)
+    ? `<span class="gp-stock">${p.stock > 0 ? ('剩 ' + p.stock) : '已兑完'}</span>` : '';
+  return `<div class="gp-item r-${p.rarity}">${img}<div class="gp-name">${label}</div>${stock}</div>`;
+}
+
+function renderGachaPool() {
+  const p = curPool();
+  if (!p) {
+    $('gachaPity').innerHTML = '<div class="search-empty">暂无可用卡池</div>';
+    $('gachaPrizes').innerHTML = '';
+    return;
+  }
+  const st = p.state || {};
+  const hard = st.hard || 90, soft = st.softStart || 74, pn = st.pity5 || 0;
+  const pct = Math.max(0, Math.min(100, Math.round((pn / hard) * 100)));
+  $('gachaPity').innerHTML = `
+    <div class="gp-row"><span>距离稀有保底</span><b>${st.toPity != null ? st.toPity : Math.max(hard - pn, 0)} 抽</b></div>
+    <div class="gp-bar"><i style="width:${pct}%"></i></div>
+    <div class="gp-sub">已累计 ${pn} / ${hard} 抽未出稀有；精品保底 ${Math.max(10 - (st.pity4 || 0), 0)} 抽内必出精品以上</div>
+    <div class="gp-sub">稀有基础概率 0.6%，第 ${soft} 抽起递增，第 ${hard} 抽必出；五星有 ${limitedPct()}% 为限定${st.guaranteed ? ' · <span class="gp-guard">大保底：下次稀有必为限定</span>' : ''}</div>`;
+  const groups = {};
+  (p.prizes || []).forEach(x => { (groups[x.rarity] = groups[x.rarity] || []).push(x); });
+  const order = ['limited', 'rare', 'premium', 'normal'];
+  const html = order.filter(r => groups[r]).map(r =>
+    `<div class="gp-group"><div class="gp-gtitle r-${r}">${RARITY_CN[r]} · ${groups[r].length}</div>
+      <div class="gp-items">${groups[r].map(gachaPrizeHTML).join('')}</div></div>`).join('');
+  $('gachaPrizes').innerHTML = html || '<div class="search-empty">该卡池还没有配置奖品</div>';
+  $('gachaOneCost').textContent = (p.cost1 || 0) + ' 积分';
+  $('gachaTenCost').textContent = (p.cost10 || 0) + ' 积分';
+}
+
+async function drawGacha(times) {
+  const p = curPool(); if (!p) return;
+  const cost = times === 10 ? (p.cost10 || 0) : (p.cost1 || 0);
+  if (cost > 0 && GACHA.balance < cost) return toast('积分不足，需要 ' + cost + ' 积分');
+  const btns = [$('gachaOne'), $('gachaTen')];
+  btns.forEach(b => b && (b.disabled = true));
+  try {
+    const r = await fetch('/api/gacha/draw', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ poolId: p.id, times }),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) return toast('❌ ' + (d.error || d.detail || '抽卡失败'));
+    GACHA.balance = d.balance;
+    $('gachaBalance').textContent = d.balance;
+    const cp = GACHA.pools.find(x => x.id === p.id); if (cp) cp.state = d.state;
+    if (POINTS.enabled) { POINTS.balance = d.balance; if ($('walletBalance')) $('walletBalance').textContent = d.balance; }
+    if (GACHA.tab === 'pool') renderGachaPool();
+    if ($('walletModal').classList.contains('on')) refreshWallet();
+    refreshMyLevel();                                 // 抽到经验奖品会涨经验
+    showGachaResult(d.results || []);
+  } catch (e) { toast('❌ 抽卡失败'); }
+  finally { btns.forEach(b => b && (b.disabled = false)); }
+}
+
+function showGachaResult(results) {
+  if (!results.length) return;
+  const best = results.reduce((a, b) => (RARITY_RANK[b.rarity] > RARITY_RANK[a.rarity] ? b : a), results[0]);
+  const box = $('grCards');
+  box.className = 'gr-cards ' + (results.length > 1 ? 'ten' : 'one');
+  box.innerHTML = results.map((r, i) => {
+    const u = avUrlOf(r.image);
+    const img = u ? `<img src="${esc(u)}" alt="">`
+      : `<div class="gr-ph">${r.kind === 'exp' ? '✨' : (r.kind === 'points' ? '💎' : '🎁')}</div>`;
+    const label = r.kind === 'physical' ? esc(r.name || '实物奖品') : esc(r.label || '');
+    const lim = r.isLimited ? '<div class="gr-lim">限定</div>' : '';
+    return `<div class="gr-card r-${r.rarity}" style="animation-delay:${i * 55}ms">
+      <div class="gr-rar">${esc(r.rarityName || RARITY_CN[r.rarity] || '')}</div>
+      ${img}<div class="gr-name">${label}</div>${lim}</div>`;
+  }).join('');
+  $('gachaResult').classList.add('on');
+  if (RARITY_RANK[best.rarity] >= 2) toast(best.isLimited ? '🎉 恭喜抽到【限定五星】！' : '✨ 出稀有啦！');
+}
+function closeGachaResult() { $('gachaResult').classList.remove('on'); }
+
+async function loadGachaLogs() {
+  const box = $('gachaLogs');
+  box.innerHTML = '<div class="search-empty">加载中…</div>';
+  try {
+    const d = await (await fetch('/api/gacha/logs?limit=60')).json();
+    if (!d.ok) { box.innerHTML = '<div class="search-empty">加载失败</div>'; return; }
+    const logs = d.logs || [];
+    if (!logs.length) { box.innerHTML = '<div class="search-empty">还没有抽卡记录</div>'; return; }
+    box.innerHTML = logs.map(l => {
+      const t = new Date(l.createdAt); const p = n => String(n).padStart(2, '0');
+      const time = `${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}`;
+      const main = (l.kind === 'physical' ? (l.name || '实物奖品')
+        : (l.kind === 'points' ? (l.value + ' 积分') : (l.value + ' 经验')))
+        + (l.isLimited ? ' · 限定' : '') + (l.pullNo ? '（第 ' + l.pullNo + ' 抽）' : '');
+      return `<div class="gacha-log">
+        <span class="gl-rar r-${l.rarity}">${esc(l.rarityName || '')}</span>
+        <span class="gl-main">${esc(l.poolName || '')} · ${esc(main)}</span>
+        <span class="gl-time">${esc(time)}</span>
+      </div>`;
+    }).join('');
+  } catch (e) { box.innerHTML = '<div class="search-empty">加载失败</div>'; }
+}
+
+/* ---------------- 群红包 ---------------- */
+let RP = { asset: 'points', mode: 'random', curId: 0, timer: 0 };
+const RP_UNIT = { points: '积分', exp: '经验' };
+
+/* 入口按钮：离线（局域网）模式下积分/经验红包都依赖在线服务器，故隐藏 */
+async function initRedPacket() {
+  try {
+    const info = await (await fetch('/api/lan/info')).json();
+    if (info && info.lan_mode) return;
+  } catch (e) {}
+  const b = $('rpBtn'); if (b) b.style.display = 'flex';
+}
+
+/* 消息气泡里的红包卡片 */
+function rpCardHTML(m) {
+  const id = Number(m.redpacketId || (m.redpacket && m.redpacket.id) || 0);
+  const info = (m.redpacket && typeof m.redpacket === 'object') ? m.redpacket : null;
+  const st = (info && info.status) ? info.status : 'active';
+  const title = info ? (info.remark || '恭喜发财，大吉大利') : '群红包';
+  const sub = info ? (info.assetName + '红包 · ' + info.count + '个') : '点击查看详情';
+  const label = st === 'done' ? '已领完' : (st === 'expired' ? '已过期' : '领取');
+  return `<div class="rp-bubble ${st}" data-rpid="${id}" onclick="openRP(${id})">
+    <div class="rp-ico">🧧</div>
+    <div class="rp-txt"><div class="rp-title">${esc(title)}</div><div class="rp-sub">${esc(sub)}</div></div>
+    <div class="rp-go">${esc(label)}</div>
+  </div>`;
+}
+
+/* 用完整红包信息回填气泡（详情加载后 / 领到后） */
+function updateRPCardDom(p) {
+  if (!p || !p.id) return;
+  document.querySelectorAll('.rp-bubble[data-rpid="' + p.id + '"]').forEach(el => {
+    el.classList.remove('active', 'done', 'expired');
+    el.classList.add(p.status || 'active');
+    const t = el.querySelector('.rp-title'); if (t) t.textContent = p.remark || '恭喜发财，大吉大利';
+    const s = el.querySelector('.rp-sub'); if (s) s.textContent = p.assetName + '红包 · ' + p.count + '个';
+    const g = el.querySelector('.rp-go');
+    if (g) g.textContent = p.status === 'done' ? '已领完'
+      : p.status === 'expired' ? '已过期'
+      : (p.canGrab ? '领取' : (p.myAmount != null ? '已领取' : '查看'));
+  });
+}
+
+/* 有人领取的红包广播：状态变化时更新所有气泡；详情弹窗打开中则实时刷新 */
+function patchRPCard(packetId, grabbedCount, status) {
+  const id = Number(packetId || 0); if (!id) return;
+  const st = status || 'active';
+  document.querySelectorAll('.rp-bubble[data-rpid="' + id + '"]').forEach(el => {
+    el.classList.remove('active', 'done', 'expired');
+    el.classList.add(st);
+    const g = el.querySelector('.rp-go');
+    if (g) g.textContent = st === 'done' ? '已领完' : (st === 'expired' ? '已过期' : '领取');
+  });
+  if (RP.curId === id && $('rpModal') && $('rpModal').classList.contains('on')) loadRP(id, true);
+}
+
+/* ---- 发红包 ---- */
+function openSendRP() {
+  if (currentRoom && currentRoom !== 'group') openRoom('group');   // 红包只发群聊
+  RP.asset = 'points'; RP.mode = 'random';
+  ['rpTotal', 'rpPer', 'rpCount', 'rpRemark'].forEach(id => { const el = $(id); if (el) el.value = ''; });
+  $('rpSendModal').classList.add('on');
+  syncRPSendUI();
+}
+function closeRpSend() { $('rpSendModal').classList.remove('on'); }
+function setRPKind(a) { RP.asset = (a === 'exp' ? 'exp' : 'points'); syncRPSendUI(); }
+function setRPMode(m) { RP.mode = (m === 'fixed' ? 'fixed' : 'random'); syncRPSendUI(); }
+
+function syncRPSendUI() {
+  const admin = !!(ME && ME.isAdmin);
+  if (RP.asset === 'exp' && !admin) RP.asset = 'points';           // 非管理员回退到积分红包
+  $('rpKindPoints').classList.toggle('on', RP.asset === 'points');
+  const expBtn = $('rpKindExp');
+  if (expBtn) { expBtn.classList.toggle('on', RP.asset === 'exp'); expBtn.disabled = !admin; }
+  $('rpModeRandom').classList.toggle('on', RP.mode === 'random');
+  $('rpModeFixed').classList.toggle('on', RP.mode === 'fixed');
+  const fixed = RP.mode === 'fixed';
+  $('rpTotalWrap').style.display = fixed ? 'none' : '';
+  $('rpPerWrap').style.display = fixed ? '' : 'none';
+  const u = RP_UNIT[RP.asset];
+  $('rpUnit1').textContent = u; $('rpUnit2').textContent = u;
+  const cnt = Math.max(0, Math.floor(Number($('rpCount').value) || 0));
+  const total = fixed
+    ? Math.max(0, Math.floor(Number($('rpPer').value) || 0)) * cnt
+    : Math.max(0, Math.floor(Number($('rpTotal').value) || 0));
+  const hint = $('rpCostHint');
+  if (RP.asset === 'exp') {
+    hint.textContent = '管理员发放经验红包不扣除任何余额';
+  } else if (admin) {
+    hint.textContent = '管理员发放积分红包不扣除自身余额' + (total ? '（本次发放 ' + total + ' 积分）' : '');
+  } else if (total > 0) {
+    hint.textContent = '将从你的余额扣除 ' + total + ' 积分（当前余额 ' + (POINTS.balance || 0) + '）';
+  } else {
+    hint.textContent = '当前积分余额 ' + (POINTS.balance || 0);
+  }
+}
+
+async function submitRP() {
+  const cnt = Math.floor(Number($('rpCount').value) || 0);
+  const fixed = RP.mode === 'fixed';
+  const total = fixed ? 0 : Math.floor(Number($('rpTotal').value) || 0);
+  const per = fixed ? Math.floor(Number($('rpPer').value) || 0) : 0;
+  const remark = ($('rpRemark').value || '').trim();
+  if (cnt < 1) return toast('请填写红包个数');
+  if (fixed) { if (per < 1) return toast('请填写单个数量'); }
+  else if (total < cnt) return toast('随机红包总额不能小于个数（每人至少 1）');
+  const btn = $('rpSendBtn'); if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('/api/redpacket/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asset: RP.asset, mode: RP.mode, total, per, count: cnt, remark }),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) return toast('❌ ' + (d.error || d.detail || '发送失败'));
+    if (typeof d.balance === 'number') {
+      POINTS.balance = d.balance;
+      if ($('walletBalance')) $('walletBalance').textContent = d.balance;
+    }
+    closeRpSend();
+    toast('🧧 红包已发出，快抢！');
+    if ($('walletModal').classList.contains('on')) refreshWallet();
+    RP.asset = 'points'; RP.mode = 'random';
+  } catch (e) { toast('❌ 发送失败'); }
+  finally { if (btn) btn.disabled = false; }
+}
+
+/* ---- 红包详情 / 领取 ---- */
+function openRP(id) {
+  id = Number(id || 0); if (!id) return;
+  RP.curId = id;
+  $('rpModal').classList.add('on');
+  $('rpBody').innerHTML = '<div class="search-empty">加载中…</div>';
+  loadRP(id);
+}
+function closeRP() { $('rpModal').classList.remove('on'); }
+
+async function loadRP(id, silent) {
+  try {
+    const r = await fetch('/api/redpacket/' + id);
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      if (!silent) $('rpBody').innerHTML = '<div class="search-empty">' + esc(d.error || d.detail || '红包不存在') + '</div>';
+      return;
+    }
+    renderRP(d.packet);
+  } catch (e) { if (!silent) $('rpBody').innerHTML = '<div class="search-empty">网络错误</div>'; }
+}
+
+function renderRP(p) {
+  const best = (p.grabs || []).reduce((m, g) => Math.max(m, g.amount), 0);
+  let luckyShown = false;
+  const rows = (p.grabs || []).map(g => {
+    let tag = '';
+    if (g.amount === best && best > 0 && !luckyShown) { luckyShown = true; tag = ' 🍀'; }
+    return `<div class="rp-grab"><span class="rp-gn">${esc(g.name)}${tag}</span><span class="rp-ga">${g.amount} ${esc(p.assetName)}</span></div>`;
+  }).join('');
+  const statusTxt = p.status === 'done' ? ' · 已领完' : (p.status === 'expired' ? ' · 已过期' : '');
+  const head = `<div class="rp-head">
+      <div class="rp-from">来自 ${esc(p.senderName)}${p.isAdminFree ? ' · 管理员红包' : ''}</div>
+      <div class="rp-remark">${esc(p.remark || '恭喜发财，大吉大利')}</div>
+      <div class="rp-big">${esc(p.assetName)}红包${p.mode === 'fixed' ? '（固定 ' + p.per + '/个）' : '（拼手气）'} · 共 ${p.count} 个${statusTxt}</div>
+    </div>`;
+  let act = '';
+  if (p.canGrab) act = `<button class="rp-open-btn" onclick="doGrabRP(${p.id})">开</button>`;
+  else if (p.myAmount != null) act = `<div class="rp-mine">你抢到了 <b>${p.myAmount}</b> ${esc(p.assetName)}</div>`;
+  else if (p.isMine) act = `<div class="rp-hint">这是你发出的红包</div>`;
+  else if (p.status === 'done') act = `<div class="rp-hint">来晚了，红包已被抢光</div>`;
+  else if (p.status === 'expired') act = `<div class="rp-hint">这个红包已经过期</div>`;
+  $('rpBody').innerHTML = head + act +
+    `<div class="rp-list-title">领取记录 ${p.grabbedCount}/${p.count}${p.grabbedAmount ? ' · 已领 ' + p.grabbedAmount + ' ' + esc(p.assetName) : ''}</div>
+     <div class="rp-list">${rows || '<div class="rp-grab"><span class="rp-gn">还没有人领取</span></div>'}</div>
+     <div class="rp-hint">每人限领 1 次 · 24 小时未领完自动退回发包者</div>`;
+  updateRPCardDom(p);
+}
+
+async function doGrabRP(id) {
+  id = Number(id || 0); if (!id) return;
+  const btns = document.querySelectorAll('#rpBody .rp-open-btn');
+  btns.forEach(b => b.disabled = true);
+  try {
+    const r = await fetch('/api/redpacket/' + id + '/grab', { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { toast('❌ ' + (d.error || d.detail || '领取失败')); await loadRP(id, true); return; }
+    if (typeof d.balance === 'number') {
+      POINTS.balance = d.balance;
+      if ($('walletBalance')) $('walletBalance').textContent = d.balance;
+    }
+    const pk = d.packet || {};
+    const amt = (d.amount != null ? d.amount : pk.myAmount) || 0;
+    if (d.already) toast('你已经领过这个红包了');
+    else showRpPop(amt, pk.assetName || '积分', pk.asset);
+    if (pk.asset === 'exp') refreshMyLevel();
+    else if ($('walletModal').classList.contains('on')) refreshWallet();
+    await loadRP(id, true);
+  } catch (e) { toast('❌ 领取失败'); }
+  finally { btns.forEach(b => b.disabled = false); }
+}
+
+function showRpPop(amount, assetName, asset) {
+  const pop = $('rpGrabPop'); if (!pop) return;
+  $('rpPopNum').textContent = '+' + amount;
+  $('rpPopTxt').textContent = asset === 'exp' ? ('经验 +' + amount + ' 已到账') : ('已存入 ' + amount + ' ' + assetName);
+  pop.classList.add('on');
+  clearTimeout(RP.timer);
+  RP.timer = setTimeout(hideRpPop, 1700);
+}
+function hideRpPop() { const pop = $('rpGrabPop'); if (pop) pop.classList.remove('on'); }
+
+['rpTotal', 'rpPer', 'rpCount'].forEach(id => { const el = $(id); if (el) el.addEventListener('input', syncRPSendUI); });
 
 /* ---------------- 启动 ---------------- */
 (async function boot() {

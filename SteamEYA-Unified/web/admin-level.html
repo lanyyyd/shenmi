@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-mode="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>等级管理 · 管理后台</title>
+<link rel="stylesheet" href="/css/style.css?v=30">
+<style>
+body{overflow:auto}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:26px 18px 60px}
+.top{display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.top h1{font-size:21px;font-weight:800;letter-spacing:-.3px}
+.top .spacer{flex:1}
+.btn{padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;transition:.2s;
+  background:var(--panel);border:1px solid var(--line);color:var(--text)}
+html[data-theme="light"] .btn:not(.pri){background:#fff}
+.btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn.pri{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;border:none}
+.btn.pri:hover{filter:brightness(1.08);color:#fff}
+.btn.danger{color:#EF4444}
+.btn.danger:hover{border-color:#EF4444}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur)}
+html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
+.card-h{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.card-h h2{font-size:15px;font-weight:700}
+.card-h .spacer{flex:1}
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl th{text-align:left;padding:11px 14px;font-size:11.5px;font-weight:700;color:var(--hint);
+  border-bottom:1px solid var(--line);white-space:nowrap;letter-spacing:.4px}
+.tbl td{padding:12px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:var(--panel-soft)}
+html[data-theme="light"] .tbl tr:hover td{background:#FAFBFC}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
+.chip{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:6px;font-weight:700;
+  background:var(--primary-l);color:var(--primary);margin-left:6px}
+.chip.red{background:rgba(239,68,68,.12);color:#EF4444}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts button{font-size:12px;padding:5px 10px;border-radius:7px;background:var(--panel-soft);
+  border:1px solid var(--line);transition:.15s;color:var(--muted)}
+html[data-theme="light"] .acts button{background:#F7F8FA}
+.acts button:hover{border-color:var(--primary);color:var(--primary)}
+/* 表单 */
+.form{padding:16px 18px}
+.fld{margin-bottom:14px}
+.fld>label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:7px}
+.fld input{width:100%;padding:10px 13px;border-radius:10px;font-size:13.5px;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+.fld input:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-l)}
+.inline{display:flex;gap:14px;flex-wrap:wrap}
+.hint{font-size:12px;color:var(--hint);margin-top:6px;line-height:1.7}
+.th-box{display:flex;gap:10px;flex-wrap:wrap}
+.th-box .fld{max-width:130px;margin:0}
+.src-tbl input[type=number],.src-tbl input[type=text]{padding:8px 10px;border-radius:9px;font-size:13px;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+.src-tbl input:focus{border-color:var(--primary)}
+.src-tbl input[type=checkbox]{width:auto}
+.modal{position:fixed;inset:0;z-index:150;background:var(--mask);display:none;align-items:center;justify-content:center;padding:20px}
+.modal.on{display:flex}
+.modal-c{width:100%;max-width:460px;background:var(--panel);border:1px solid var(--line);border-radius:18px;
+  padding:26px 24px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+html[data-theme="light"] .modal-c{background:#fff;box-shadow:var(--shadow-lg)}
+.modal-c h3{font-size:17px;font-weight:700;margin-bottom:16px}
+.modal-c .field{margin-bottom:13px}
+.modal-c .field label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px}
+.modal-c .field input{width:100%;padding:11px 13px;border-radius:10px;font-size:14.5px;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+html[data-theme="light"] .modal-c .field input{background:#FAFBFC}
+.modal-c .field input:focus{border-color:var(--primary);box-shadow:0 0 0 3.5px var(--primary-l)}
+.modal-f{display:flex;gap:10px;margin-top:18px}
+.modal-f .btn{flex:1;text-align:center}
+.deny{text-align:center;padding:80px 20px}.deny h2{font-size:19px;margin-bottom:10px}
+.deny p{color:var(--muted);font-size:13.5px;margin-bottom:20px}
+.empty{text-align:center;color:var(--hint);padding:32px 0;font-size:13.5px}
+.form-msg{font-size:12.5px;min-height:16px;margin-top:8px}
+.form-msg.ok{color:#10B981}.form-msg.err{color:#EF4444}
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(20px);z-index:300;
+  padding:11px 20px;border-radius:11px;font-size:13.5px;font-weight:600;color:#fff;
+  background:linear-gradient(135deg,var(--primary),var(--primary-2));opacity:0;pointer-events:none;transition:.25s}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+@media(max-width:760px){
+  .tbl thead{display:none}
+  .tbl tr{display:block;border-bottom:1px solid var(--line);padding:10px 4px}
+  .tbl td{display:flex;justify-content:space-between;gap:10px;border:none;padding:5px 12px}
+  .tbl td::before{content:attr(data-l);color:var(--hint);font-size:11.5px;font-weight:700;flex-shrink:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>🏅 等级管理</h1>
+    <span id="whoami" class="mono"></span>
+    <div class="spacer"></div>
+    <button class="btn" onclick="location.href='/admin.html'">← 聊天管理</button>
+    <button class="btn" onclick="location.href='/admin-steam.html'">Steam 账号</button>
+    <button class="btn" onclick="location.href='/admin-cloud.html'">云游戏账号</button>
+    <button class="btn" onclick="location.href='/admin-update.html'">更新管理</button>
+    <button class="btn" onclick="location.href='/admin-points.html'">积分管理</button>
+    <button class="btn" onclick="location.href='/admin-gacha.html'">🎴 抽卡管理</button>
+    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
+    <button class="btn danger" onclick="logout()">退出</button>
+  </div>
+
+  <div id="deny" class="deny hidden">
+    <h2>需要管理员权限</h2>
+    <p>请用管理员账号登录后再访问本页</p>
+    <button class="btn pri" onclick="location.href='/'">去登录</button>
+  </div>
+
+  <div id="main" class="hidden">
+    <!-- 等级配置 -->
+    <div class="card">
+      <div class="card-h">
+        <h2>等级配置</h2>
+        <div class="spacer"></div>
+        <label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">
+          <input type="checkbox" id="cEnabled" style="width:auto"> 启用等级/经验
+        </label>
+        <button class="btn pri" id="cSaveBtn" onclick="saveConfig()">保存配置</button>
+        <button class="btn" onclick="loadConfig()">重新加载</button>
+      </div>
+      <div class="form">
+        <div class="fld"><label>等级阈值（升到该等级所需的累计经验；Lv0 固定为 0）</label>
+          <div class="th-box" id="thBox"></div>
+          <div class="hint">阈值必须为递增的非负整数。现有徽章图支持 Lv0–Lv6 共 7 档，请保持 7 个阈值。</div>
+        </div>
+        <div class="form-msg" id="cMsg"></div>
+      </div>
+
+      <div class="card-h" style="border-top:1px solid var(--line)"><h2>经验来源与每日上限</h2></div>
+      <div style="overflow-x:auto">
+        <table class="tbl src-tbl">
+          <thead><tr>
+            <th>来源</th><th>启用</th><th>单位经验</th><th>每日经验上限</th><th>每日次数上限</th><th>其他</th>
+          </tr></thead>
+          <tbody id="srcBody"></tbody>
+        </table>
+      </div>
+      <div class="form">
+        <div class="hint">说明：每日上限填 0 表示不限。群聊/私聊按「每日经验上限」封顶；兑换默认按「每日次数上限」封顶（各平台可自行调整）。签到可设「连签 N 天 ×倍率」加成。</div>
+      </div>
+    </div>
+
+    <!-- 老用户折算初始化 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>老用户经验折算初始化</h2>
+        <span class="mono" id="initInfo"></span>
+        <div class="spacer"></div>
+        <button class="btn" onclick="previewInit()">预览</button>
+        <button class="btn pri" onclick="runInit()">执行折算</button>
+      </div>
+      <div class="form">
+        <div class="hint">折算规则：注册天数×2（≤300）+ 发言数（≤800）+ 签到次数×10 + 现有积分×1。
+          仅对「尚无经验记录」的用户发放，可重复执行且不会重复发放；执行后用户经验明细会记一条「老用户折算」。</div>
+        <div id="initList" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- 用户经验列表 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>用户经验 / 等级</h2>
+        <div class="spacer"></div>
+        <input id="uFilter" placeholder="搜索用户名/昵称…" oninput="renderLevelUsers()"
+          style="padding:8px 12px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);font-size:13px;color:var(--text)">
+        <button class="btn" onclick="loadLevelUsers()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr>
+            <th>用户名</th><th>昵称</th><th>经验</th><th>等级</th><th>操作</th>
+          </tr></thead>
+          <tbody id="uBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 修改经验 -->
+<div class="modal" id="mExp">
+  <div class="modal-c">
+    <h3>修改经验</h3>
+    <div class="field"><label>用户</label><input id="eUser" readonly></div>
+    <div class="field"><label>当前经验 / 等级</label><input id="eNow" readonly></div>
+    <div class="field"><label>变动数量（正数增加 / 负数扣减）</label>
+      <input id="eDelta" type="number" step="1" placeholder="例如 100 或 -50"></div>
+    <div class="field"><label>备注（可选，会写入该用户的经验明细）</label>
+      <input id="eRemark" placeholder="例如 活动奖励 / 违规扣减" maxlength="50"></div>
+    <div class="form-msg" id="eMsg"></div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mExp')">取消</button>
+      <button class="btn pri" id="eSaveBtn" onclick="saveExp()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script>
+let CFG = null, SRC = [], LUSERS = [];
+const $ = (id) => document.getElementById(id);
+let tTimer; function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(tTimer); tTimer=setTimeout(()=>t.classList.remove('on'),2200); }
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtTime(ts){ if(!ts) return '—'; const d=new Date(ts); const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function cMsg(t, err){ const el=$('cMsg'); el.textContent = t || ''; el.className = 'form-msg ' + (err ? 'err' : 'ok'); }
+
+/* 主题（与其它后台页共用 localStorage key） */
+const ICONS={auto:'🌗 自动',light:'☀️ 浅色',dark:'🌙 深色'};
+function resolveTheme(mode){ if(mode==='light')return 'light'; if(mode==='dark')return 'dark';
+  const h=new Date().getHours(); return (h>=6&&h<18)?'light':'dark'; }
+function applyTheme(mode){ document.documentElement.dataset.mode=mode; document.documentElement.dataset.theme=resolveTheme(mode);
+  try{localStorage.setItem('chat_theme_mode',mode)}catch(e){} const b=$('themeBtn'); if(b) b.textContent=ICONS[mode]; }
+function cycleTheme(){ const o=['auto','light','dark']; const cur=document.documentElement.dataset.mode||'auto';
+  applyTheme(o[(o.indexOf(cur)+1)%o.length]); }
+(function(){ let s='auto'; try{s=localStorage.getItem('chat_theme_mode')||'auto'}catch(e){} applyTheme(s); })();
+
+/* ---------- 配置 ---------- */
+async function loadConfig(){
+  const r = await fetch('/api/admin/level-config'); const d = await r.json().catch(()=>({}));
+  if(!d.ok){ toast(d.error || d.detail || '加载失败'); return; }
+  CFG = d.config || {}; SRC = d.sources || [];
+  $('cEnabled').checked = !!CFG.enabled;
+  renderThresholds(CFG.thresholds || []);
+  renderSources(SRC);
+  $('initInfo').textContent = d.initAt ? ('上次初始化：' + fmtTime(d.initAt)) : '尚未执行过折算初始化';
+}
+function renderThresholds(th){
+  $('thBox').innerHTML = th.map((v,i)=>`
+    <div class="fld">
+      <label>Lv${i} 所需经验</label>
+      <input type="number" min="0" step="1" class="thv" value="${v}" ${i===0?'readonly':''}>
+    </div>`).join('');
+}
+function extraFields(s){
+  if(s.key === 'daily_login')
+    return `<label style="display:inline-flex;gap:6px;align-items:center;font-size:12.5px">
+      <input type="checkbox" class="s-once" data-k="${s.key}" ${s.oncePerDay?'checked':''} style="width:auto"> 每天只发 1 次</label>`;
+  if(s.key === 'signin')
+    return `<label style="font-size:12.5px">连签≥<input type="number" min="0" step="1" class="s-sd" data-k="${s.key}" value="${s.streakDays||0}" style="width:56px"> 天 ×
+      <input type="number" min="1" step="0.1" class="s-sm" data-k="${s.key}" value="${s.streakMultiplier||1}" style="width:64px"></label>`;
+  return '<span class="mono">—</span>';
+}
+function renderSources(list){
+  $('srcBody').innerHTML = list.map(s=>`
+    <tr>
+      <td data-l="来源"><b>${esc(s.name)}</b><div class="mono">${esc(s.key)}</div></td>
+      <td data-l="启用"><input type="checkbox" class="s-en" data-k="${s.key}" ${s.enabled?'checked':''}></td>
+      <td data-l="单位经验"><input type="number" min="0" step="1" class="s-exp" data-k="${s.key}" value="${s.exp}" style="width:92px"></td>
+      <td data-l="每日经验上限"><input type="number" min="0" step="1" class="s-cap" data-k="${s.key}" value="${s.dailyCap||0}" style="width:92px" title="0 = 不限"></td>
+      <td data-l="每日次数上限"><input type="number" min="0" step="1" class="s-ccap" data-k="${s.key}" value="${s.dailyCountCap||0}" style="width:92px" title="0 = 不限"></td>
+      <td data-l="其他">${extraFields(s)}</td>
+    </tr>`).join('');
+}
+async function saveConfig(){
+  const th = [...document.querySelectorAll('.thv')].map(i=>Number(i.value));
+  if(th.length < 2 || th[0] !== 0 || th.some((v,i)=>!Number.isInteger(v) || v < 0 || (i > 0 && v <= th[i-1]))){
+    cMsg('阈值需为不重复递增的非负整数，且第 1 档固定为 0', true); return;
+  }
+  const sources = {};
+  SRC.forEach(s=>{
+    const q = sel => document.querySelector(`${sel}[data-k="${s.key}"]`);
+    const en = q('.s-en'), ex = q('.s-exp'), cap = q('.s-cap'), ccap = q('.s-ccap'), once = q('.s-once'), sd = q('.s-sd'), sm = q('.s-sm');
+    const spec = {
+      enabled: en ? en.checked : !!s.enabled,
+      exp: ex ? (Number(ex.value) || 0) : s.exp,
+      dailyCap: cap ? (Number(cap.value) || 0) : 0,
+      dailyCountCap: ccap ? (Number(ccap.value) || 0) : 0,
+    };
+    if(once) spec.oncePerDay = once.checked;
+    if(sd) spec.streakDays = Number(sd.value) || 0;
+    if(sm) spec.streakMultiplier = Number(sm.value) || 1;
+    sources[s.key] = spec;
+  });
+  const body = { enabled: $('cEnabled').checked, thresholds: th, sources };
+  const btn = $('cSaveBtn'); btn.disabled = true;
+  try{
+    const r = await fetch('/api/admin/level-config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ cMsg('保存失败：' + (d.detail || d.error || '未知错误'), true); return; }
+    cMsg('✅ 已保存');
+    toast('等级配置已保存');
+    loadConfig();
+  } catch(e){ cMsg('保存失败：' + e.message, true); }
+  finally { btn.disabled = false; }
+}
+
+/* ---------- 老用户折算 ---------- */
+async function previewInit(){
+  const d = await (await fetch('/api/admin/level-init', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({preview:true})})).json().catch(()=>({}));
+  if(!d.ok){ toast(d.error || '预览失败'); return; }
+  renderInitPreview(d.users || [], d.count || 0, true);
+}
+async function runInit(){
+  const pre = await (await fetch('/api/admin/level-init', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({preview:true})})).json().catch(()=>({}));
+  const n = (pre && pre.count) || 0;
+  if(!n){ toast('没有需要折算的用户（都已初始化）'); return; }
+  if(!confirm(`将对 ${n} 个尚未有经验记录的用户执行折算初始化，写入后不会重复发放。\n\n确定执行？`)) return;
+  const d = await (await fetch('/api/admin/level-init', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({})})).json().catch(()=>({}));
+  if(!d.ok){ toast(d.error || '执行失败'); return; }
+  toast('已初始化 ' + (d.applied || 0) + ' 个用户');
+  renderInitPreview(d.users || [], d.applied || 0, false);
+  loadConfig(); loadLevelUsers();
+}
+function renderInitPreview(users, count, isPreview){
+  const box = $('initList');
+  if(!users.length){ box.innerHTML = '<div class="empty">没有需要折算的用户（都已初始化）</div>'; return; }
+  box.innerHTML = `<div class="mono" style="margin-bottom:8px">${isPreview ? '预览' : '本次已初始化'}：${count} 人</div>` +
+    users.slice(0, 300).map(u=>`<div style="display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--line-soft);font-size:13px;flex-wrap:wrap">
+      <div style="min-width:120px;font-weight:600">${esc(u.username)}</div>
+      <div class="mono">注册${u.regDays}天(+${u.regExp}) · 发言${u.msgCount}(+${u.msgExp}) · 签到${u.signinCount}次(+${u.signinExp}) · 积分${u.points}(+${u.pointsExp})</div>
+      <div style="margin-left:auto;font-weight:700;color:#10B981">= ${u.exp} 经验 · Lv${u.level}</div>
+    </div>`).join('');
+}
+
+/* ---------- 用户经验列表 ---------- */
+async function loadLevelUsers(){
+  const r = await fetch('/api/admin/level-users?limit=500'); const d = await r.json().catch(()=>({}));
+  if(!d.ok){ toast(d.error || '加载失败'); return; }
+  LUSERS = d.users || [];
+  renderLevelUsers();
+}
+function renderLevelUsers(){
+  const kw = ($('uFilter').value || '').trim().toLowerCase();
+  const list = LUSERS.filter(u => !kw || (u.username||'').toLowerCase().includes(kw) || (u.nickname||'').toLowerCase().includes(kw));
+  if(!list.length){ $('uBody').innerHTML = '<tr><td colspan="5" class="empty">没有匹配的用户</td></tr>'; return; }
+  $('uBody').innerHTML = list.map(u=>{
+    const lv = Math.max(0, Math.min(6, Number(u.level) || 0));
+    return `<tr>
+      <td data-l="用户名"><b>${esc(u.username)}</b>${u.isAdmin?'<span class="chip">管理员</span>':''}${u.active?'':'<span class="chip red">已停用</span>'}</td>
+      <td data-l="昵称"><span class="mono">${esc(u.nickname || '—')}</span></td>
+      <td data-l="经验"><b style="color:#10B981">${esc(u.exp)}</b></td>
+      <td data-l="等级"><img class="lv-badge" src="/img/level/lv${lv}.svg" alt="" style="margin-right:5px">Lv${lv}</td>
+      <td data-l="操作"><div class="acts"><button onclick="openExp(${u.id})">改经验</button></div></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ---------- 改经验 ---------- */
+let expTarget = null;
+function openExp(id){
+  const u = LUSERS.find(x=>x.id===id); if(!u) return;
+  expTarget = id;
+  $('eUser').value = u.username + (u.nickname ? '（' + u.nickname + '）' : '');
+  $('eNow').value = '经验 ' + (u.exp ?? 0) + ' · Lv' + (u.level ?? 0);
+  $('eDelta').value = '';
+  $('eRemark').value = '';
+  $('eMsg').textContent = ''; $('eMsg').className = 'form-msg';
+  $('mExp').classList.add('on');
+}
+async function saveExp(){
+  const v = $('eDelta').value.trim();
+  const delta = Number(v);
+  if(!v || !Number.isInteger(delta) || delta === 0){
+    $('eMsg').textContent = '请填写非 0 整数（正数增加、负数扣减）'; $('eMsg').className = 'form-msg err'; return;
+  }
+  const btn = $('eSaveBtn'); btn.disabled = true;
+  try{
+    const r = await fetch('/api/admin/level-exp', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ userId: expTarget, delta, remark: $('eRemark').value.trim() }) });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ $('eMsg').textContent = (d.detail || d.error || '保存失败'); $('eMsg').className = 'form-msg err'; return; }
+    toast(`已调整 ${delta > 0 ? '+' : ''}${delta}，当前经验 ${d.exp}（Lv${d.level}）`);
+    closeModal('mExp'); loadLevelUsers();
+  } catch(e){ $('eMsg').textContent = '保存失败：' + e.message; $('eMsg').className = 'form-msg err'; }
+  finally { btn.disabled = false; }
+}
+function closeModal(id){ $(id).classList.remove('on'); }
+async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
+
+/* 启动 */
+(async function(){
+  const r = await fetch('/api/me'); const d = await r.json();
+  if(!d.ok || !d.user || !d.user.isAdmin){ $('deny').classList.remove('hidden'); return; }
+  $('whoami').textContent = '@' + d.user.username;
+  $('main').classList.remove('hidden');
+  loadConfig();
+  loadLevelUsers();
+})();
+</script>
+</body>
+</html>

@@ -17,6 +17,7 @@ from typing import Optional
 from fastapi import APIRouter, Body, Depends, File, Form, Header, Request, Response, UploadFile
 
 from .. import chat_logic as CL
+from .. import levelcore as LV
 from .. import security
 from ..config import (AVATAR_DIR, MAX_AVATAR, MAX_STICKER, MAX_UPLOAD, STICKER_DIR, UPLOAD_DIR)
 from ..db import execute, query_all, query_one
@@ -33,6 +34,30 @@ _STICKER_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 
 def _now() -> int:
     return security.now_ms()
+
+
+def _grant_daily_login(user_id: int) -> None:
+    """每日首登经验（每人每天只发一次；失败静默，绝不影响登录）。"""
+    try:
+        LV.grant(user_id, "daily_login", ref=LV.bj_day(), remark="每日首登")
+    except Exception:
+        pass
+
+
+def _attach_redpackets(msgs: list, viewer_id: int) -> None:
+    """给消息列表里的红包消息补一份简报，供前端卡片直接渲染（批量查询，避免逐条）。"""
+    ids = [m.get("redpacketId") for m in msgs if m.get("redpacketId")]
+    if not ids:
+        return
+    try:
+        from .. import redpacket as RP
+        mp = RP.briefs(ids, viewer_id)
+    except Exception:
+        return
+    for m in msgs:
+        rid = m.get("redpacketId")
+        if rid and mp.get(rid):
+            m["redpacket"] = mp[rid]
 
 
 # MIME encoded-word（RFC2047）：=?charset?B/Q?text?=
@@ -173,6 +198,7 @@ def register(request: Request, response: Response, payload: dict = Body(...)):
         "INSERT INTO users (username, password_hash, nickname, email, created_at, reg_ip) VALUES (?,?,?,?,?,?)",
         (username, security.hash_password(password), nickname, email, _now(), _client_ip(request)))
     _issue_session(response, uid, device_id, request)
+    _grant_daily_login(uid)
     u = query_one("SELECT * FROM users WHERE id = ?", (uid,))
     return {"ok": True, "user": user_public(u)}
 
@@ -190,6 +216,8 @@ def login(request: Request, response: Response, payload: dict = Body(...)):
         execute("UPDATE users SET password_hash = ? WHERE id = ?", (security.hash_password(password), u["id"]))
     execute("UPDATE users SET last_login_at = ? WHERE id = ?", (_now(), u["id"]))
     _issue_session(response, u["id"], str(payload.get("deviceId", "")), request)
+    _grant_daily_login(u["id"])
+    u = query_one("SELECT * FROM users WHERE id = ?", (u["id"],))   # 重读：拿下最新经验
     return {"ok": True, "user": user_public(u)}
 
 
@@ -293,33 +321,43 @@ def users(request: Request, authorization: Optional[str] = Header(default=None))
     if not u:
         return _err("请先登录", 401)
     online_ids = {r["user_id"] for r in query_all("SELECT user_id FROM online")}
-    # lastSeen = 最后登录 / 最后在线 / 最后发言 三者取最大（毫秒），供前端“上次登录时间”展示。
-    # 之前未下发该字段，前端 fmtAgo 收到空值便恒显示“从未登录过”。
+    # lastSeen = 最后登录 / 最后在线 / 会话活跃 / 最后发言 取最大（毫秒），
+    # 与后台「最后活跃」口径保持一致（会话活跃来自 sessions.last_seen，浏览器打开页面即会刷新）。
     rows = query_all(
-        "SELECT u.id, u.username, u.nickname, u.avatar, u.last_login_at, "
+        "SELECT u.id, u.username, u.nickname, u.avatar, u.last_login_at, u.is_ai, "
         "(SELECT MAX(o.last_seen) FROM online o WHERE o.user_id = u.id) AS online_seen, "
-        "(SELECT MAX(m.created_at) FROM messages m WHERE m.from_id = u.id) AS msg_seen "
-        "FROM users u WHERE u.is_active=1 AND u.is_admin=0 ORDER BY u.id DESC")
+        "(SELECT MAX(s.last_seen) FROM sessions s WHERE s.user_id = u.id) AS session_seen, "
+        "(SELECT MAX(m.created_at) FROM messages m WHERE m.from_id = u.id) AS msg_seen, "
+        "COALESCE(e.exp, 0) AS exp "
+        "FROM users u LEFT JOIN user_exp e ON e.user_id = u.id "
+        "WHERE u.is_active=1 AND u.is_admin=0 ORDER BY u.id DESC")
     out = []
     for r in rows:
-        last_seen = max(r["last_login_at"] or 0, r["online_seen"] or 0, r["msg_seen"] or 0)
+        login_seen = r["last_login_at"] or 0
+        if 0 < login_seen < 1_000_000_000_000:
+            login_seen *= 1000    # 兼容旧数据：云游戏登录曾把「秒」写进毫秒字段
+        last_seen = max(login_seen, r["online_seen"] or 0,
+                        r["session_seen"] or 0, r["msg_seen"] or 0)
         out.append({"id": r["id"], "username": r["username"], "nickname": r["nickname"],
                     "avatar": r["avatar"] or "", "displayName": CL.display_name(r),
-                    "online": r["id"] in online_ids, "lastSeen": last_seen})
+                    "level": LV.level_of(r["exp"]), "exp": int(r["exp"] or 0),
+                    "online": r["id"] in online_ids, "lastSeen": last_seen,
+                    "isAi": bool(r["is_ai"])})
     return {"ok": True, "users": out}
 
 
 @router.get("/history")
-def history(request: Request, room: str = "group", limit: int = 80, before: int = 0,
+def history(request: Request, room: str = "group", limit: int = 500, before: int = 0,
             authorization: Optional[str] = Header(default=None)):
     u = _me(None, request, authorization)
     if not u:
         return _err("请先登录", 401)
-    limit = min(limit, 200)
+    limit = max(1, min(limit, 500))
     # LEFT JOIN：用户被后台删除后，其历史消息仍可正常显示（显示为“已注销用户”）
     base = ("SELECT m.*, COALESCE(NULLIF(w.nickname,''), w.username, '已注销用户') AS from_name, "
-            "COALESCE(w.avatar,'') AS from_avatar "
-            "FROM messages m LEFT JOIN users w ON w.id = m.from_id ")
+            "COALESCE(w.avatar,'') AS from_avatar, COALESCE(e.exp, 0) AS from_exp "
+            "FROM messages m LEFT JOIN users w ON w.id = m.from_id "
+            "LEFT JOIN user_exp e ON e.user_id = m.from_id ")
     if room == "group":
         if before:
             rows = query_all(base + "WHERE m.room='group' AND m.id < ? ORDER BY m.id DESC LIMIT ?", (before, limit))
@@ -337,6 +375,7 @@ def history(request: Request, room: str = "group", limit: int = 80, before: int 
         else:
             rows = query_all(base + "WHERE m.room=? ORDER BY m.id DESC LIMIT ?", (room, limit))
     lst = [CL.shape_msg(r, u) for r in reversed(rows)]
+    _attach_redpackets(lst, u["id"])
     return {"ok": True, "messages": lst, "hasMore": len(rows) == limit}
 
 
@@ -423,11 +462,14 @@ def search(request: Request, q: str = "", type: str = "", sender: str = "", room
         where.append("m.created_at <= ?")
         params.append(to)
     sql = ("SELECT m.*, COALESCE(NULLIF(w.nickname,''), w.username, '已注销用户') AS from_name, "
-           "COALESCE(w.avatar,'') AS from_avatar "
-           "FROM messages m LEFT JOIN users w ON w.id = m.from_id WHERE " + " AND ".join(where) +
+           "COALESCE(w.avatar,'') AS from_avatar, COALESCE(e.exp, 0) AS from_exp "
+           "FROM messages m LEFT JOIN users w ON w.id = m.from_id "
+           "LEFT JOIN user_exp e ON e.user_id = m.from_id WHERE " + " AND ".join(where) +
            " ORDER BY m.id DESC LIMIT ? OFFSET ?")
     rows = query_all(sql, (*params, limit, offset))
-    return {"ok": True, "messages": [CL.shape_msg(r, u) for r in rows], "count": len(rows),
+    msgs = [CL.shape_msg(r, u) for r in rows]
+    _attach_redpackets(msgs, u["id"])
+    return {"ok": True, "messages": msgs, "count": len(rows),
             "hasMore": len(rows) == limit, "nextOffset": offset + len(rows)}
 
 
@@ -457,6 +499,11 @@ async def upload_file(request: Request, file: UploadFile = File(...),
     sub = "images" if is_img else ("videos" if is_vid else "files")
     name = f"{_now()}-{security.gen_token(6)}{ext[:12]}"
     (UPLOAD_DIR / sub / name).write_bytes(data)
+    # 发送文件经验（图片/视频/文件都算；每天有上限）
+    try:
+        LV.grant(u["id"], "upload", ref=(raw_name or name)[:80], remark="发送文件")
+    except Exception:
+        pass
     return {"ok": True, "url": f"/uploads/{sub}/{name}", "name": raw_name or name,
             "size": len(data), "isImage": is_img, "isVideo": is_vid}
 
@@ -520,3 +567,67 @@ def delete_sticker(sticker_id: int, request: Request, authorization: Optional[st
         return _err("表情不存在", 404)
     execute("UPDATE stickers SET active=0 WHERE id=?", (sticker_id,))
     return {"ok": True}
+
+
+# ---------------- 联系人备注 / 置顶 ----------------
+# 每个用户只影响自己看到的联系人：给别人备注、把某人（含小火人）置顶/取消置顶。
+@router.get("/contacts")
+def contacts(request: Request, authorization: Optional[str] = Header(default=None)):
+    u = _me(None, request, authorization)
+    if not u:
+        return _err("请先登录", 401)
+    uid = u["id"]
+    rows = query_all("SELECT peer_id, note, pinned FROM contact_notes WHERE owner_id = ?", (uid,))
+    notes: dict = {}
+    pinned: set = set()
+    for r in rows:
+        if r["note"]:
+            notes[str(r["peer_id"])] = r["note"]
+        if r["pinned"]:
+            pinned.add(int(r["peer_id"]))
+    # 小火人默认置顶：没有记录（或仍为置顶）就算置顶；用户取消后不再自动置顶
+    ai = query_one("SELECT id FROM users WHERE is_ai = 1 LIMIT 1")
+    ai_id = int(ai["id"]) if ai else 0
+    if ai_id:
+        has = query_one("SELECT pinned FROM contact_notes WHERE owner_id = ? AND peer_id = ?", (uid, ai_id))
+        if has is None or int(has["pinned"] or 0) == 1:
+            pinned.add(ai_id)
+    return {"ok": True, "notes": notes, "pinned": sorted(pinned), "aiId": ai_id}
+
+
+@router.post("/contacts/note")
+def set_contact_note(request: Request, payload: dict = Body(...),
+                     authorization: Optional[str] = Header(default=None)):
+    u = _me(None, request, authorization)
+    if not u:
+        return _err("请先登录", 401)
+    peer = int(payload.get("peerId") or 0)
+    note = str(payload.get("note") or "").strip()[:30]
+    if peer <= 0 or peer == u["id"]:
+        return _err("联系人无效")
+    if not query_one("SELECT id FROM users WHERE id = ?", (peer,)):
+        return _err("用户不存在", 404)
+    execute(
+        "INSERT INTO contact_notes (owner_id, peer_id, note, pinned, updated_at) VALUES (?, ?, ?, 0, ?) "
+        "ON CONFLICT(owner_id, peer_id) DO UPDATE SET note = excluded.note, updated_at = excluded.updated_at",
+        (u["id"], peer, note, security.now_ms()))
+    return {"ok": True, "note": note}
+
+
+@router.post("/contacts/pin")
+def set_contact_pin(request: Request, payload: dict = Body(...),
+                    authorization: Optional[str] = Header(default=None)):
+    u = _me(None, request, authorization)
+    if not u:
+        return _err("请先登录", 401)
+    peer = int(payload.get("peerId") or 0)
+    pinned = 1 if payload.get("pinned") else 0
+    if peer <= 0 or peer == u["id"]:
+        return _err("联系人无效")
+    if not query_one("SELECT id FROM users WHERE id = ?", (peer,)):
+        return _err("用户不存在", 404)
+    execute(
+        "INSERT INTO contact_notes (owner_id, peer_id, note, pinned, updated_at) VALUES (?, ?, '', ?, ?) "
+        "ON CONFLICT(owner_id, peer_id) DO UPDATE SET pinned = excluded.pinned, updated_at = excluded.updated_at",
+        (u["id"], peer, pinned, security.now_ms()))
+    return {"ok": True, "pinned": bool(pinned)}

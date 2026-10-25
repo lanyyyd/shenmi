@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-mode="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 设置 · 管理后台</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+body{overflow:auto}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:26px 18px 60px}
+.top{display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.top h1{font-size:21px;font-weight:800;letter-spacing:-.3px}
+.top .spacer{flex:1}
+.btn{padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;transition:.2s;
+  background:var(--panel);border:1px solid var(--line);color:var(--text)}
+html[data-theme="light"] .btn:not(.pri){background:#fff}
+.btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn.pri{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;border:none}
+.btn.pri:hover{filter:brightness(1.08);color:#fff}
+.btn.danger{color:#EF4444}
+.btn.danger:hover{border-color:#EF4444}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur)}
+html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
+.card-h{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.card-h h2{font-size:15px;font-weight:700}
+.card-h .spacer{flex:1}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
+.deny{text-align:center;padding:80px 20px}.deny h2{font-size:19px;margin-bottom:10px}
+.deny p{color:var(--muted);font-size:13.5px;margin-bottom:20px}
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(20px);z-index:300;
+  padding:11px 20px;border-radius:11px;font-size:13.5px;font-weight:600;color:#fff;
+  background:linear-gradient(135deg,var(--primary),var(--primary-2));opacity:0;pointer-events:none;transition:.25s}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+/* 表单 */
+.form{padding:16px 18px}
+.fld{margin-bottom:14px}
+.fld>label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:7px}
+.fld input,.fld textarea{width:100%;padding:10px 13px;border-radius:10px;font-size:13.5px;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+.fld input:focus,.fld textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-l)}
+.fld textarea{resize:vertical;line-height:1.7;font-family:inherit}
+.fld .row{display:flex;gap:8px;align-items:center}
+.fld .row input{flex:1;min-width:0}
+.sw{display:inline-flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;cursor:pointer;user-select:none}
+.sw input{width:auto}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.grid2 .fld{margin-bottom:0}
+.hint{font-size:12px;color:var(--hint);margin-top:6px;line-height:1.7}
+.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>🔥 AI 设置 · 小火人</h1>
+    <span id="whoami" class="mono"></span>
+    <div class="spacer"></div>
+    <button class="btn" onclick="location.href='/admin.html'">← 聊天管理</button>
+    <button class="btn" onclick="location.href='/admin-steam.html'">Steam 账号</button>
+    <button class="btn" onclick="location.href='/admin-cloud.html'">云游戏账号</button>
+    <button class="btn" onclick="location.href='/admin-points.html'">积分管理</button>
+    <button class="btn" onclick="location.href='/admin-level.html'">🏅 等级管理</button>
+    <button class="btn" onclick="location.href='/admin-gacha.html'">🎴 抽卡管理</button>
+    <button class="btn" onclick="location.href='/admin-update.html'">📦 更新管理</button>
+    <button class="btn" onclick="location.href='/admin-ai-image.html'">🖼️ AI 生图</button>
+    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
+    <button class="btn danger" onclick="logout()">退出</button>
+  </div>
+
+  <div id="deny" class="deny hidden">
+    <h2>需要管理员权限</h2>
+    <p>请用管理员账号登录后再访问本页</p>
+    <button class="btn pri" onclick="location.href='/'">去登录</button>
+  </div>
+
+  <div id="main" class="hidden">
+    <div class="mono" style="margin-bottom:16px;line-height:1.8">
+      在这里填写 API Key / 模型 / 接口地址；私聊与群聊 @ 都由小火人自动回复，主动发言可在本页开关。
+    </div>
+
+    <!-- 基础 -->
+    <div class="card">
+      <div class="card-h"><h2>基础</h2></div>
+      <div class="form">
+        <div class="fld">
+          <label class="sw"><input type="checkbox" id="enabled"> 启用小火人</label>
+          <div class="hint">关闭后小火人不再回复私聊与群聊 @。</div>
+        </div>
+        <div class="fld"><label>显示名</label>
+          <input id="name" placeholder="小火人" maxlength="20">
+          <div class="hint">显示在聊天里的名字（会同步到 AI 账号昵称）。</div>
+        </div>
+        <div class="fld"><label>接口地址（base_url）</label>
+          <input id="base_url" placeholder="https://api.deepseek.com">
+          <div class="hint">OpenAI 兼容接口地址，末尾不带 /。</div>
+        </div>
+        <div class="fld"><label>API Key</label>
+          <div class="row">
+            <input id="api_key" type="password" placeholder="sk-... 留空则小火人回复「未配置」提示">
+            <button class="btn" id="keyToggle" onclick="toggleKey()">显示</button>
+            <button class="btn danger" onclick="clearKey()">清空</button>
+          </div>
+        </div>
+        <div class="fld"><label>模型名称</label>
+          <input id="model" placeholder="deepseek-flash">
+        </div>
+      </div>
+    </div>
+
+    <!-- 人设 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h"><h2>人设</h2></div>
+      <div class="form">
+        <div class="fld"><label>私聊人设</label>
+          <textarea id="persona_private" rows="5" placeholder="描述小火人在私聊里的语气、风格与边界"></textarea>
+        </div>
+        <div class="fld"><label>群聊人设</label>
+          <textarea id="persona_group" rows="5" placeholder="描述小火人在群聊被 @ 时的语气、风格与边界"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- 主动发言 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h"><h2>主动发言</h2></div>
+      <div class="form">
+        <div class="fld">
+          <label class="sw"><input type="checkbox" id="active_speak"> 开启主动发言</label>
+          <div class="hint">开启后，群聊安静到设定时长时小火人会主动说话。</div>
+        </div>
+        <div class="grid2">
+          <div class="fld"><label>静默秒数（群聊静默多久后才主动发言）</label>
+            <input id="active_gap_sec" type="number" min="0" step="1" placeholder="600">
+          </div>
+          <div class="fld"><label>每日主动发言上限</label>
+            <input id="active_daily_limit" type="number" min="0" step="1" placeholder="20">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 高级 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h"><h2>高级</h2></div>
+      <div class="form">
+        <div class="grid2">
+          <div class="fld"><label>上下文条数（max_context）</label>
+            <input id="max_context" type="number" min="0" step="1" placeholder="20">
+          </div>
+          <div class="fld"><label>单次最大 token（max_tokens）</label>
+            <input id="max_tokens" type="number" min="1" step="1" placeholder="700">
+          </div>
+          <div class="fld"><label>温度（temperature）</label>
+            <input id="temperature" type="number" min="0" max="2" step="0.1" placeholder="0.8">
+          </div>
+          <div class="fld"><label>最小回复间隔秒（cooldown_sec）</label>
+            <input id="cooldown_sec" type="number" min="0" step="1" placeholder="3">
+          </div>
+          <div class="fld"><label>群聊被 @ 每日上限（group_daily_limit）</label>
+            <input id="group_daily_limit" type="number" min="0" step="1" placeholder="300">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:20px">
+      <button class="btn pri" id="saveBtn" onclick="saveConfig()">保存</button>
+      <button class="btn" onclick="loadConfig()">重新加载</button>
+    </div>
+    <div class="form-msg" id="msg" style="text-align:left;margin-top:12px"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+let tTimer; function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(tTimer); tTimer=setTimeout(()=>t.classList.remove('on'),2200); }
+
+/* 主题（与聊天管理页共用 localStorage key） */
+const ICONS={auto:'🌗 自动',light:'☀️ 浅色',dark:'🌙 深色'};
+function resolveTheme(mode){ if(mode==='light')return 'light'; if(mode==='dark')return 'dark';
+  const h=new Date().getHours(); return (h>=6&&h<18)?'light':'dark'; }
+function applyTheme(mode){ document.documentElement.dataset.mode=mode; document.documentElement.dataset.theme=resolveTheme(mode);
+  try{localStorage.setItem('chat_theme_mode',mode)}catch(e){} const b=$('themeBtn'); if(b) b.textContent=ICONS[mode]; }
+function cycleTheme(){ const o=['auto','light','dark']; const cur=document.documentElement.dataset.mode||'auto';
+  applyTheme(o[(o.indexOf(cur)+1)%o.length]); }
+(function(){ let s='auto'; try{s=localStorage.getItem('chat_theme_mode')||'auto'}catch(e){} applyTheme(s); })();
+
+/* 表单字段（字符串/数字/布尔） */
+const TEXT_FIELDS = ['name','base_url','model','persona_private','persona_group'];
+const NUM_FIELDS  = ['active_gap_sec','active_daily_limit','max_context','max_tokens','temperature','cooldown_sec','group_daily_limit'];
+const BOOL_FIELDS = ['enabled','active_speak'];
+
+function setMsg(t, err){ const el=$('msg'); if(!el) return;
+  el.textContent = t || ''; el.className = 'form-msg ' + (err ? 'err' : 'ok'); }
+
+/* 显示/隐藏 API Key */
+function toggleKey(){
+  const inp = $('api_key');
+  const show = inp.type === 'password';
+  inp.type = show ? 'text' : 'password';
+  $('keyToggle').textContent = show ? '隐藏' : '显示';
+}
+/* 清空 API Key */
+function clearKey(){ $('api_key').value = ''; setMsg('已清空 API Key（记得点「保存」生效）'); }
+
+async function loadConfig(){
+  setMsg('加载中…');
+  try{
+    const r = await fetch('/api/admin/ai-config');
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ setMsg('加载失败：' + (d.detail || d.error || '未知错误'), true); toast('加载失败'); return; }
+    fillForm(d.config || {});
+    setMsg('');
+  }catch(e){ setMsg('加载失败：' + e.message, true); toast('加载失败'); }
+}
+function fillForm(c){
+  TEXT_FIELDS.forEach(k=>{ const el=$(k); if(el) el.value = (c[k] ?? ''); });
+  NUM_FIELDS.forEach(k=>{ const el=$(k); if(el) el.value = (c[k] ?? ''); });
+  BOOL_FIELDS.forEach(k=>{ const el=$(k); if(el) el.checked = !!c[k]; });
+  const kEl = $('api_key'); if(kEl) kEl.value = (c.api_key ?? '');
+  kEl && (kEl.type = 'password'); $('keyToggle').textContent = '显示';
+}
+async function saveConfig(){
+  const body = {};
+  TEXT_FIELDS.forEach(k=>{ body[k] = ($(k).value ?? '').trim(); });
+  BOOL_FIELDS.forEach(k=>{ body[k] = !!$(k).checked; });
+  for(const k of NUM_FIELDS){
+    const raw = ($(k).value ?? '').trim();
+    const n = Number(raw);
+    if(raw === '' || !isFinite(n)){ setMsg('「' + k + '」需要填写有效数字', true); toast('保存失败'); return; }
+    body[k] = n;
+  }
+  body.api_key = ($('api_key').value ?? '');
+  const btn = $('saveBtn'); btn.disabled = true;
+  setMsg('保存中…');
+  try{
+    const r = await fetch('/api/admin/ai-config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ setMsg('保存失败：' + (d.detail || d.error || '未知错误'), true); toast('保存失败'); return; }
+    fillForm(d.config || body);
+    setMsg('✅ 已保存');
+    toast('AI 配置已保存');
+  }catch(e){
+    setMsg('保存失败：' + e.message, true); toast('保存失败');
+  }finally{
+    btn.disabled = false;
+  }
+}
+async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
+
+/* 启动 */
+(async function(){
+  const r = await fetch('/api/me'); const d = await r.json();
+  if(!d.ok || !d.user || !d.user.isAdmin){ $('deny').classList.remove('hidden'); return; }
+  $('whoami').textContent = '@' + d.user.username;
+  $('main').classList.remove('hidden');
+  loadConfig();
+})();
+</script>
+</body>
+</html>

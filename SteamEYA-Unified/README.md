@@ -89,9 +89,7 @@ Steam 上号页的「远程账号」模式：登录统一账号后，一键从�
 - **离线→在线同步**：本地网关把离线消息标记为 `install_id + client_msg_id + synced=0`；联网后客户端调用
   `GET {本地}/api/sync/pending` → `POST {在线}/api/sync/push`（服务端按 `(install_id, client_msg_id)` 幂等去重）→
   `POST {本地}/api/sync/mark_synced`。**按消息真实 `created_at` 落库排序**；已同步的机器不再重复上传。
-- **局域网发现与互传**：UDP 广播自动发现同网段实例（默认端口 8899），并支持手动填 IP 兜底（`/api/lan/peers/add`）。
-  本机产生的新群聊消息会异步转发给所有已发现对端（`/api/lan/relay`，文件走 `/api/lan/relay/file` 落盘到对端），
-  对端落库后在本机聊天室广播，形成跨实例局域网群聊与文件互传（不经公网，按 `(install_id, client_msg_id)` 幂等去重）。
+- **局域网发现**：UDP 广播自动发现同网段实例（默认端口 8899），并支持手动填 IP 兜底（`/api/lan/peers/add`）。
 - **云存档**：植物大战僵尸支持自动备份（压缩 `yourdata` 上传）；我的世界「自动备份」置灰，仅支持拖入单个 `.zip`。
   共享存档显示上传者与时间，备注跟随上传者自己列表的备注。
 
@@ -108,7 +106,7 @@ Steam 上号页的「远程账号」模式：登录统一账号后，一键从�
 | 聊天 | `/api/*` + `/ws` | 与原聊天室完全一致（前端零改动） |
 | 离线同步 | `/api/sync` | push / pull / **pending** / **mark_synced** |
 | 云存档 | `/api/save` | upload / list / shared / download / remark / share / delete |
-| 局域网 | `/api/lan` | info / identity / peers / peers/add / relay / relay/file |
+| 局域网 | `/api/lan` | info / peers / peers/add |
 
 ---
 

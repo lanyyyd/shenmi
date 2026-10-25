@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-mode="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>导航 tips · 管理后台</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+body{overflow:auto}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:26px 18px 60px}
+.top{display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.top h1{font-size:21px;font-weight:800;letter-spacing:-.3px}
+.top .spacer{flex:1}
+.btn{padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;transition:.2s;
+  background:var(--panel);border:1px solid var(--line);color:var(--text)}
+html[data-theme="light"] .btn:not(.pri){background:#fff}
+.btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn.pri{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;border:none}
+.btn.pri:hover{filter:brightness(1.08);color:#fff}
+.btn.danger{color:#EF4444}
+.btn.danger:hover{border-color:#EF4444}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur)}
+html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
+.card-h{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.card-h h2{font-size:15px;font-weight:700}
+.card-h .spacer{flex:1}
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl th{text-align:left;padding:11px 14px;font-size:11.5px;font-weight:700;color:var(--hint);
+  border-bottom:1px solid var(--line);white-space:nowrap;letter-spacing:.4px}
+.tbl td{padding:12px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:var(--panel-soft)}
+html[data-theme="light"] .tbl tr:hover td{background:#FAFBFC}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
+.chip{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:6px;font-weight:700;
+  background:var(--primary-l);color:var(--primary)}
+.chip.gray{background:var(--panel-soft);color:var(--hint);border:1px solid var(--line)}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts button{font-size:12px;padding:5px 10px;border-radius:7px;background:var(--panel-soft);
+  border:1px solid var(--line);transition:.15s;color:var(--muted)}
+html[data-theme="light"] .acts button{background:#F7F8FA}
+.acts button:hover{border-color:var(--primary);color:var(--primary)}
+.acts button.dg:hover{border-color:#EF4444;color:#EF4444}
+.deny{text-align:center;padding:80px 20px}.deny h2{font-size:19px;margin-bottom:10px}
+.deny p{color:var(--muted);font-size:13.5px;margin-bottom:20px}
+.empty{text-align:center;color:var(--hint);padding:40px 0;font-size:13.5px}
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(20px);z-index:300;
+  padding:11px 20px;border-radius:11px;font-size:13.5px;font-weight:600;color:#fff;
+  background:linear-gradient(135deg,var(--primary),var(--primary-2));opacity:0;pointer-events:none;transition:.25s}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.form{padding:16px 18px}
+.fld{margin-bottom:14px}
+.fld>label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:7px}
+.fld input,.fld textarea{width:100%;padding:10px 13px;border-radius:10px;font-size:13.5px;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+.fld input:focus,.fld textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-l)}
+.hint{font-size:12px;color:var(--hint);margin-top:6px;line-height:1.7}
+.row{display:flex;gap:14px;flex-wrap:wrap}
+.row>.fld{flex:1;min-width:220px}
+textarea.cell{width:100%;min-height:58px;padding:8px 10px;border-radius:8px;font-size:13px;
+  background:var(--input-bg);border:1.5px solid transparent;color:var(--text);resize:vertical}
+textarea.cell:focus{border-color:var(--primary);outline:none}
+input.num{width:74px;padding:7px 9px;border-radius:8px;font-size:13px;text-align:center;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+input.num:focus{border-color:var(--primary);outline:none}
+.sw{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);cursor:pointer}
+@media(max-width:760px){
+  .tbl thead{display:none}
+  .tbl tr{display:block;border-bottom:1px solid var(--line);padding:10px 4px}
+  .tbl td{display:flex;justify-content:space-between;gap:10px;border:none;padding:5px 12px}
+  .tbl td::before{content:attr(data-l);color:var(--hint);font-size:11.5px;font-weight:700;flex-shrink:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>💬 导航 tips</h1>
+    <span id="whoami" class="mono"></span>
+    <div class="spacer"></div>
+    <button class="btn" onclick="location.href='/admin.html'">← 聊天管理</button>
+    <button class="btn" onclick="location.href='/admin-update.html'">📦 更新管理</button>
+    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
+    <button class="btn danger" onclick="logout()">退出</button>
+  </div>
+
+  <div id="deny" class="deny hidden">
+    <h2>需要管理员权限</h2>
+    <p>请用管理员账号登录后再访问本页</p>
+    <button class="btn pri" onclick="location.href='/'">去登录</button>
+  </div>
+
+  <div id="main" class="hidden">
+    <!-- 一言配置 -->
+    <div class="card">
+      <div class="card-h">
+        <h2>一言 API</h2>
+        <div class="spacer"></div>
+        <button class="btn" onclick="preview()">试取一条</button>
+      </div>
+      <div class="form">
+        <div class="fld">
+          <label>接口地址</label>
+          <input id="cfgApi" placeholder="https://v1.hitokoto.cn/?encode=text" maxlength="500">
+          <div class="hint">支持返回纯文本或 JSON（自动读取 <span class="mono">hitokoto</span> / <span class="mono">text</span> 字段）。仅允许 http/https。</div>
+        </div>
+        <div class="row">
+          <div class="fld">
+            <label>一言权重</label>
+            <input id="cfgWeight" type="number" min="0" max="1000" step="1" value="1">
+            <div class="hint">默认 1。设成 0 等于暂时不使用一言。</div>
+          </div>
+          <div class="fld">
+            <label>总开关</label>
+            <label class="sw" style="margin-top:10px">
+              <input id="cfgEnabled" type="checkbox" checked> 参与随机
+            </label>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <button class="btn pri" id="cfgBtn" onclick="saveConfig()">保存配置</button>
+          <span class="mono" id="ratioHint"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新增 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h"><h2>添加条目</h2></div>
+      <div class="form">
+        <div class="fld">
+          <label>显示内容</label>
+          <textarea id="newContent" rows="2" maxlength="200" placeholder="例如：今天也要顺顺利利。"></textarea>
+        </div>
+        <div class="row">
+          <div class="fld">
+            <label>权重</label>
+            <input id="newWeight" type="number" min="0" max="1000" step="1" value="10">
+            <div class="hint">权重越大越常出现；默认 10，约为一条一言的 10 倍。</div>
+          </div>
+        </div>
+        <button class="btn pri" id="addBtn" onclick="addTip()">添加</button>
+      </div>
+    </div>
+
+    <!-- 列表 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>条目列表</h2>
+        <div class="spacer"></div>
+        <button class="btn" onclick="loadAll()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr>
+            <th>内容</th><th style="width:90px">权重</th><th style="width:90px">启用</th><th style="width:110px">操作</th>
+          </tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+let TIPS = [], CFG = {};
+let tTimer;
+function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(tTimer); tTimer=setTimeout(()=>t.classList.remove('on'),2200); }
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* 主题（与其它管理页共用 localStorage key） */
+const ICONS={auto:'🌗 自动',light:'☀️ 浅色',dark:'🌙 深色'};
+function resolveTheme(mode){ if(mode==='light')return 'light'; if(mode==='dark')return 'dark';
+  const h=new Date().getHours(); return (h>=6&&h<18)?'light':'dark'; }
+function applyTheme(mode){ document.documentElement.dataset.mode=mode; document.documentElement.dataset.theme=resolveTheme(mode);
+  try{localStorage.setItem('chat_theme_mode',mode)}catch(e){} const b=$('themeBtn'); if(b) b.textContent=ICONS[mode]; }
+function cycleTheme(){ const o=['auto','light','dark']; const cur=document.documentElement.dataset.mode||'auto';
+  applyTheme(o[(o.indexOf(cur)+1)%o.length]); }
+(function(){ let s='auto'; try{s=localStorage.getItem('chat_theme_mode')||'auto'}catch(e){} applyTheme(s); })();
+
+async function loadAll(){
+  const r = await fetch('/api/admin/tips');
+  const d = await r.json().catch(()=>({}));
+  if(!d.ok){ toast(d.detail || d.error || '加载失败'); return; }
+  TIPS = d.tips || []; CFG = d.config || {};
+  $('cfgApi').value = CFG.api || '';
+  $('cfgWeight').value = CFG.hitokotoWeight ?? 1;
+  $('cfgEnabled').checked = !!CFG.hitokotoEnabled;
+  render(); updateRatio();
+}
+
+function render(){
+  if(!TIPS.length){
+    $('tbody').innerHTML = '<tr><td colspan="4" class="empty">还没有手动条目，当前只靠一言</td></tr>';
+    return;
+  }
+  $('tbody').innerHTML = TIPS.map(x=>`
+    <tr>
+      <td data-l="内容">
+        <textarea class="cell" onblur="saveContent(${x.id}, this)" onkeydown="if(event.key==='Enter'&&event.ctrlKey){this.blur();}">${esc(x.content)}</textarea>
+      </td>
+      <td data-l="权重"><input class="num" type="number" min="0" max="1000" value="${x.weight}" onchange="saveWeight(${x.id}, this.value)"></td>
+      <td data-l="启用"><label class="sw"><input type="checkbox" ${x.active?'checked':''} onchange="saveActive(${x.id}, this.checked)"></label></td>
+      <td data-l="操作"><div class="acts">
+        <button class="dg" onclick="delTip(${x.id})">删除</button>
+      </div></td>
+    </tr>`).join('');
+}
+
+function updateRatio(){
+  const manual = TIPS.filter(x=>x.active).reduce((a,x)=>a+Number(x.weight||0),0);
+  const hk = $('cfgEnabled').checked ? Math.max(0, Number($('cfgWeight').value)||0) : 0;
+  const total = manual + hk;
+  if(total <= 0){ $('ratioHint').textContent = '当前没有任何可抽内容'; return; }
+  const pct = (v)=> (v/total*100).toFixed(v/total > 0.995 ? 0 : 1);
+  $('ratioHint').textContent = `手动 ${pct(manual)}% · 一言 ${pct(hk)}%`;
+}
+$('cfgWeight').addEventListener('input', updateRatio);
+$('cfgEnabled').addEventListener('change', updateRatio);
+
+async function saveConfig(){
+  const btn = $('cfgBtn'); btn.disabled = true;
+  try {
+    const r = await fetch('/api/admin/tips/config', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        api: $('cfgApi').value.trim(),
+        hitokotoWeight: Number($('cfgWeight').value) || 0,
+        hitokotoEnabled: $('cfgEnabled').checked,
+      })
+    });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ toast(d.detail || d.error || '保存失败'); return; }
+    toast('配置已保存');
+    loadAll();
+  } finally { btn.disabled = false; }
+}
+
+async function addTip(){
+  const content = $('newContent').value.trim();
+  if(!content){ toast('请填写内容'); return; }
+  const btn = $('addBtn'); btn.disabled = true;
+  try {
+    const r = await fetch('/api/admin/tips', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ content, weight: Number($('newWeight').value) || 10, active: true })
+    });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ toast(d.detail || d.error || '添加失败'); return; }
+    $('newContent').value = '';
+    toast('已添加');
+    loadAll();
+  } finally { btn.disabled = false; }
+}
+
+async function patch(id, body){
+  const r = await fetch('/api/admin/tips/' + id, {
+    method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ toast(d.detail || d.error || '保存失败'); return false; }
+  return true;
+}
+
+async function saveContent(id, el){
+  const text = el.value.trim();
+  const old = (TIPS.find(x=>x.id===id)||{}).content;
+  if(!text){ toast('内容不能为空'); el.value = old || ''; return; }
+  if(text === old) return;
+  if(await patch(id, { content: text })){ toast('已保存'); loadAll(); }
+}
+
+async function saveWeight(id, value){
+  if(await patch(id, { weight: Number(value) || 0 })){ toast('权重已更新'); loadAll(); }
+}
+
+async function saveActive(id, checked){
+  if(await patch(id, { active: checked })){ toast(checked ? '已启用' : '已停用'); loadAll(); }
+}
+
+async function delTip(id){
+  if(!confirm('确定删除这条？')) return;
+  const r = await fetch('/api/admin/tips/' + id, { method:'DELETE' });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ toast(d.detail || d.error || '删除失败'); return; }
+  toast('已删除'); loadAll();
+}
+
+/* 试取一条：直接走客户端用的接口，验证一言是否可达 */
+async function preview(){
+  toast('正在取…');
+  try{
+    const r = await fetch('/api/tips/next');
+    const d = await r.json();
+    toast((d.source === 'hitokoto' ? '一言：' : d.source === 'manual' ? '手动：' : '兜底：') + d.content);
+  }catch(e){ toast('取失败：' + e.message); }
+}
+
+async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
+
+(async function(){
+  const r = await fetch('/api/me'); const d = await r.json();
+  if(!d.ok || !d.user || !d.user.isAdmin){ $('deny').classList.remove('hidden'); return; }
+  $('whoami').textContent = '@' + d.user.username;
+  $('main').classList.remove('hidden');
+  loadAll();
+})();
+</script>
+</body>
+</html>

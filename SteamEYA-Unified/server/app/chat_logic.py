@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Optional
 
-from . import config, security
+from . import config, levelcore, security
 from .db import execute, query_all, query_one
 from .hub import hub
 
@@ -57,9 +57,15 @@ def shape_msg(r, viewer) -> dict:
     is_admin = bool(viewer and viewer.get("is_admin"))
     is_sender = bool(viewer and r["from_id"] == viewer["id"])
     hide = recalled and not is_admin and not is_sender
-    return {
+    from_exp = 0
+    try:
+        from_exp = int(r["from_exp"] or 0)
+    except Exception:
+        from_exp = 0
+    out = {
         "id": r["id"], "room": r["room"], "fromId": r["from_id"],
         "fromName": r["from_name"], "fromAvatar": r["from_avatar"] or "",
+        "fromLevel": levelcore.level_of(from_exp),
         "toId": r["to_id"], "type": "text" if hide else r["type"],
         "content": "" if hide else r["content"],
         "mentions": [] if hide else parse_mentions(r["mentions"]),
@@ -68,12 +74,20 @@ def shape_msg(r, viewer) -> dict:
         "fileSize": None if hide else r["file_size"],
         "recalled": recalled, "createdAt": r["created_at"],
     }
+    # 红包消息：内容即红包 id，前端据此渲染红包卡片
+    if r["type"] == "redpacket":
+        try:
+            out["redpacketId"] = int(r["content"] or 0)
+        except Exception:
+            out["redpacketId"] = 0
+    return out
 
 
 _MSG_SELECT = (
     "SELECT m.*, COALESCE(NULLIF(u.nickname,''), u.username, '已注销用户') AS from_name, "
-    "COALESCE(u.avatar,'') AS from_avatar FROM messages m "
+    "COALESCE(u.avatar,'') AS from_avatar, COALESCE(e.exp, 0) AS from_exp FROM messages m "
     "LEFT JOIN users u ON u.id = m.from_id "
+    "LEFT JOIN user_exp e ON e.user_id = m.from_id "
 )
 
 
@@ -103,6 +117,7 @@ def insert_chat(from_id: int, msg_type: str, content: str, file: Optional[dict],
     return {
         "type": "chat", "id": mid, "room": room, "fromId": from_id,
         "fromName": display_name(me), "fromAvatar": (me["avatar"] if me else "") or "",
+        "fromLevel": levelcore.level_of(levelcore.exp_of(from_id)),
         "toId": to_id, "msgType": msg_type, "content": content,
         "mentions": parse_mentions(mentions),
         "filePath": (file or {}).get("url"), "fileName": (file or {}).get("name"),

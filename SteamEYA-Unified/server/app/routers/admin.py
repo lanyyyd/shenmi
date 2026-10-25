@@ -60,8 +60,17 @@ def list_users(admin: dict = Depends(require_admin)):
         last_seen[r["user_id"]] = max(last_seen.get(r["user_id"], 0), r["last_seen"] or 0)
 
     rows = query_all("SELECT * FROM users ORDER BY created_at ASC")
+    # 积分余额（没有账户记录的用户按 0 处理）
+    points_map = {r["user_id"]: (r["balance"] or 0)
+                  for r in query_all("SELECT user_id, balance FROM point_accounts")}
+    # 经验（没有记录的用户按 0 处理）；等级由阈值推导
+    from .. import levelcore as _LV
+    exp_map = {r["user_id"]: int(r["exp"] or 0)
+               for r in query_all("SELECT user_id, exp FROM user_exp")}
+    thresholds = _LV.load_config()["thresholds"]
     users = []
     for u in rows:
+        exp = exp_map.get(u["id"], 0)
         users.append({
             "id": u["id"],
             "username": u["username"],
@@ -73,7 +82,13 @@ def list_users(admin: dict = Depends(require_admin)):
             "createdAt": u["created_at"],
             "regIp": u["reg_ip"] or "",
             "loginIps": sorted(login_ips.get(u["id"], ())),
-            "lastSeen": last_seen.get(u["id"], u["last_login_at"] or 0),
+            "lastSeen": max(last_seen.get(u["id"], 0),
+                            (u["last_login_at"] * 1000
+                             if 0 < (u["last_login_at"] or 0) < 1_000_000_000_000
+                             else (u["last_login_at"] or 0))),
+            "points": points_map.get(u["id"], 0),
+            "exp": exp,
+            "level": _LV.level_of(exp, thresholds),
         })
     total = len(users)
     msg_total = query_one("SELECT COUNT(*) AS c FROM messages")["c"]

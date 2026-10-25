@@ -12,8 +12,9 @@
 from __future__ import annotations
 
 import datetime
+import json
+import logging
 import pathlib
-import urllib.parse
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, Request, UploadFile
@@ -24,6 +25,8 @@ from ..db import execute, execute_update, query_all, query_one
 from ..deps import get_current_user, resolve_user, user_public
 
 router = APIRouter(prefix="/api/eat", tags=["eat"])
+
+log = logging.getLogger("gateway.eat")
 
 # 评价配图 / 菜品图落盘目录（本模块自带，避免改动全局 config）
 EAT_DIR = UPLOAD_DIR / "eat"
@@ -40,12 +43,6 @@ def _now() -> int:
 
 def _opt_user(request: Request, authorization: Optional[str]) -> Optional[dict]:
     return resolve_user(request, authorization)
-
-
-def _img(prompt: str) -> str:
-    """示例图片：走在线生成接口，避免仓库里塞二进制资源。"""
-    return ("https://trae-api-cn.mchost.guru/api/ide/v1/tool_text_to_image?prompt="
-            + urllib.parse.quote(prompt) + "&image_size=landscape_4_3")
 
 
 def _to_int(v, default=None):
@@ -82,18 +79,59 @@ def _store_out(s) -> dict:
     avg, cnt = _store_rating(s["id"])
     return {"id": s["id"], "name": s["name"], "image": s["image"], "location": s["location"],
             "rating": avg, "ratingCount": cnt, "ownerId": s["owner_id"],
-            "createdAt": s["created_at"], "recommend": _recommended(s["id"], 3)}
+            "createdAt": s["created_at"], "recommend": _recommended(s["id"], 3),
+            "imageStatus": _img_status(s), "imageError": _img_error(s)}
 
 
 def _dish_out(d, store=None) -> dict:
     cnt = query_one("SELECT COUNT(*) c FROM eat_reviews WHERE dish_id = ?", (d["id"],))["c"]
     o = {"id": d["id"], "storeId": d["store_id"], "name": d["name"], "image": d["image"],
          "price": d["price"], "eatCount": int(cnt or 0), "ownerId": d["owner_id"],
-         "createdAt": d["created_at"]}
+         "createdAt": d["created_at"], "imageStatus": _img_status(d), "imageError": _img_error(d)}
     if store is not None:
         o["storeName"] = store["name"]
         o["location"] = store["location"]
     return o
+
+
+def _img_status(row) -> str:
+    """AI 配图状态：老数据/用户图都按空处理，前端只在 queued/running 时显示占位。"""
+    try:
+        return str(row["image_status"] or "")
+    except (IndexError, KeyError, TypeError):
+        return ""
+
+
+def _img_error(row) -> str:
+    try:
+        return str(row["image_error"] or "")
+    except (IndexError, KeyError, TypeError):
+        return ""
+
+
+def _try_enqueue(kind: str, target_id: int) -> None:
+    """新建无图对象后入 AI 配图队列；任何异常都不影响创建本身。"""
+    try:
+        from .. import aigen
+        aigen.enqueue(kind, target_id)
+    except Exception as exc:
+        log.warning("AI 配图入队失败 %s#%s：%s", kind, target_id, exc)
+
+
+def _cancel_jobs(kind: str, target_id: int, reason: str) -> None:
+    execute_update(
+        "UPDATE ai_image_jobs SET status = 'canceled', error = ?, updated_at = ?, finished_at = ? "
+        "WHERE kind = ? AND target_id = ? AND status IN ('queued','running')",
+        (reason[:200], _now(), _now(), kind, target_id))
+
+
+def _mark_user_image(kind: str, target_id: int) -> None:
+    """用户自己补了图：标记来源并取消该对象还没跑完的 AI 任务。"""
+    table = "eat_stores" if kind == "store" else "eat_dishes"
+    execute_update(
+        f"UPDATE {table} SET image_status = '', image_error = '', image_source = 'user' WHERE id = ?",
+        (target_id,))
+    _cancel_jobs(kind, target_id, "用户已上传图片")
 
 
 def _task_out(t) -> Optional[dict]:
@@ -111,12 +149,20 @@ def _task_out(t) -> Optional[dict]:
             "rating": avg, "createdAt": t["created_at"]}
 
 
+def _day_start_ms() -> int:
+    """当天 00:00（服务器本地时区）的毫秒时间戳：任务只在当天有效。"""
+    now = datetime.datetime.now()
+    return int(now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
+
+
 def _global_task():
-    return query_one("SELECT * FROM eat_tasks WHERE owner_id IS NULL ORDER BY id DESC LIMIT 1")
+    return query_one("SELECT * FROM eat_tasks WHERE owner_id IS NULL AND created_at >= ? "
+                     "ORDER BY id DESC LIMIT 1", (_day_start_ms(),))
 
 
 def _personal_task(uid: int):
-    return query_one("SELECT * FROM eat_tasks WHERE owner_id = ? ORDER BY id DESC LIMIT 1", (uid,))
+    return query_one("SELECT * FROM eat_tasks WHERE owner_id = ? AND created_at >= ? "
+                     "ORDER BY id DESC LIMIT 1", (uid, _day_start_ms()))
 
 
 def _override(uid: int) -> bool:
@@ -136,63 +182,48 @@ def _may_edit(row, user: dict) -> bool:
     return bool(user.get("is_admin")) or (row is not None and row["owner_id"] == user["id"])
 
 
-# ---------------------------------------------------------------- 种子数据（仅空库时写入）
-_SEED = [
-    {"name": "川味小馆", "location": "后街 1楼",
-     "image": _img("spicy sichuan cuisine restaurant, kung pao chicken and mapo tofu on table"),
-     "dishes": [("宫保鸡丁", 18, _img("kung pao chicken with peanuts and dried chili")),
-                ("麻婆豆腐", 14, _img("mapo tofu in red spicy sauce")),
-                ("回锅肉", 22, _img("twice cooked pork slices with green pepper")),
-                ("水煮牛肉", 32, _img("sichuan boiled beef in chili oil"))]},
-    {"name": "老张面馆", "location": "食堂 2楼",
-     "image": _img("chinese noodle shop, beef noodle soup bowl close up"),
-     "dishes": [("红烧牛肉面", 16, _img("braised beef noodle soup bowl")),
-                ("番茄鸡蛋面", 13, _img("tomato egg noodle soup")),
-                ("炸酱面", 15, _img("zhajiangmian noodles with soybean paste"))]},
-    {"name": "深夜烧烤", "location": "夜市 3号",
-     "image": _img("chinese bbq skewers grilling at night with smoke"),
-     "dishes": [("羊肉串", 6, _img("grilled lamb skewers with cumin")),
-                ("烤茄子", 12, _img("grilled eggplant with garlic and chili")),
-                ("烤鸡翅", 8, _img("grilled chicken wings")),
-                ("炒花甲", 25, _img("stir fried clams with chili"))]},
-    {"name": "樱之屋日料", "location": "新餐厅 2楼",
-     "image": _img("japanese restaurant, sushi platter and ramen bowl"),
-     "dishes": [("三文鱼寿司", 28, _img("salmon sushi pieces on plate")),
-                ("豚骨拉面", 26, _img("tonkotsu ramen bowl with soft boiled egg")),
-                ("天妇罗", 22, _img("crispy tempura shrimp platter"))]},
-    {"name": "甜品小站", "location": "一楼中庭",
-     "image": _img("colorful dessert shop with milk tea and cakes"),
-     "dishes": [("杨枝甘露", 16, _img("mango pomelo sago dessert in cup")),
-                ("芋圆奶茶", 12, _img("taro ball milk tea cup")),
-                ("抹茶千层", 20, _img("matcha mille crepe cake slice"))]},
-    {"name": "沸腾火锅", "location": "老街 5楼",
-     "image": _img("chinese hot pot with boiling spicy red soup"),
-     "dishes": [("麻辣锅底", 38, _img("spicy hot pot soup base with chili")),
-                ("肥牛卷", 28, _img("sliced beef rolls for hot pot")),
-                ("虾滑", 26, _img("shrimp paste balls for hot pot")),
-                ("毛肚", 30, _img("beef tripe slices for hot pot"))]},
-]
+def _clean_images(raw) -> list[str]:
+    """规整前端传来的图片数组：最多 9 张、去重、只收 /uploads/ 地址。"""
+    out = []
+    if isinstance(raw, list):
+        for x in raw[:9]:
+            s = str(x or "").strip()[:400]
+            if s.startswith("/uploads/") and s not in out:
+                out.append(s)
+    return out
 
 
-def seed_eat_if_empty() -> None:
-    if query_one("SELECT id FROM eat_stores LIMIT 1"):
-        return
-    for s in _SEED:
-        sid = execute(
-            "INSERT INTO eat_stores (name, image, location, owner_id, created_at) VALUES (?,?,?,?,?)",
-            (s["name"], s["image"], s["location"], None, _now()),
-        )
-        for name, price, img in s["dishes"]:
-            execute(
-                "INSERT INTO eat_dishes (store_id, name, image, price, owner_id, created_at) VALUES (?,?,?,?,?,?)",
-                (sid, name, img, price, None, _now()),
-            )
+def _review_images(r) -> list[str]:
+    """取一条评价的图片列表：优先 images（JSON 数组），回退单张 image，都没有则空。"""
+    raw = ""
+    try:
+        raw = r["images"] or ""
+    except (IndexError, KeyError, TypeError):
+        raw = ""
+    imgs = []
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            parsed = None
+        if isinstance(parsed, list):
+            for x in parsed[:9]:
+                s = str(x or "").strip()[:400]
+                if s:
+                    imgs.append(s)
+    if not imgs:
+        try:
+            single = str(r["image"] or "").strip()
+        except (IndexError, KeyError, TypeError):
+            single = ""
+        if single:
+            imgs = [single[:400]]
+    return imgs
 
 
 # ---------------------------------------------------------------- 店铺 / 菜品
 @router.get("/stores")
 def list_stores():
-    seed_eat_if_empty()
     rows = query_all("SELECT * FROM eat_stores ORDER BY id DESC")
     return {"ok": True, "stores": [_store_out(s) for s in rows]}
 
@@ -216,7 +247,6 @@ def list_store_dishes(store_id: int):
 
 @router.get("/dishes")
 def list_dishes():
-    seed_eat_if_empty()
     rows = query_all(
         "SELECT d.*, s.name AS sname, s.location AS sloc FROM eat_dishes d "
         "LEFT JOIN eat_stores s ON s.id = d.store_id ORDER BY d.store_id ASC, d.id ASC")
@@ -239,6 +269,7 @@ def add_store(payload: dict = Body(...), user: dict = Depends(get_current_user))
         (name, str(payload.get("image", ""))[:400], str(payload.get("location", "")).strip()[:60],
          user["id"], _now()),
     )
+    _try_enqueue("store", sid)
     s = query_one("SELECT * FROM eat_stores WHERE id = ?", (sid,))
     return {"ok": True, "store": _store_out(s)}
 
@@ -259,8 +290,56 @@ def update_store(store_id: int, payload: dict = Body(...), user: dict = Depends(
         sets.append("location = ?"); vals.append(str(payload["location"]).strip()[:60])
     if sets:
         execute_update(f"UPDATE eat_stores SET {', '.join(sets)} WHERE id = ?", (*vals, store_id))
+    if "image" in payload and str(payload.get("image") or "").strip():
+        _mark_user_image("store", store_id)
     s = query_one("SELECT * FROM eat_stores WHERE id = ?", (store_id,))
     return {"ok": True, "store": _store_out(s)}
+
+
+# ---------------------------------------------------------------- AI 重新生图
+def _queue_regen(kind: str, target_id: int, payload: dict) -> dict:
+    from .. import aigen
+    if not aigen.is_ready():
+        raise HTTPException(400, "AI 生图未启用或未配置，请先在后台开启")
+    extra = str((payload or {}).get("extraPrompt") or "").strip()[:300]
+    jid = aigen.enqueue(kind, target_id, force=True, extra_prompt=extra, regen=True)
+    if not jid:
+        raise HTTPException(500, "创建生图任务失败")
+    return {"ok": True, "jobId": jid, "status": "queued"}
+
+
+@router.post("/stores/{store_id}/regen-image")
+def regen_store_image(store_id: int, payload: dict = Body(default={}),
+                      user: dict = Depends(get_current_user)):
+    s = query_one("SELECT * FROM eat_stores WHERE id = ?", (store_id,))
+    if not s:
+        raise HTTPException(404, "店铺不存在")
+    if not _may_edit(s, user):
+        raise HTTPException(403, "无权修改该店铺")
+    return _queue_regen("store", store_id, payload)
+
+
+@router.post("/dishes/{dish_id}/regen-image")
+def regen_dish_image(dish_id: int, payload: dict = Body(default={}),
+                     user: dict = Depends(get_current_user)):
+    d = query_one("SELECT * FROM eat_dishes WHERE id = ?", (dish_id,))
+    if not d:
+        raise HTTPException(404, "菜品不存在")
+    if not _may_edit(d, user):
+        raise HTTPException(403, "无权修改该菜品")
+    return _queue_regen("dish", dish_id, payload)
+
+
+@router.get("/image-status")
+def image_status(kind: str = "", id: int = 0, user: dict = Depends(get_current_user)):
+    table = "eat_stores" if kind == "store" else ("eat_dishes" if kind == "dish" else "")
+    if not table:
+        raise HTTPException(400, "参数错误")
+    row = query_one(f"SELECT image, image_status, image_error FROM {table} WHERE id = ?", (id,))
+    if not row:
+        raise HTTPException(404, "对象不存在")
+    return {"ok": True, "image": row["image"] or "", "status": row["image_status"] or "",
+            "error": row["image_error"] or ""}
 
 
 @router.delete("/stores/{store_id}")
@@ -270,9 +349,17 @@ def delete_store(store_id: int, user: dict = Depends(get_current_user)):
         raise HTTPException(404, "店铺不存在")
     if not _may_edit(s, user):
         raise HTTPException(403, "无权删除该店铺")
+    execute_update("DELETE FROM eat_review_likes WHERE review_id IN "
+                   "(SELECT id FROM eat_reviews WHERE store_id = ?)", (store_id,))
+    execute_update("DELETE FROM eat_review_guests WHERE review_id IN "
+                   "(SELECT id FROM eat_reviews WHERE store_id = ?)", (store_id,))
     execute_update("DELETE FROM eat_reviews WHERE store_id = ?", (store_id,))
     execute_update("DELETE FROM eat_dishes WHERE store_id = ?", (store_id,))
     execute_update("DELETE FROM eat_stores WHERE id = ?", (store_id,))
+    _cancel_jobs("store", store_id, "店铺已删除")
+    execute_update("UPDATE ai_image_jobs SET status = 'canceled', error = '店铺已删除', updated_at = ?, "
+                   "finished_at = ? WHERE kind = 'dish' AND status IN ('queued','running') "
+                   "AND target_id NOT IN (SELECT id FROM eat_dishes)", (_now(), _now()))
     return {"ok": True}
 
 
@@ -289,6 +376,7 @@ def add_dish(payload: dict = Body(...), user: dict = Depends(get_current_user)):
         (store_id, name, str(payload.get("image", ""))[:400], float(payload.get("price") or 0),
          user["id"], _now()),
     )
+    _try_enqueue("dish", did)
     d = query_one("SELECT * FROM eat_dishes WHERE id = ?", (did,))
     return {"ok": True, "dish": _dish_out(d)}
 
@@ -313,6 +401,8 @@ def update_dish(dish_id: int, payload: dict = Body(...), user: dict = Depends(ge
             sets.append("store_id = ?"); vals.append(sid)
     if sets:
         execute_update(f"UPDATE eat_dishes SET {', '.join(sets)} WHERE id = ?", (*vals, dish_id))
+    if "image" in payload and str(payload.get("image") or "").strip():
+        _mark_user_image("dish", dish_id)
     d = query_one("SELECT * FROM eat_dishes WHERE id = ?", (dish_id,))
     return {"ok": True, "dish": _dish_out(d)}
 
@@ -324,8 +414,13 @@ def delete_dish(dish_id: int, user: dict = Depends(get_current_user)):
         raise HTTPException(404, "菜品不存在")
     if not _may_edit(d, user):
         raise HTTPException(403, "无权删除该菜品")
+    execute_update("DELETE FROM eat_review_likes WHERE review_id IN "
+                   "(SELECT id FROM eat_reviews WHERE dish_id = ?)", (dish_id,))
+    execute_update("DELETE FROM eat_review_guests WHERE review_id IN "
+                   "(SELECT id FROM eat_reviews WHERE dish_id = ?)", (dish_id,))
     execute_update("DELETE FROM eat_reviews WHERE dish_id = ?", (dish_id,))
     execute_update("DELETE FROM eat_dishes WHERE id = ?", (dish_id,))
+    _cancel_jobs("dish", dish_id, "菜品已删除")
     return {"ok": True}
 
 
@@ -344,25 +439,30 @@ async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_cu
 
 
 # ---------------------------------------------------------------- 转盘 / 任务
-def _create_task(uid: int, store_id: Optional[int]) -> dict:
+def _set_task(uid: int, dish_row) -> dict:
+    """把指定菜品设为任务：未「吃别的」→ 写全局共享任务；已「吃别的」→ 只写自己的个人任务。"""
     ov = _override(uid)
+    if ov:
+        # 「我要吃别的」后：只写自己一个人的任务，不动全局结果
+        execute_update("DELETE FROM eat_tasks WHERE owner_id = ?", (uid,))
+        tid = execute("INSERT INTO eat_tasks (owner_id, dish_id, store_id, created_at) VALUES (?,?,?,?)",
+                      (uid, dish_row["id"], dish_row["store_id"], _now()))
+    else:
+        # 全局共享：清掉旧的全局任务，写入新的一条，所有人看到同一结果
+        execute_update("DELETE FROM eat_tasks WHERE owner_id IS NULL")
+        tid = execute("INSERT INTO eat_tasks (owner_id, dish_id, store_id, created_at) VALUES (?,?,?,?)",
+                      (None, dish_row["id"], dish_row["store_id"], _now()))
+    return {"ok": True, "global": not ov, "task": _task_out(query_one("SELECT * FROM eat_tasks WHERE id = ?", (tid,)))}
+
+
+def _create_task(uid: int, store_id: Optional[int]) -> dict:
     if store_id:
         row = query_one("SELECT * FROM eat_dishes WHERE store_id = ? ORDER BY RANDOM() LIMIT 1", (store_id,))
     else:
         row = query_one("SELECT * FROM eat_dishes ORDER BY RANDOM() LIMIT 1")
     if not row:
         raise HTTPException(400, "还没有菜品，先去添加吧")
-    if ov:
-        # 「我要吃别的」后：只写自己一个人的任务，不动全局结果
-        execute_update("DELETE FROM eat_tasks WHERE owner_id = ?", (uid,))
-        tid = execute("INSERT INTO eat_tasks (owner_id, dish_id, store_id, created_at) VALUES (?,?,?,?)",
-                      (uid, row["id"], row["store_id"], _now()))
-    else:
-        # 全局共享：清掉旧的全局任务，写入新的一条，所有人看到同一结果
-        execute_update("DELETE FROM eat_tasks WHERE owner_id IS NULL")
-        tid = execute("INSERT INTO eat_tasks (owner_id, dish_id, store_id, created_at) VALUES (?,?,?,?)",
-                      (None, row["id"], row["store_id"], _now()))
-    return {"ok": True, "global": not ov, "task": _task_out(query_one("SELECT * FROM eat_tasks WHERE id = ?", (tid,)))}
+    return _set_task(uid, row)
 
 
 @router.get("/task")
@@ -390,12 +490,35 @@ def pick(payload: dict = Body(...), user: dict = Depends(get_current_user)):
     return _create_task(user["id"], _to_int(payload.get("storeId")))
 
 
+@router.post("/choose")
+def choose(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    """「就吃这个了！」：把餐品详情页里选中的那个具体菜品设为任务。"""
+    dish_id = _to_int(payload.get("dishId"))
+    if not dish_id:
+        raise HTTPException(400, "缺少菜品")
+    d = query_one("SELECT * FROM eat_dishes WHERE id = ?", (dish_id,))
+    if not d:
+        raise HTTPException(404, "菜品不存在")
+    return _set_task(user["id"], d)
+
+
 @router.post("/task/other")
 def task_other(user: dict = Depends(get_current_user)):
     """「我要吃别的」：给自己置 override，从此不跟随全局任务。"""
     _set_override(user["id"], True)
     execute_update("DELETE FROM eat_tasks WHERE owner_id = ?", (user["id"],))
     return {"ok": True, "overridden": True}
+
+
+# ---------------------------------------------------------------- 参与者列表
+@router.get("/users")
+def eat_users(request: Request, authorization: Optional[str] = Header(default=None)):
+    """评价时可多选的「一起吃」小伙伴（登录后可见，只返回昵称等公开字段）。"""
+    u = _opt_user(request, authorization)
+    if not u:
+        raise HTTPException(401, "请先登录")
+    rows = query_all("SELECT * FROM users WHERE is_active = 1 ORDER BY id ASC")
+    return {"ok": True, "users": [user_public(r) for r in rows]}
 
 
 # ---------------------------------------------------------------- 评价（同评 + 点赞）
@@ -407,12 +530,19 @@ def _review_out(r, uid: Optional[int]) -> dict:
     liked = bool(uid and query_one("SELECT 1 FROM eat_review_likes WHERE review_id = ? AND user_id = ?",
                                    (r["id"], uid)))
     same_count = query_one("SELECT COUNT(*) c FROM eat_reviews WHERE parent_id = ?", (r["id"],))["c"]
+    guests = []
+    for g in query_all("SELECT user_id FROM eat_review_guests WHERE review_id = ? ORDER BY user_id ASC", (r["id"],)):
+        gu = query_one("SELECT * FROM users WHERE id = ?", (g["user_id"],))
+        if gu:
+            guests.append(user_public(gu))
+    imgs = _review_images(r)
     return {"id": r["id"], "user": user_public(author) if author else {},
             "storeId": r["store_id"], "storeName": store["name"] if store else "",
             "dishId": r["dish_id"], "dishName": dish["name"] if dish else "",
             "price": dish["price"] if dish else 0, "dishImage": dish["image"] if dish else "",
             "parentId": r["parent_id"], "rating": r["rating"], "comment": r["comment"] or "",
-            "image": r["image"] or "", "createdAt": r["created_at"],
+            "image": imgs[0] if imgs else "", "images": imgs, "createdAt": r["created_at"],
+            "guests": guests,
             "likeCount": int(like_count or 0), "liked": liked, "sameCount": int(same_count or 0)}
 
 
@@ -446,6 +576,12 @@ def add_review(payload: dict = Body(...), user: dict = Depends(get_current_user)
         parent = query_one("SELECT * FROM eat_reviews WHERE id = ?", (parent_id,))
         if not parent:
             raise HTTPException(404, "原评价不存在")
+        # 禁止套娃：跟评只能挂在一级评价下，若父级本身是跟评则挂到它的主评
+        if parent["parent_id"]:
+            root = query_one("SELECT * FROM eat_reviews WHERE id = ?", (parent["parent_id"],))
+            if root:
+                parent = root
+                parent_id = root["id"]
     store_id = _to_int(payload.get("storeId")) or (parent["store_id"] if parent else None)
     dish_id = _to_int(payload.get("dishId")) or (parent["dish_id"] if parent else None)
     if not dish_id:
@@ -458,18 +594,47 @@ def add_review(payload: dict = Body(...), user: dict = Depends(get_current_user)
     if rating is not None:
         rating = max(1, min(5, rating))
     comment = str(payload.get("comment", ""))[:500]
-    image = str(payload.get("image", ""))[:400]
+    # 多图：优先 images 数组，兼容旧的单张 image 字段；image 列存第一张
+    images = _clean_images(payload.get("images")) if "images" in payload else _clean_images([payload.get("image")])
+    image = images[0] if images else ""
     rid = execute(
-        "INSERT INTO eat_reviews (user_id, store_id, dish_id, parent_id, rating, comment, image, created_at) "
-        "VALUES (?,?,?,?,?,?,?,?)",
-        (uid, store_id, dish_id, parent_id, rating, comment, image, _now()),
+        "INSERT INTO eat_reviews (user_id, store_id, dish_id, parent_id, rating, comment, image, images, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        (uid, store_id, dish_id, parent_id, rating, comment, image, json.dumps(images), _now()),
     )
-    # 打完卡：清掉自己的任务；若跟随的是全局任务，给自己打 override，避免重复提示
-    execute_update("DELETE FROM eat_tasks WHERE owner_id = ?", (uid,))
-    if not parent and _global_task():
-        _set_override(uid, True)
+    # 「一起吃」：勾选的小伙伴也计入这条评价的统计（不能选自己，自动去重）
+    # 只有主评需要成员；同评不提供该选项，传入也忽略
+    guests = []
+    raw_guests = payload.get("guestIds") or []
+    if parent is None and isinstance(raw_guests, list):
+        for g in raw_guests[:30]:
+            gid = _to_int(g)
+            if not gid or gid == uid or gid in guests:
+                continue
+            if not query_one("SELECT id FROM users WHERE id = ? AND is_active = 1", (gid,)):
+                continue
+            execute("INSERT OR IGNORE INTO eat_review_guests (review_id, user_id, created_at) VALUES (?,?,?)",
+                    (rid, gid, _now()))
+            guests.append(gid)
+
+    # 当前任务：个人任务优先，否则（未「吃别的」）跟随全局任务
+    cur = _personal_task(uid)
+    if cur is None and not _override(uid):
+        cur = _global_task()
+    matched = bool(cur and _to_int(cur["dish_id"]) == dish_id)
+    if parent is None:
+        # 打完卡：清掉自己的任务；若跟随的是全局任务，给自己打 override，避免重复提示
+        execute_update("DELETE FROM eat_tasks WHERE owner_id = ?", (uid,))
+        if _global_task():
+            _set_override(uid, True)
+    elif matched:
+        # 跟评的菜品与当前任务一致 → 同样算完成任务
+        execute_update("DELETE FROM eat_tasks WHERE owner_id = ?", (uid,))
+        if cur["owner_id"] is None:
+            _set_override(uid, True)
     r = query_one("SELECT * FROM eat_reviews WHERE id = ?", (rid,))
-    return {"ok": True, "review": _review_out(r, uid)}
+    return {"ok": True, "review": _review_out(r, uid),
+            "taskCompleted": bool(matched or parent is None), "guests": guests}
 
 
 @router.post("/reviews/{review_id}/like")
@@ -489,19 +654,103 @@ def toggle_like(review_id: int, user: dict = Depends(get_current_user)):
     return {"ok": True, "liked": liked, "likeCount": int(count or 0)}
 
 
+@router.put("/reviews/{review_id}")
+def update_review(review_id: int, payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    """编辑评价 / 同评（仅作者本人）：评分、评语、图片。
+
+    - 菜品与店铺不可改，避免消费记录串账；
+    - 「一起吃」成员仅主评可调整，同评忽略 guestIds；
+    - 编辑不会改变任务完成状态。
+    """
+    r = query_one("SELECT * FROM eat_reviews WHERE id = ?", (review_id,))
+    if not r:
+        raise HTTPException(404, "评价不存在")
+    if int(r["user_id"]) != int(user["id"]):
+        raise HTTPException(403, "只能编辑自己的评价")
+    if "rating" in payload:
+        rating = _to_int(payload.get("rating"))
+        if rating is not None:
+            rating = max(1, min(5, rating))
+    else:
+        rating = r["rating"]
+    comment = str(payload.get("comment") or "")[:500] if "comment" in payload else (r["comment"] or "")
+    # 多图：传了 images 就整体替换；未传则保持原值不变（不要清空）
+    if "images" in payload:
+        images = _clean_images(payload.get("images"))
+        image = images[0] if images else ""
+        images_json = json.dumps(images)
+    else:
+        images_json = r["images"] or ""
+        image = str(payload.get("image") or "")[:400] if "image" in payload else (r["image"] or "")
+    execute_update("UPDATE eat_reviews SET rating = ?, comment = ?, image = ?, images = ? WHERE id = ?",
+                   (rating, comment, image, images_json, review_id))
+    if r["parent_id"] is None and payload.get("guestIds") is not None:
+        execute_update("DELETE FROM eat_review_guests WHERE review_id = ?", (review_id,))
+        raw_guests = payload.get("guestIds") or []
+        seen = []
+        if isinstance(raw_guests, list):
+            for g in raw_guests[:30]:
+                gid = _to_int(g)
+                if not gid or gid == user["id"] or gid in seen:
+                    continue
+                if not query_one("SELECT id FROM users WHERE id = ? AND is_active = 1", (gid,)):
+                    continue
+                execute("INSERT OR IGNORE INTO eat_review_guests (review_id, user_id, created_at) VALUES (?,?,?)",
+                        (review_id, gid, _now()))
+                seen.append(gid)
+    r = query_one("SELECT * FROM eat_reviews WHERE id = ?", (review_id,))
+    return {"ok": True, "review": _review_out(r, user["id"])}
+
+
+@router.delete("/reviews/{review_id}")
+def delete_review(review_id: int, user: dict = Depends(get_current_user)):
+    """删除评价（作者本人或管理员）。
+
+    - 若该评价下面挂着「同评」：第一条同评自动升为主评，其余同评改挂到新主评下，顺序不变；
+    - 该评价的点赞一并清除；
+    - 评价本身就是消费记录，删除后自动不再计入店铺平均分、我的评价、月度/年度总结与图片墙。
+    """
+    r = query_one("SELECT * FROM eat_reviews WHERE id = ?", (review_id,))
+    if not r:
+        raise HTTPException(404, "评价不存在")
+    if not (user.get("is_admin") or r["user_id"] == user["id"]):
+        raise HTTPException(403, "只能删除自己发布的评价")
+
+    kids = query_all("SELECT id FROM eat_reviews WHERE parent_id = ? ORDER BY id ASC", (review_id,))
+    promoted_id = None
+    if kids:
+        promoted_id = kids[0]["id"]
+        execute_update("UPDATE eat_reviews SET parent_id = NULL WHERE id = ?", (promoted_id,))
+        for k in kids[1:]:
+            execute_update("UPDATE eat_reviews SET parent_id = ? WHERE id = ?", (promoted_id, k["id"]))
+    execute_update("DELETE FROM eat_review_likes WHERE review_id = ?", (review_id,))
+    execute_update("DELETE FROM eat_review_guests WHERE review_id = ?", (review_id,))
+    execute_update("DELETE FROM eat_reviews WHERE id = ?", (review_id,))
+    return {"ok": True, "deleted": review_id, "promotedId": promoted_id}
+
+
 # ---------------------------------------------------------------- 图片墙 / 总结
 @router.get("/wall")
 def wall(limit: int = 300):
-    rows = query_all("SELECT * FROM eat_reviews WHERE image <> '' ORDER BY id DESC LIMIT ?",
-                     (max(1, min(limit, 500)),))
+    rows = query_all(
+        "SELECT * FROM eat_reviews "
+        "WHERE (image IS NOT NULL AND image <> '') "
+        "OR (images IS NOT NULL AND images <> '' AND images <> '[]') "
+        "ORDER BY id DESC LIMIT ?",
+        (max(1, min(limit, 500)),))
     out = []
     for r in rows:
+        imgs = _review_images(r)
+        if not imgs:
+            continue
         author = query_one("SELECT * FROM users WHERE id = ?", (r["user_id"],))
         dish = query_one("SELECT name FROM eat_dishes WHERE id = ?", (r["dish_id"],)) if r["dish_id"] else None
         store = query_one("SELECT name FROM eat_stores WHERE id = ?", (r["store_id"],)) if r["store_id"] else None
-        out.append({"id": r["id"], "image": r["image"], "comment": r["comment"] or "",
-                    "dishName": dish["name"] if dish else "", "storeName": store["name"] if store else "",
-                    "user": user_public(author) if author else {}, "createdAt": r["created_at"]})
+        # 一条评价的每一张图都进墙：同一评价的多张图会产生多条
+        for url in imgs:
+            out.append({"id": r["id"], "image": url, "comment": r["comment"] or "",
+                        "dishName": dish["name"] if dish else "", "storeName": store["name"] if store else "",
+                        "user": user_public(author) if author else {}, "createdAt": r["created_at"]})
     return {"ok": True, "images": out}
 
 
@@ -519,8 +768,10 @@ def summary(request: Request, period: str = "month", authorization: Optional[str
     since = int(start_dt.timestamp() * 1000)
 
     rows = query_all(
-        "SELECT * FROM eat_reviews WHERE user_id = ? AND created_at >= ? AND parent_id IS NULL "
-        "ORDER BY id DESC", (uid, since))
+        "SELECT r.* FROM eat_reviews r WHERE r.created_at >= ? AND r.parent_id IS NULL "
+        "AND (r.user_id = ? OR EXISTS (SELECT 1 FROM eat_review_guests g "
+        "     WHERE g.review_id = r.id AND g.user_id = ?)) "
+        "ORDER BY r.id DESC", (since, uid, uid))
     count = len(rows)
     spend = 0.0
     store_hits: dict[str, int] = {}

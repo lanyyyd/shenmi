@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>今天吃点啥</title>
-<link rel="stylesheet" href="/css/eat.css?v=1">
+<link rel="stylesheet" href="/css/eat.css?v=10">
 </head>
 <body>
 
@@ -38,6 +38,7 @@
   <section class="page active" id="page-home">
     <div class="page-title"><span class="dot"></span>附近好店 · 就等你来</div>
     <div id="storeList"></div>
+    <div class="store-upload-tip" id="storeUploadTip" title="添加一家新店铺">找不到店铺？点我上传</div>
   </section>
 
   <!-- ---- 店铺详情（页内切换） ---- -->
@@ -137,6 +138,17 @@
   </div>
 </div>
 
+<!-- ================= 餐品详情 ================= -->
+<div class="mask" id="dishMask">
+  <div class="modal">
+    <div id="dishDetail"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="eatThisDishBtn">🍽️ 就吃这个了！</button>
+      <button class="btn btn-soft" id="dishCancel">关闭</button>
+    </div>
+  </div>
+</div>
+
 <!-- ================= 通用信息 / 确认弹窗 ================= -->
 <div class="mask" id="infoMask">
   <div class="modal">
@@ -162,6 +174,11 @@
       <div class="field"><label>选择菜品</label><select id="rvDish"></select></div>
     </div>
 
+    <div class="field" id="reviewGuestsField">
+      <label>一起吃的小伙伴（可多选，计入 TA 的月统计）</label>
+      <div class="guest-picker" id="rvGuests"></div>
+    </div>
+
     <div class="field">
       <label style="text-align:center;">打个分（可不填）</label>
       <div class="stars-input" id="rvStars">
@@ -173,9 +190,9 @@
       <textarea id="rvComment" placeholder="比如：面条筋道，汤头浓郁，分量很足！"></textarea>
     </div>
     <div class="field">
-      <label>上传一张图片（可不填）</label>
-      <input type="file" id="rvFile" accept="image/*">
-      <img class="preview" id="rvPreview" alt="预览">
+      <label>上传图片（可多选，最多 9 张，可不填）</label>
+      <input type="file" id="rvFile" accept="image/*" multiple>
+      <div class="review-imgs edit" id="rvPreview"></div>
     </div>
     <div class="btn-row">
       <button class="btn btn-primary" id="rvSubmit">提交</button>
@@ -204,6 +221,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/js/eat.js?v=1"></script>
+<script src="/js/eat.js?v=10"></script>
 </body>
 </html>

@@ -17,6 +17,13 @@ def user_public(u) -> dict:
     if u is None:
         return {}
     d = dict(u)
+    # 等级 / 经验（由经验按阈值推导；读不到时按 0 / Lv0 兜底，绝不影响登录）
+    try:
+        from . import levelcore
+        exp = levelcore.exp_of(d["id"])
+        level = levelcore.level_of(exp)
+    except Exception:
+        exp, level = 0, 0
     return {
         "id": d["id"],
         "username": d["username"],
@@ -24,6 +31,8 @@ def user_public(u) -> dict:
         "avatar": d.get("avatar") or "",
         "email": d.get("email") or "",
         "isAdmin": bool(d.get("is_admin")),
+        "exp": exp,
+        "level": level,
     }
 
 

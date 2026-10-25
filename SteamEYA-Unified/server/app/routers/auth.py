@@ -10,6 +10,7 @@ import re
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
+from .. import levelcore as LV
 from .. import security
 from ..db import execute, query_one
 from ..deps import get_current_user, user_public
@@ -51,6 +52,10 @@ def register(request: Request, payload: dict = Body(...)):
     if query_one("SELECT id FROM users WHERE username = ?", (username,)):
         raise HTTPException(409, "用户名已被占用")
     uid = _create_user(username, password, nickname, email, _client_ip(request))
+    try:
+        LV.grant(uid, "daily_login", ref=LV.bj_day(), remark="每日首登")
+    except Exception:
+        pass
     u = query_one("SELECT * FROM users WHERE id = ?", (uid,))
     return _login_result(u)
 
@@ -68,6 +73,10 @@ def login(payload: dict = Body(...)):
     if security.needs_rehash(u["password_hash"]):
         execute("UPDATE users SET password_hash = ? WHERE id = ?", (security.hash_password(password), u["id"]))
     execute("UPDATE users SET last_login_at = ? WHERE id = ?", (security.now_ms(), u["id"]))
+    try:
+        LV.grant(u["id"], "daily_login", ref=LV.bj_day(), remark="每日首登")
+    except Exception:
+        pass
     return _login_result(u)
 
 

@@ -21,7 +21,9 @@ AVATAR_DIR = UPLOAD_DIR / "avatars"
 STICKER_DIR = UPLOAD_DIR / "stickers"
 UPDATE_DIR = UPLOAD_DIR / "releases"          # 客户端安装包（「更新管理」上传）
 POINT_ITEM_DIR = UPLOAD_DIR / "points"        # 积分商城商品图片
-for _d in (UPLOAD_DIR, AVATAR_DIR, STICKER_DIR, UPDATE_DIR, POINT_ITEM_DIR,
+ORDER_FILE_DIR = UPLOAD_DIR / "orders"        # 兑换订单兑现时下发的图片/视频
+GACHA_PRIZE_DIR = UPLOAD_DIR / "gacha"        # 抽卡实物奖品图片
+for _d in (UPLOAD_DIR, AVATAR_DIR, STICKER_DIR, UPDATE_DIR, POINT_ITEM_DIR, ORDER_FILE_DIR, GACHA_PRIZE_DIR,
            UPLOAD_DIR / "images", UPLOAD_DIR / "videos", UPLOAD_DIR / "files"):
     _d.mkdir(parents=True, exist_ok=True)
 

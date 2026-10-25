@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-mode="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 生图设置 · 管理后台</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+body{overflow:auto}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:26px 18px 60px}
+.top{display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.top h1{font-size:21px;font-weight:800;letter-spacing:-.3px}
+.top .spacer{flex:1}
+.btn{padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;transition:.2s;
+  background:var(--panel);border:1px solid var(--line);color:var(--text);cursor:pointer}
+html[data-theme="light"] .btn:not(.pri){background:#fff}
+.btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn.pri{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;border:none}
+.btn.pri:hover{filter:brightness(1.08);color:#fff}
+.btn.danger{color:#EF4444}
+.btn.danger:hover{border-color:#EF4444}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur)}
+html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
+.card-h{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.card-h h2{font-size:15px;font-weight:700}
+.card-h .spacer{flex:1}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
+.deny{text-align:center;padding:80px 20px}.deny h2{font-size:19px;margin-bottom:10px}
+.deny p{color:var(--muted);font-size:13.5px;margin-bottom:20px}
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(20px);z-index:300;
+  padding:11px 20px;border-radius:11px;font-size:13.5px;font-weight:600;color:#fff;
+  background:linear-gradient(135deg,var(--primary),var(--primary-2));opacity:0;pointer-events:none;transition:.25s}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.form{padding:16px 18px}
+.fld{margin-bottom:14px}
+.fld>label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:7px}
+.fld input,.fld textarea,.fld select{width:100%;padding:10px 13px;border-radius:10px;font-size:13.5px;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+.fld input:focus,.fld textarea:focus,.fld select:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-l)}
+.fld textarea{resize:vertical;line-height:1.7;font-family:inherit}
+.fld .row{display:flex;gap:8px;align-items:center}
+.fld .row input{flex:1;min-width:0}
+.sw{display:inline-flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;cursor:pointer;user-select:none}
+.sw input{width:auto}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.grid2 .fld{margin-bottom:0}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}
+.grid3 .fld{margin-bottom:0}
+.hint{font-size:12px;color:var(--hint);margin-top:6px;line-height:1.7}
+.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:4px}
+.form-msg{font-size:13px;font-weight:600;margin-top:10px;min-height:18px}
+.form-msg.ok{color:#22A06B}.form-msg.err{color:#EF4444}
+.tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:700}
+.tag.ok{background:rgba(34,160,107,.12);color:#22A06B}
+.tag.failed{background:rgba(239,68,68,.12);color:#EF4444}
+.tag.running{background:rgba(59,130,246,.12);color:#3B82F6}
+.tag.queued{background:rgba(245,158,11,.14);color:#B45309}
+.tag.canceled{background:rgba(120,120,120,.12);color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:11.5px;color:var(--muted);font-weight:600;white-space:nowrap}
+td.prompt{max-width:360px;color:var(--muted);line-height:1.5;word-break:break-word}
+tbody tr:hover{background:var(--hover,rgba(0,0,0,.02))}
+.preview{margin-top:12px;display:none}
+.preview img{max-width:320px;border-radius:12px;border:1px solid var(--line);display:block}
+.preview .p{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.6;word-break:break-word}
+.stat{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.stat span{background:var(--input-bg);border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:12.5px}
+.stat b{color:var(--primary);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>🖼️ AI 生图设置 · 自动配图</h1>
+    <span id="whoami" class="mono"></span>
+    <div class="spacer"></div>
+    <button class="btn" onclick="location.href='/admin.html'">← 聊天管理</button>
+    <button class="btn" onclick="location.href='/admin-ai.html'">🔥 小火人</button>
+    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
+    <button class="btn danger" onclick="logout()">退出</button>
+  </div>
+
+  <div id="deny" class="deny hidden">
+    <h2>需要管理员权限</h2>
+    <p>请用管理员账号登录后再访问本页</p>
+    <button class="btn pri" onclick="location.href='/'">去登录</button>
+  </div>
+
+  <div id="main" class="hidden">
+    <div class="mono" style="margin-bottom:16px;line-height:1.8">
+      新建店铺/菜品且没有配图时自动入队：先用「文本模型」根据名称与店铺信息生成提示词，再用「生图模型」出图，
+      压缩成 webp 后写回。默认关闭，填好模型与 Key 后再启用。
+    </div>
+
+    <!-- 总开关 -->
+    <div class="card">
+      <div class="card-h"><h2>总开关</h2><div class="spacer"></div><span id="readyTag" class="tag canceled">未就绪</span></div>
+      <div class="form">
+        <div class="fld">
+          <label class="sw"><input type="checkbox" id="enabled"> 启用 AI 自动配图</label>
+          <div class="hint">关闭后不再处理队列；已生成的图片不受影响。</div>
+        </div>
+        <div class="fld">
+          <label class="sw"><input type="checkbox" id="auto_on_create"> 新建店铺/菜品时自动生成</label>
+          <div class="hint">只对没有图片的新对象生效；用户自己上传过图片的永远不会被覆盖。</div>
+        </div>
+        <div class="grid2" style="margin-top:14px">
+          <div class="fld"><label>每日生成上限（张）</label><input id="daily_limit" type="number" min="1" step="1" placeholder="50"></div>
+          <div class="fld"><label>失败重试次数</label><input id="retry_max" type="number" min="0" step="1" placeholder="2"></div>
+          <div class="fld"><label>重试间隔（秒）</label><input id="retry_backoff_sec" type="number" min="0" step="5" placeholder="20"></div>
+          <div class="fld"><label>单条任务超时（秒）</label><input id="job_timeout_sec" type="number" min="30" step="10" placeholder="120"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 文本模型 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h"><h2>文本模型 · 生成提示词</h2></div>
+      <div class="form">
+        <div class="grid2">
+          <div class="fld"><label>接口地址（base_url）</label>
+            <input id="text_base_url" placeholder="https://api.deepseek.com">
+            <div class="hint">会自动拼 /chat/completions；也可以直接填完整地址。</div>
+          </div>
+          <div class="fld"><label>模型名称</label>
+            <input id="text_model" list="textModels" placeholder="deepseek-chat">
+            <datalist id="textModels">
+              <option value="deepseek-chat"></option>
+              <option value="gpt-4o-mini"></option>
+              <option value="qwen-plus"></option>
+              <option value="glm-4-flash"></option>
+            </datalist>
+          </div>
+        </div>
+        <div class="fld" style="margin-top:14px"><label>API Key</label>
+          <div class="row">
+            <input id="text_api_key" type="password" placeholder="留空 / 保持掩码表示不修改">
+            <button class="btn" onclick="toggleKey('text_api_key', this)">显示</button>
+            <button class="btn danger" onclick="clearKey('text_api_key')">清空</button>
+          </div>
+          <div class="hint">文本模型不可用时会自动退回内置模板，出图流程不会中断。</div>
+        </div>
+        <div class="grid2" style="margin-top:14px">
+          <div class="fld"><label>温度（temperature）</label><input id="text_temperature" type="number" min="0" max="2" step="0.1" placeholder="0.7"></div>
+          <div class="fld"><label>最大 token</label><input id="text_max_tokens" type="number" min="50" step="10" placeholder="200"></div>
+          <div class="fld"><label>请求超时（秒）</label><input id="text_timeout_sec" type="number" min="5" step="5" placeholder="30"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 生图模型 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h"><h2>生图模型</h2></div>
+      <div class="form">
+        <div class="grid2">
+          <div class="fld"><label>接口地址（base_url）</label>
+            <input id="image_base_url" placeholder="https://api.openai.com/v1">
+            <div class="hint">OpenAI 兼容；会自动拼 /images/generations。</div>
+          </div>
+          <div class="fld"><label>模型名称</label>
+            <input id="image_model" list="imgModels" placeholder="gpt-image-1">
+            <datalist id="imgModels">
+              <option value="sensenova-u1.5-lite"></option>
+              <option value="gpt-image-1"></option>
+              <option value="dall-e-3"></option>
+              <option value="flux-schnell"></option>
+              <option value="seedream-4.0"></option>
+            </datalist>
+          </div>
+        </div>
+        <div class="fld" style="margin-top:14px"><label>API Key</label>
+          <div class="row">
+            <input id="image_api_key" type="password" placeholder="留空 / 保持掩码表示不修改">
+            <button class="btn" onclick="toggleKey('image_api_key', this)">显示</button>
+            <button class="btn danger" onclick="clearKey('image_api_key')">清空</button>
+          </div>
+        </div>
+        <div class="grid3" style="margin-top:14px">
+          <div class="fld"><label>店铺封面尺寸</label>
+            <select id="store_size">
+              <option value="2048x1536">2048x1536（3:2，2K）</option>
+              <option value="1664x2496">1664x2496（2:3，2K）</option>
+              <option value="1536x1024">1536x1024（4:3，gpt-image-1）</option>
+              <option value="1792x1024">1792x1024（DALL·E 3 横向）</option>
+              <option value="1024x768">1024x768（4:3 通用）</option>
+              <option value="1024x1024">1024x1024（方图）</option>
+            </select>
+          </div>
+          <div class="fld"><label>菜品图片尺寸</label>
+            <select id="dish_size">
+              <option value="2048x2048">2048x2048（1:1，2K）</option>
+              <option value="1664x2496">1664x2496（2:3，2K）</option>
+              <option value="1024x1024">1024x1024（1:1）</option>
+              <option value="1024x768">1024x768（4:3）</option>
+              <option value="1536x1024">1536x1024</option>
+            </select>
+          </div>
+          <div class="fld"><label>生图超时（秒）</label><input id="image_timeout_sec" type="number" min="30" step="10" placeholder="90"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 提示词 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h"><h2>提示词</h2></div>
+      <div class="form">
+        <div class="fld"><label>文本模型的系统提示词</label>
+          <textarea id="prompt_system" rows="4"></textarea>
+        </div>
+        <div class="fld"><label>给文本模型的用户消息模板</label>
+          <textarea id="prompt_template" rows="5"></textarea>
+          <div class="hint">可用变量：{dish} 菜品名 / {store} 店铺名 / {location} 位置 / {siblings} 同店其他菜品。</div>
+        </div>
+        <div class="fld"><label>风格后缀（追加到每条提示词）</label>
+          <textarea id="style_suffix" rows="3"></textarea>
+        </div>
+        <div class="grid2">
+          <div class="fld"><label>额外要求（可选）</label><textarea id="extra_prompt" rows="3" placeholder="例如：暖色调、木质桌面、浅景深"></textarea></div>
+          <div class="fld"><label>负向约束</label><textarea id="negative_prompt" rows="3" placeholder="no text, no watermark, no logo, no people"></textarea></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 测试 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h"><h2>测试</h2></div>
+      <div class="form">
+        <div class="grid3">
+          <div class="fld"><label>类型</label>
+            <select id="test_kind"><option value="dish">菜品</option><option value="store">店铺</option></select>
+          </div>
+          <div class="fld"><label>名称</label><input id="test_name" placeholder="例如：麻婆豆腐"></div>
+          <div class="fld"><label>所属店铺（可空）</label><input id="test_store" placeholder="例如：蜀香川菜馆"></div>
+        </div>
+        <div class="actions" style="margin-top:14px">
+          <button class="btn" id="testPromptBtn" onclick="testPrompt()">测试文本模型（只生成提示词）</button>
+          <button class="btn" id="testGenBtn" onclick="testGenerate()">测试生图（会消耗一次额度）</button>
+        </div>
+        <div id="promptOut" class="hint" style="margin-top:12px"></div>
+        <div class="preview" id="previewBox"><img id="previewImg" alt="预览"><div class="p" id="previewPrompt"></div></div>
+      </div>
+    </div>
+
+    <!-- 队列 -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
+        <h2>队列与补全</h2>
+        <div class="spacer"></div>
+        <button class="btn" onclick="loadJobs()">刷新</button>
+      </div>
+      <div class="form">
+        <div class="stat" id="statBar"></div>
+        <div class="grid3">
+          <div class="fld"><label>扫描范围</label>
+            <select id="scan_scope">
+              <option value="all">店铺 + 菜品</option>
+              <option value="stores">仅店铺</option>
+              <option value="dishes">仅菜品</option>
+            </select>
+          </div>
+          <div class="fld"><label>单次上限</label><input id="scan_limit" type="number" min="1" max="500" value="200"></div>
+          <div class="fld" style="display:flex;align-items:flex-end;gap:8px">
+            <button class="btn" onclick="scan(true)">预览待补全</button>
+            <button class="btn pri" onclick="scan(false)">全部入队</button>
+          </div>
+        </div>
+        <div id="scanOut" class="hint" style="margin-top:12px"></div>
+        <div style="overflow:auto;margin-top:14px">
+          <table>
+            <thead><tr><th>ID</th><th>对象</th><th>状态</th><th>提示词</th><th>时间</th><th>操作</th></tr></thead>
+            <tbody id="jobRows"><tr><td colspan="6" class="mono">加载中…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:20px">
+      <button class="btn pri" id="saveBtn" onclick="saveConfig()">保存配置</button>
+      <button class="btn" onclick="loadConfig()">重新加载</button>
+    </div>
+    <div class="form-msg" id="msg"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+let tTimer;
+function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(tTimer); tTimer=setTimeout(()=>t.classList.remove('on'),2200); }
+
+/* 主题（与其它后台页共用 key） */
+const ICONS={auto:'🌗 自动',light:'☀️ 浅色',dark:'🌙 深色'};
+function resolveTheme(mode){ if(mode==='light')return 'light'; if(mode==='dark')return 'dark';
+  const h=new Date().getHours(); return (h>=6&&h<18)?'light':'dark'; }
+function applyTheme(mode){ document.documentElement.dataset.mode=mode; document.documentElement.dataset.theme=resolveTheme(mode);
+  try{localStorage.setItem('chat_theme_mode',mode)}catch(e){} const b=$('themeBtn'); if(b) b.textContent=ICONS[mode]; }
+function cycleTheme(){ const o=['auto','light','dark']; const cur=document.documentElement.dataset.mode||'auto';
+  applyTheme(o[(o.indexOf(cur)+1)%o.length]); }
+(function(){ let s='auto'; try{s=localStorage.getItem('chat_theme_mode')||'auto'}catch(e){} applyTheme(s); })();
+
+const TEXT_FIELDS = ['text_base_url','text_model','image_base_url','image_model',
+  'prompt_system','prompt_template','style_suffix','extra_prompt','negative_prompt'];
+const NUM_FIELDS = ['daily_limit','retry_max','retry_backoff_sec','job_timeout_sec','text_temperature','text_max_tokens',
+  'text_timeout_sec','image_timeout_sec'];
+const SELECT_FIELDS = ['store_size','dish_size'];
+const BOOL_FIELDS = ['enabled','auto_on_create'];
+const KEY_FIELDS = ['text_api_key','image_api_key'];
+
+function setMsg(t, err){ const el=$('msg'); el.textContent=t||''; el.className='form-msg '+(err?'err':'ok'); }
+function toggleKey(id, btn){ const inp=$(id); const show=inp.type==='password';
+  inp.type=show?'text':'password'; btn.textContent=show?'隐藏':'显示'; }
+const clearedKeys = {};
+function clearKey(id){ $(id).value=''; clearedKeys[id]=true; setMsg('已清空 Key（记得点保存生效）'); }
+
+async function loadConfig(){
+  setMsg('加载中…');
+  try{
+    const r = await fetch('/api/admin/ai-image-config');
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ setMsg('加载失败：'+(d.detail||d.error||'未知错误'), true); return; }
+    fillForm(d.config||{});
+    renderReady(d.ready, d.config);
+    renderStats(d.stats);
+    setMsg('');
+  }catch(e){ setMsg('加载失败：'+e.message, true); }
+}
+
+function fillForm(c){
+  TEXT_FIELDS.forEach(k=>{ const el=$(k); if(el) el.value=(c[k] ?? ''); });
+  NUM_FIELDS.forEach(k=>{ const el=$(k); if(el) el.value=(c[k] ?? ''); });
+  SELECT_FIELDS.forEach(k=>{ const el=$(k); if(el && c[k]){
+    // 允许配置里是自定义值：没有对应 option 时补一个
+    if(![...el.options].some(o=>o.value===c[k])) el.add(new Option(c[k], c[k]));
+    el.value=c[k];
+  }});
+  BOOL_FIELDS.forEach(k=>{ const el=$(k); if(el) el.checked=!!c[k]; });
+  KEY_FIELDS.forEach(k=>{ const el=$(k); if(el){ el.value=(c[k] ?? ''); el.type='password'; } delete clearedKeys[k]; });
+}
+
+function renderReady(ready, c){
+  const t=$('readyTag');
+  t.textContent = ready ? '已就绪' : '未就绪';
+  t.className = 'tag ' + (ready ? 'ok' : 'canceled');
+}
+
+function renderStats(s){
+  s = s || {};
+  const bs = s.byStatus || {};
+  const items = [
+    ['排队', bs.queued||0], ['生成中', bs.running||0], ['成功', bs.ok||0],
+    ['失败', bs.failed||0], ['已取消', bs.canceled||0], ['今日已生成', s.todayDone||0]
+  ];
+  $('statBar').innerHTML = items.map(([k,v])=>`<span>${k} <b>${v}</b></span>`).join('');
+}
+
+async function saveConfig(){
+  const body = {};
+  TEXT_FIELDS.forEach(k=>{ body[k]=($(k).value ?? '').trim(); });
+  BOOL_FIELDS.forEach(k=>{ body[k]=!!$(k).checked; });
+  SELECT_FIELDS.forEach(k=>{ body[k]=$(k).value; });
+  for(const k of NUM_FIELDS){
+    const raw=($(k).value ?? '').trim(); const n=Number(raw);
+    if(raw==='' || !isFinite(n)){ setMsg('「'+k+'」需要填写有效数字', true); toast('保存失败'); return; }
+    body[k]=n;
+  }
+  KEY_FIELDS.forEach(k=>{ body[k]=$(k).value || ''; body['clear_'+k]=!!clearedKeys[k]; });
+  const btn=$('saveBtn'); btn.disabled=true; setMsg('保存中…');
+  try{
+    const r = await fetch('/api/admin/ai-image-config', { method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ setMsg('保存失败：'+(d.detail||d.error||'未知错误'), true); toast('保存失败'); return; }
+    fillForm(d.config||body);
+    renderReady(d.ready, d.config);
+    renderStats(d.stats);
+    setMsg('✅ 已保存'); toast('AI 生图配置已保存');
+    loadJobs();
+  }catch(e){ setMsg('保存失败：'+e.message, true); toast('保存失败'); }
+  finally{ btn.disabled=false; }
+}
+
+let lastPrompt = '';
+async function testPrompt(){
+  const name=($('test_name').value||'').trim();
+  if(!name){ toast('先填一个名称'); return; }
+  const btn=$('testPromptBtn'); btn.disabled=true;
+  $('promptOut').textContent='生成中…';
+  try{
+    const r = await fetch('/api/admin/ai-image/test-prompt', { method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ kind:$('test_kind').value, name, store:($('test_store').value||'').trim() }) });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ $('promptOut').textContent='失败：'+(d.detail||'未知错误'); lastPrompt=''; return; }
+    lastPrompt = d.prompt || '';
+    $('promptOut').innerHTML = '<b>'+(d.source==='model'?'文本模型':'内置模板')+'</b><br>'+escapeHtml(d.prompt);
+  }catch(e){ $('promptOut').textContent='失败：'+e.message; lastPrompt=''; }
+  finally{ btn.disabled=false; }
+}
+
+async function testGenerate(){
+  const name=($('test_name').value||'').trim();
+  if(!name && !lastPrompt){ toast('先填名称或生成提示词'); return; }
+  const btn=$('testGenBtn'); btn.disabled=true; toast('生图中，请稍候…');
+  try{
+    const body = { kind:$('test_kind').value, name, store:($('test_store').value||'').trim() };
+    if(lastPrompt) body.prompt=lastPrompt;
+    const r = await fetch('/api/admin/ai-image/test-generate', { method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ toast('生图失败：'+(d.detail||'未知错误')); return; }
+    $('previewImg').src=d.url+'?t='+Date.now();
+    $('previewPrompt').textContent='提示词：'+d.prompt+'　尺寸：'+d.size;
+    $('previewBox').style.display='block';
+    toast('生图完成');
+  }catch(e){ toast('生图失败：'+e.message); }
+  finally{ btn.disabled=false; }
+}
+
+async function scan(dryRun){
+  const limit=Math.max(1, Math.min(500, Number($('scan_limit').value||200)));
+  const scope=$('scan_scope').value;
+  if(!dryRun && !confirm('确认把扫描到的无图对象全部加入生成队列？')) return;
+  $('scanOut').textContent = dryRun ? '扫描中…' : '入队中…';
+  try{
+    const r = await fetch('/api/admin/ai-image/scan', { method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ scope, limit, dryRun }) });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ $('scanOut').textContent='失败：'+(d.detail||'未知错误'); return; }
+    const line = '店铺 '+(d.stores||[]).length+' 个、菜品 '+(d.dishes||[]).length+' 个无图'
+      + (dryRun ? '（预览，未入队）' : '，已入队 '+d.queued+' 条');
+    const names = [].concat((d.stores||[]).map(x=>x.name), (d.dishes||[]).map(x=>x.name)).slice(0,20);
+    $('scanOut').innerHTML = line + (names.length ? '<br>'+escapeHtml(names.join('、')) : '');
+    if(!dryRun) loadJobs();
+  }catch(e){ $('scanOut').textContent='失败：'+e.message; }
+}
+
+async function loadJobs(){
+  try{
+    const r = await fetch('/api/admin/ai-image/jobs?limit=30');
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok) return;
+    renderStats(d.stats);
+    const rows=(d.jobs||[]).map(j=>{
+      const kind = j.kind==='store' ? '店铺' : '菜品';
+      const ts = j.finished_at || j.updated_at || j.created_at;
+      const ops = [];
+      if(j.status==='failed' || j.status==='canceled') ops.push('<button class="btn" onclick="retryJob('+j.id+')">重试</button>');
+      if(j.status==='queued' || j.status==='running') ops.push('<button class="btn danger" onclick="cancelJob('+j.id+')">取消</button>');
+      return '<tr><td>'+j.id+'</td><td>'+kind+' #'+j.target_id+'</td>'
+        + '<td><span class="tag '+j.status+'">'+statusText(j.status)+'</span></td>'
+        + '<td class="prompt">'+escapeHtml(j.prompt || j.error || '—')+'</td>'
+        + '<td class="mono">'+(ts?new Date(Number(ts)).toLocaleString('zh-CN'):'—')+'</td>'
+        + '<td>'+ops.join(' ')+'</td></tr>';
+    });
+    $('jobRows').innerHTML = rows.length ? rows.join('') : '<tr><td colspan="6" class="mono">暂无任务</td></tr>';
+  }catch(e){}
+}
+
+function statusText(s){
+  return {queued:'排队中', running:'生成中', ok:'已完成', failed:'失败', canceled:'已取消'}[s] || s;
+}
+
+async function retryJob(id){
+  const r = await fetch('/api/admin/ai-image/jobs/'+id+'/retry', { method:'POST' });
+  const d = await r.json().catch(()=>({}));
+  toast(r.ok && d.ok ? '已重新入队' : '操作失败：'+(d.detail||''));
+  loadJobs();
+}
+async function cancelJob(id){
+  const r = await fetch('/api/admin/ai-image/jobs/'+id+'/cancel', { method:'POST' });
+  const d = await r.json().catch(()=>({}));
+  toast(r.ok && d.ok ? '已取消' : '操作失败：'+(d.detail||''));
+  loadJobs();
+}
+
+function escapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
+
+/* 启动 */
+(async function(){
+  const r = await fetch('/api/me'); const d = await r.json();
+  if(!d.ok || !d.user || !d.user.isAdmin){ $('deny').classList.remove('hidden'); return; }
+  $('whoami').textContent='@'+d.user.username;
+  $('main').classList.remove('hidden');
+  loadConfig(); loadJobs();
+  setInterval(loadJobs, 5000);
+})();
+</script>
+</body>
+</html>
