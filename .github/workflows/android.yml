@@ -46,10 +46,10 @@ jobs:
           echo "=== 已装 build-tools ==="
           ls "$SDK/build-tools" 2>/dev/null || true
 
+      # 不指定 gradle-version：runner 自带 Gradle 9.8.1（/usr/bin/gradle），
+      # 而 setup-gradle 的版本清单里 9.4 实际叫 9.4.0，写 9.4 会报 "does not exist"。
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.4'
 
       - name: 还原签名密钥
         env:
