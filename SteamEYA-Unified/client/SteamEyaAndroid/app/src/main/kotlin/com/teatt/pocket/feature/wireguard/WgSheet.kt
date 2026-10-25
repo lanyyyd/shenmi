@@ -1,8 +1,13 @@
 package com.teatt.pocket.feature.wireguard
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -57,6 +62,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.teatt.pocket.ui.BrandPink
 import com.wireguard.android.backend.Tunnel
 import kotlinx.coroutines.launch
@@ -91,6 +98,38 @@ fun WgSheet(
     }
     var keepAlive by remember {
         mutableStateOf(WgService.isKeepAliveEnabled(context))
+    }
+    // 通知权限被拒后的引导弹窗
+    var notifHint by remember { mutableStateOf(false) }
+
+    /** 去系统通知设置里打开本 App 的通知权限。 */
+    fun openNotificationSettings() {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+
+    /** 保存开关并让运行中的服务立即生效。 */
+    fun persistKeepAlive(enabled: Boolean) {
+        keepAlive = enabled
+        WgService.setKeepAliveEnabled(context, enabled)
+        WgService.refreshKeepAlive()
+    }
+
+    // Android 13+ 通知是运行时权限：首次勾选「通知保活」时向系统申请
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            persistKeepAlive(true)
+        } else {
+            persistKeepAlive(false)
+            notifHint = true
+        }
     }
 
     var profile by remember { mutableStateOf<WgApi.UserProfile?>(null) }
@@ -458,11 +497,29 @@ fun WgSheet(
 
             ToggleRow(
                 title = "通知保活",
-                desc = "常驻通知显示连接状态与网速",
+                desc = "常驻通知显示连接状态与网速，降低被系统回收的概率",
                 checked = keepAlive
-            ) {
-                keepAlive = it
-                WgService.setKeepAliveEnabled(context, it)
+            ) { on ->
+                if (!on) {
+                    persistKeepAlive(false)
+                    return@ToggleRow
+                }
+                val permissionGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.POST_NOTIFICATIONS
+                    ) == PackageManager.PERMISSION_GRANTED
+                when {
+                    // 首次勾选：先跳系统通知权限
+                    !permissionGranted ->
+                        notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    // 权限给了但用户在系统里关掉了通知：引导去设置
+                    !NotificationManagerCompat.from(context).areNotificationsEnabled() -> {
+                        persistKeepAlive(false)
+                        notifHint = true
+                    }
+                    else -> persistKeepAlive(true)
+                }
             }
 
             Spacer(Modifier.height(30.dp))
@@ -482,6 +539,23 @@ fun WgSheet(
             },
             confirmButton = {
                 TextButton(onClick = { showConfig = false }) { Text("关闭") }
+            }
+        )
+    }
+
+    if (notifHint) {
+        AlertDialog(
+            onDismissRequest = { notifHint = false },
+            title = { Text("需要通知权限") },
+            text = { Text("通知保活依赖常驻通知来降低被系统回收的概率，请允许本应用发送通知。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    notifHint = false
+                    openNotificationSettings()
+                }) { Text("去设置") }
+            },
+            dismissButton = {
+                TextButton(onClick = { notifHint = false }) { Text("取消") }
             }
         )
     }

@@ -89,6 +89,16 @@ class WgService : Service() {
         /** 当前上传速度（字节/秒）。 */
         fun upSpeedValue(): Long = upSpeed
 
+        /** 运行中的服务实例：面板改「通知保活」开关时直接通知它刷新，不用重启服务。 */
+        @Volatile private var runningService: WgService? = null
+
+        /** 通知保活开关变更后调用：让运行中的服务立刻加上或撤掉常驻通知。 */
+        fun refreshKeepAlive() {
+            runningService?.let { svc ->
+                svc.handler.post { svc.applyKeepAlive() }
+            }
+        }
+
         /** 启动前台服务（连接成功后调用，隧道由它持有）。 */
         fun start(context: Context) {
             val intent = Intent(context, WgService::class.java)
@@ -167,6 +177,7 @@ class WgService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        runningService = this
         createNotificationChannel()
         WgManager.getInstance(this).initialize()
     }
@@ -185,6 +196,10 @@ class WgService : Service() {
                 WgManager.getInstance(this).addStateListener(tunnelListener)
                 // 初始通知用隧道真实状态，不要一上来就显示"已连接"
                 startForegroundCompat(buildNotification(WgManager.getInstance(this).state.value))
+                // 用户关闭通知保活：撤掉常驻通知，服务降级为普通后台服务
+                if (!isKeepAliveEnabled(this)) {
+                    runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+                }
                 handler.post(samplingTick)
                 // 服务被系统重启（进程被杀）后，如果之前连着且有配置，直接恢复连接
                 restoreIfNeeded()
@@ -199,6 +214,7 @@ class WgService : Service() {
         WgManager.getInstanceOrNull()?.removeStateListener(tunnelListener)
         reconnectJob?.cancel()
         scope.cancel()
+        if (runningService === this) runningService = null
         super.onDestroy()
     }
 
@@ -340,12 +356,24 @@ class WgService : Service() {
             .setContentTitle("神秘WiFi")
             .setContentText(text)
             .setSmallIcon(R.drawable.wg_notification)
-            .setOngoing(connected)
+            // 开着通知保活时常驻、划不掉，靠前台服务通知把进程钉住
+            .setOngoing(isKeepAliveEnabled(this) || connected)
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setContentIntent(open)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
+    }
+
+    /** 「通知保活」开关切换后立即生效：开 → 重新进前台并挂常驻通知；关 → 撤通知。 */
+    private fun applyKeepAlive() {
+        if (isKeepAliveEnabled(this)) {
+            startForegroundCompat(buildNotification(WgManager.getInstance(this).state.value))
+            updateNotification()
+        } else {
+            runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+            getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
+        }
     }
 
     private fun updateNotification() {
