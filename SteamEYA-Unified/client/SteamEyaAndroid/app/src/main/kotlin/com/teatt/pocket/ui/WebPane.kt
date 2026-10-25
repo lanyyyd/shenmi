@@ -16,10 +16,19 @@ import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -32,7 +41,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.teatt.pocket.BuildConfig
 import com.teatt.pocket.core.Api
@@ -62,11 +73,16 @@ fun WebPane(
     var webView by remember { mutableStateOf<WebView?>(null) }
     var ready by remember { mutableStateOf(false) }
     var progress by remember { mutableIntStateOf(0) }
+    // 主文档加载失败（断网 / 超时）：盖一层原生错误页，别让 WebView 自己那套「网页无法打开」露出来
+    var failed by remember { mutableStateOf(false) }
 
     // 用普通对象记录已加载地址：放 state 会在组合期写状态，多触发一轮重组
     val loaded = remember { UrlSlot() }
     val barPx by rememberUpdatedState(barInsetPx)
     val bgArgb = remember(backgroundColor) { backgroundColor.toArgb() }
+
+    // 失败时 WebView 是隐藏的，这里要把它一起算进去
+    val webVisible = visible && !failed
 
     BackHandler(enabled = visible && webView?.canGoBack() == true) {
         webView?.goBack()
@@ -83,6 +99,7 @@ fun WebPane(
         if (loaded.value != url) {
             loaded.value = url
             ready = false
+            failed = false
             view.loadUrl(url)
         }
     }
@@ -159,7 +176,14 @@ fun WebPane(
                             request: WebResourceRequest?,
                             error: android.webkit.WebResourceError?
                         ) {
-                            // 断网/超时也要撤掉占位层，露出 WebView 自己的错误页
+                            // 只有主文档失败才切原生错误页；子资源失败（图片挂了）不影响页面
+                            if (request?.isForMainFrame == true) {
+                                failed = true
+                                progress = 0
+                                // 立刻藏掉 WebView，别让系统错误页「网页无法打开」闪一下
+                                view?.visibility = View.INVISIBLE
+                            }
+                            // 断网/超时也要撤掉占位层，别让同色底一直盖着
                             ready = true
                         }
 
@@ -197,7 +221,7 @@ fun WebPane(
                 // 只切可见性，**不要**调 onPause/onResume。
                 // 一旦 pause，WebView 的渲染进程会被降级，切回来要重建表面，
                 // 就是用户看到的那一下白闪（两个 WebView 交替暂停/恢复时尤其明显）。
-                val want = if (visible) View.VISIBLE else View.INVISIBLE
+                val want = if (webVisible) View.VISIBLE else View.INVISIBLE
                 if (view.visibility != want) view.visibility = want
             },
             onRelease = { view ->
@@ -209,11 +233,11 @@ fun WebPane(
         )
 
         // 首帧占位：commit 之前盖一层同色底，消掉白底闪一下
-        if (!ready) {
+        if (!ready && !failed) {
             Box(Modifier.fillMaxSize().background(backgroundColor))
         }
 
-        if (progress in 1..99) {
+        if (progress in 1..99 && !failed) {
             LinearProgressIndicator(
                 progress = { progress / 100f },
                 modifier = Modifier
@@ -222,12 +246,58 @@ fun WebPane(
                     .align(Alignment.TopCenter)
             )
         }
+
+        // 断网错误页：和「吃什么」的空态一致——图标 + 提示语 + 重试按钮
+        if (failed) {
+            Box(
+                Modifier.fillMaxSize().background(backgroundColor),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Filled.WifiOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(34.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "网络连接失败，请检查网络后重试",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    TextButton(onClick = {
+                        failed = false
+                        ready = false
+                        webView?.reloadOrFallback(url)
+                    }) {
+                        Text("重试")
+                    }
+                }
+            }
+        }
     }
 }
 
 /** 只用来存一个字符串，不参与重组。 */
 private class UrlSlot {
     var value: String? = null
+}
+
+/**
+ * 刷新当前页。
+ * 加载失败后 WebView 停在内部错误页，个别机型此时 getUrl() 是 about:blank，
+ * 直接 reload() 等于没反应，所以拿不到 http(s) 地址时退回原始 URL 重新走一遍。
+ */
+private fun WebView.reloadOrFallback(fallbackUrl: String) {
+    val current = url
+    if (current.isNullOrBlank() || !current.startsWith("http")) {
+        loadUrl(fallbackUrl)
+    } else {
+        reload()
+    }
 }
 
 /**
