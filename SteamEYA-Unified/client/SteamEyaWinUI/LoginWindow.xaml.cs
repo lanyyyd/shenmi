@@ -65,32 +65,49 @@ public sealed partial class LoginWindow : Window
         ApplyTabStyle(TabRegisterButton, _isRegister);
     }
 
-    /// <summary>取主题强调色画刷；资源缺失时退回注册表同款的粉色兜底。</summary>
-    private static Brush AccentBrush()
+    /// <summary>默认按钮底（与「退出登录」一致：浅色主题近白，深色主题浅灰）。</summary>
+    private static Brush DefaultFillBrush() => ResourceBrush("ControlFillColorDefaultBrush", 0xFF, 0xFF, 0xFF, 0xFF);
+
+    private static Brush PrimaryTextBrush() => ResourceBrush("TextFillColorPrimaryBrush", 0xFF, 0x1A, 0x1A, 0x1A);
+
+    /// <summary>次级文字色；旧主题里叫 AuroraTextMutedBrush，两个都试一下。</summary>
+    private static Brush MutedTextBrush()
     {
-        if (Application.Current.Resources.TryGetValue("AccentFillColorDefaultBrush", out var value) &&
-            value is Brush brush)
+        foreach (var key in new[] { "TextFillColorSecondaryBrush", "AuroraTextMutedBrush" })
+        {
+            if (Application.Current.Resources.TryGetValue(key, out var value) && value is Brush brush)
+            {
+                return brush;
+            }
+        }
+
+        return new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0x66, 0x66, 0x66));
+    }
+
+    /// <summary>按资源键取画刷，取不到用给定 ARGB 兜底，避免登录页因主题资源缺失而崩。</summary>
+    private static Brush ResourceBrush(string key, byte a, byte r, byte g, byte b)
+    {
+        if (Application.Current.Resources.TryGetValue(key, out var value) && value is Brush brush)
         {
             return brush;
         }
 
-        return new SolidColorBrush(Windows.UI.Color.FromArgb(255, 236, 72, 153));
+        return new SolidColorBrush(Windows.UI.Color.FromArgb(a, r, g, b));
     }
 
     private static void ApplyTabStyle(Button button, bool selected)
     {
         if (selected)
         {
-            // 与「获取账号并一键上号」同一个画刷（AccentButtonStyle 用的就是它），
-            // 之前用 AuroraAccentGradientBrush 是粉→紫渐变，和主界面的纯色按钮对不上。
-            button.Background = AccentBrush();
-            button.Foreground = new SolidColorBrush(Colors.White);
+            // 用「退出登录」那种默认按钮底色（浅色主题是白色），不再用强调色/渐变。
+            button.Background = DefaultFillBrush();
+            button.Foreground = PrimaryTextBrush();
             button.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
             return;
         }
 
         button.Background = new SolidColorBrush(Colors.Transparent);
-        button.Foreground = (Brush)Application.Current.Resources["AuroraTextMutedBrush"];
+        button.Foreground = MutedTextBrush();
         button.FontWeight = Microsoft.UI.Text.FontWeights.Normal;
     }
 

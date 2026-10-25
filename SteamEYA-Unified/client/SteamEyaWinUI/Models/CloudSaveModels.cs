@@ -95,7 +95,16 @@ internal sealed class CloudSaveGameDto
 {
     public string Key { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>创建者填的存档目录，随游戏下发，别人还原时用同一路径。</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("save_dir")]
+    public string SaveDir { get; set; } = string.Empty;
+
     public bool Builtin { get; set; }
+    public bool Visible { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("mine")]
+    public bool Mine { get; set; }
 }
 
 internal sealed class CloudSaveGamesDto

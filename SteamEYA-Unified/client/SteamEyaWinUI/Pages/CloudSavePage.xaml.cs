@@ -39,6 +39,9 @@ public sealed partial class CloudSavePage : Page
     /// <summary>用户自定义的游戏（名字来自服务端目录，存档目录只存本机）。</summary>
     private List<CustomSaveGame> _customGames = [];
 
+    /// <summary>服务端下发的自定义游戏（别人加过且已上传过的），带创建者填的存档目录。</summary>
+    private List<CloudSaveGameDto> _remoteGames = [];
+
     /// <summary>重建下拉框期间屏蔽 SelectionChanged，避免清空时触发一次无用加载。</summary>
     private bool _rebuildingGames;
 
@@ -50,7 +53,31 @@ public sealed partial class CloudSavePage : Page
         BuildGameCombo();
         UpdateAutoBackupState();
 
-        Loaded += async (_, _) => await ReloadAsync();
+        Loaded += async (_, _) =>
+        {
+            await LoadRemoteGamesAsync();
+            await ReloadAsync();
+        };
+    }
+
+    /// <summary>拉服务端已公开的自定义游戏，补进下拉框（别人传过存档的也能直接用）。</summary>
+    private async Task LoadRemoteGamesAsync()
+    {
+        try
+        {
+            var dto = await _service.GamesAsync();
+            if (dto.Ok && dto.Games is { Count: > 0 } games)
+            {
+                _remoteGames = games;
+                BuildGameCombo();
+                UpdateAutoBackupState();
+            }
+        }
+        catch (Exception ex)
+        {
+            // 离线/未登录时不影响本机内置游戏与本地自定义游戏。
+            AppLog.Debug($"拉取云存档游戏列表失败：{ex.Message}");
+        }
     }
 
     /// <summary>重建游戏下拉框：内置 3 个在前，自定义在后；尽量保持当前选中项。</summary>
@@ -72,6 +99,18 @@ public sealed partial class CloudSavePage : Page
             foreach (var custom in _customGames)
             {
                 GameCombo.Items.Add(new ComboBoxItem { Content = custom.Name, Tag = custom.Key });
+            }
+
+            // 别人上传过、已对所有人公开的自定义游戏也列出来，直接就能下载还原。
+            var localKeys = _customGames.Select(g => g.Key).ToHashSet(StringComparer.Ordinal);
+            foreach (var remote in _remoteGames)
+            {
+                if (remote.Builtin || localKeys.Contains(remote.Key))
+                {
+                    continue;
+                }
+
+                GameCombo.Items.Add(new ComboBoxItem { Content = remote.Name, Tag = remote.Key });
             }
 
             var index = 0;
@@ -105,6 +144,13 @@ public sealed partial class CloudSavePage : Page
             return custom.Name;
         }
 
+        // 别人上传过的自定义游戏：本地清单里没有，名字从服务端列表取。
+        var remote = _remoteGames.FirstOrDefault(g => string.Equals(g.Key, game, StringComparison.Ordinal));
+        if (remote is not null && !string.IsNullOrWhiteSpace(remote.Name))
+        {
+            return remote.Name;
+        }
+
         foreach (var (key, name) in BuiltinGames)
         {
             if (string.Equals(key, game, StringComparison.Ordinal))
@@ -122,9 +168,18 @@ public sealed partial class CloudSavePage : Page
     /// </summary>
     private string? FixedSaveDir(string game)
     {
+        // 本地清单优先：自己填的路径能改，服务端那份是别人填的。
         if (CustomSaveStore.Find(game) is { } custom)
         {
             return string.IsNullOrWhiteSpace(custom.SaveDir) ? null : custom.SaveDir;
+        }
+
+        // 别人共享的游戏：用服务端下发的路径，这样还原到约定位置。
+        var remote = _remoteGames.FirstOrDefault(g =>
+            !g.Builtin && string.Equals(g.Key, game, StringComparison.Ordinal));
+        if (remote is not null)
+        {
+            return string.IsNullOrWhiteSpace(remote.SaveDir) ? null : remote.SaveDir;
         }
 
         return game switch
@@ -377,7 +432,7 @@ public sealed partial class CloudSavePage : Page
                 // 先问服务端要 key：同名会复用同一条，避免同一款游戏被拆成多个 key。
                 try
                 {
-                    var reg = await _service.RegisterGameAsync(name);
+                    var reg = await _service.RegisterGameAsync(name, dir);
                     if (reg.Ok && !string.IsNullOrWhiteSpace(reg.Key))
                     {
                         key = reg.Key;
@@ -452,7 +507,7 @@ public sealed partial class CloudSavePage : Page
         try
         {
             ZipFile.CreateFromDirectory(saveDir, tempZip, CompressionLevel.Optimal, includeBaseDirectory: false);
-            var result = await _service.UploadAsync(_game, tempZip, null, null, "auto");
+            var result = await _service.UploadAsync(_game, tempZip, null, null, "auto", FixedSaveDir(_game));
             if (result.Ok)
             {
                 ShowInfo("自动备份成功", InfoBarSeverity.Success);
@@ -603,7 +658,14 @@ public sealed partial class CloudSavePage : Page
             return;
         }
 
-        if (!await ConfirmRestoreAsync())
+        // 路径可能来自服务端（别人填的），清空前必须确认不是盘根/系统目录。
+        if (!IsSafeToClear(destDir))
+        {
+            ShowInfo($"拒绝还原到该目录（路径过于宽泛）：{destDir}", InfoBarSeverity.Error);
+            return;
+        }
+
+        if (!await ConfirmRestoreAsync(destDir))
         {
             return;
         }
@@ -648,18 +710,108 @@ public sealed partial class CloudSavePage : Page
     }
 
     /// <summary>还原前的二次确认（默认停在「取消」上，避免误触覆盖）。</summary>
-    private async Task<bool> ConfirmRestoreAsync()
+    private async Task<bool> ConfirmRestoreAsync(string destDir)
     {
+        var exists = Directory.Exists(destDir);
+        var body = new StackPanel { Spacing = 10 };
+        body.Children.Add(new TextBlock
+        {
+            Text = exists ? "将把存档解压到下面这个目录：" : "该目录还不存在，将会自动创建，然后把存档解压到：",
+            TextWrapping = TextWrapping.Wrap
+        });
+        body.Children.Add(new TextBlock
+        {
+            Text = destDir,
+            IsTextSelectionEnabled = true,
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+            TextWrapping = TextWrapping.Wrap
+        });
+        body.Children.Add(new TextBlock
+        {
+            Text = "目录内现有的文件和子目录会先被清空，再写入存档，避免新旧存档混在一起。建议先备份现有存档。",
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 12,
+            Foreground = SecondaryTextBrush()
+        });
+
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
             Title = "还原存档",
-            Content = "确定还原存档后将会覆盖现有存档，建议将现有存档备份后再进行还原存档喵~",
-            PrimaryButtonText = "继续还原",
+            Content = body,
+            PrimaryButtonText = "清空并还原",
             CloseButtonText = "取消",
             DefaultButton = ContentDialogButton.Close
         };
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    /// <summary>
+    /// 清空前的安全闸：拒绝盘根、系统目录、用户主目录本身。
+    /// 存档路径可能由别人填在服务端，不能无条件递归删除。
+    /// </summary>
+    private static bool IsSafeToClear(string dir)
+    {
+        if (string.IsNullOrWhiteSpace(dir))
+        {
+            return false;
+        }
+
+        string full;
+        try
+        {
+            if (!Path.IsPathFullyQualified(dir))
+            {
+                return false;
+            }
+
+            full = Path.GetFullPath(dir)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch
+        {
+            return false;
+        }
+
+        var root = (Path.GetPathRoot(full) ?? string.Empty)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        // 盘根（C:\）没有可清空的意义，直接拒绝。
+        if (full.Length == 0 || string.Equals(full, root, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        foreach (var protectedDir in ProtectedClearTargets())
+        {
+            if (string.IsNullOrWhiteSpace(protectedDir))
+            {
+                continue;
+            }
+
+            var p = protectedDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(full, p, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>不允许被整体清空的系统目录（它们的子目录仍然可以）。</summary>
+    private static IEnumerable<string> ProtectedClearTargets()
+    {
+        yield return Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        yield return Environment.GetFolderPath(Environment.SpecialFolder.System);
+        yield return Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        yield return Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        yield return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        yield return Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        yield return Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        yield return Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+        yield return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        yield return Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
     }
 
     /// <summary>清空目录内的全部文件与子目录（保留目录本身），防止新旧存档叠加。</summary>
@@ -817,7 +969,7 @@ public sealed partial class CloudSavePage : Page
 
         try
         {
-            var result = await _service.UploadAsync(_game, file.Path, null, null, "drag");
+            var result = await _service.UploadAsync(_game, file.Path, null, null, "drag", FixedSaveDir(_game));
             if (result.Ok)
             {
                 ShowInfo($"上传成功（{GameName(_game)}）", InfoBarSeverity.Success);

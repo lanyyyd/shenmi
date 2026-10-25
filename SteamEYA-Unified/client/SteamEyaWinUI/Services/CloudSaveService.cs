@@ -64,17 +64,28 @@ internal sealed class CloudSaveService
     }
 
     /// <summary>登记自定义游戏名；同名会返回已有 key（含内置游戏名）。</summary>
-    public async Task<CloudSaveRegisterDto> RegisterGameAsync(string name, CancellationToken ct = default)
+    public async Task<CloudSaveRegisterDto> RegisterGameAsync(
+        string name, string? saveDir = null, CancellationToken ct = default)
     {
         using var req = NewRequest(HttpMethod.Post, "/api/save/games");
         // 用 JsonObject 手拼，避免为匿名对象新增源生成声明（AOT 下反射式序列化被禁用）。
-        var payload = new System.Text.Json.Nodes.JsonObject { ["name"] = name }.ToJsonString();
-        req.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+        var json = new System.Text.Json.Nodes.JsonObject { ["name"] = name };
+        if (!string.IsNullOrWhiteSpace(saveDir))
+        {
+            // 路径随游戏下发，别人还原时才知道该往哪个目录放。
+            json["save_dir"] = saveDir;
+        }
+
+        req.Content = new StringContent(json.ToJsonString(), Encoding.UTF8, "application/json");
         return await SendJsonAsync(req, CloudSaveJsonContext.Default.CloudSaveRegisterDto, ct);
     }
 
+    /// <param name="saveDir">
+    /// 本机存档目录。首个上传者填的路径会被服务端记下，之后所有人还原都用这个路径。
+    /// </param>
     public async Task<CloudSaveUploadDto> UploadAsync(
-        string game, string zipPath, string? name, string? remark, string source, CancellationToken ct = default)
+        string game, string zipPath, string? name, string? remark, string source,
+        string? saveDir = null, CancellationToken ct = default)
     {
         using var req = NewRequest(HttpMethod.Post, "/api/save/upload");
         using var form = new MultipartFormDataContent();
@@ -82,6 +93,10 @@ internal sealed class CloudSaveService
         form.Add(new StringContent(name ?? string.Empty), "name");
         form.Add(new StringContent(remark ?? string.Empty), "remark");
         form.Add(new StringContent(source), "source");
+        if (!string.IsNullOrWhiteSpace(saveDir))
+        {
+            form.Add(new StringContent(saveDir), "save_dir");
+        }
 
         var bytes = await File.ReadAllBytesAsync(zipPath, ct);
         var fileContent = new ByteArrayContent(bytes);
