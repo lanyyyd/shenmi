@@ -8,6 +8,7 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
 import com.teatt.pocket.core.Session
+import okio.Path.Companion.toOkioPath
 
 @SuppressLint("StaticFieldLeak")
 class App : Application(), SingletonImageLoader.Factory {
@@ -32,7 +33,7 @@ class App : Application(), SingletonImageLoader.Factory {
         ImageLoader.Builder(context)
             .diskCache {
                 DiskCache.Builder()
-                    .directory(context.cacheDir.resolve("image_cache"))
+                    .directory(context.cacheDir.resolve("image_cache").toOkioPath())
                     .maxSizeBytes(256L * 1024 * 1024)
                     .build()
             }
