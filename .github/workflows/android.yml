@@ -101,9 +101,9 @@ jobs:
           TAG="android-v1.0.$PATCH"
           cp out/ShenMi-android.apk "ShenMi-1.0.$PATCH-android.apk"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "TeaTT-1.0.$PATCH-android.apk" --clobber
+            gh release upload "$TAG" "ShenMi-1.0.$PATCH-android.apk" --clobber
           else
-            gh release create "$TAG" "TeaTT-1.0.$PATCH-android.apk" \
+            gh release create "$TAG" "ShenMi-1.0.$PATCH-android.apk" \
               --title "神·魔法武器 安卓 1.0.$PATCH" \
               --notes "安卓客户端构建产物（直接安装 APK，固定签名可覆盖升级）。"
           fi
