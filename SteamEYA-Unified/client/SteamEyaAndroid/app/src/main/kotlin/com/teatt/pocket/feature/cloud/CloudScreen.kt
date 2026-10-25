@@ -58,6 +58,7 @@ import com.teatt.pocket.core.CookieDto
 import com.teatt.pocket.data.CloudApi
 import com.teatt.pocket.ui.BrandPink
 import com.teatt.pocket.ui.LocalBarInset
+import com.teatt.pocket.ui.NetworkErrorPane
 import kotlinx.coroutines.launch
 
 @Composable
@@ -68,6 +69,8 @@ fun CloudScreen(
     var accounts by remember { mutableStateOf<List<CloudAccountDto>>(emptyList()) }
     var games by remember { mutableStateOf<List<CloudGameDto>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    // 断网 / 接口失败且本地还没有数据时，整页显示「重试」；已有列表则保留内容只弹窗提示
+    var failed by remember { mutableStateOf(false) }
     var busyKey by remember { mutableStateOf<String?>(null) }
     var captureTarget by remember { mutableStateOf<CloudGameDto?>(null) }
     var pasteTarget by remember { mutableStateOf<CloudGameDto?>(null) }
@@ -76,10 +79,17 @@ fun CloudScreen(
     val scope = rememberCoroutineScope()
 
     suspend fun reload() {
+        failed = false
         runCatching {
             accounts = CloudApi.my(token)
             games = CloudApi.games(token)
-        }.onFailure { dialog = "加载失败" to (it.message ?: "请稍后重试") }
+        }.onFailure {
+            if (accounts.isEmpty()) {
+                failed = true
+            } else {
+                dialog = "加载失败" to (it.message ?: "请稍后重试")
+            }
+        }
         loading = false
     }
 
@@ -237,6 +247,17 @@ fun CloudScreen(
                     )
                 }
             }
+        }
+
+        // 首次拉取就失败（典型场景：断网打开 App）：整页提示 + 重试，和聊天页保持一致
+        if (failed) {
+            NetworkErrorPane(
+                onRetry = {
+                    failed = false
+                    loading = true
+                    scope.launch { reload() }
+                }
+            )
         }
     }
 
