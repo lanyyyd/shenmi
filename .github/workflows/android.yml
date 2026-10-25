@@ -57,10 +57,12 @@ jobs:
         run: |
           curl -sSL -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-9.0-bin.zip
           unzip -q /tmp/gradle.zip -d "$HOME/.gradle-dist"
-          echo "$HOME/.gradle-dist/gradle-9.0/bin" >> "$GITHUB_PATH"
+          # 用绝对路径，不依赖 PATH：setup-gradle 会把 runner 自带的 9.8.1 顶在前面
+          echo "GRADLE_BIN=$HOME/.gradle-dist/gradle-9.0/bin/gradle" >> "$GITHUB_ENV"
 
       - name: 确认 Gradle 版本
-        run: gradle --version
+        run: |
+          "$GRADLE_BIN" --version
 
       - name: 还原签名密钥
         env:
@@ -84,7 +86,7 @@ jobs:
           # 版本号与桌面端一致：1.0.<构建序号偏移>，安卓独立计数
           PATCH=$(( GITHUB_RUN_NUMBER ))
           echo "版本 1.0.$PATCH (code=$PATCH)"
-          gradle :app:assembleRelease \
+          "$GRADLE_BIN" :app:assembleRelease \
             -PappVersionName="1.0.$PATCH" \
             -PappVersionCode="$PATCH" \
             --no-daemon --stacktrace
