@@ -69,6 +69,14 @@ object Api {
         return execute(builder.build())
     }
 
+    suspend fun putJson(path: String, body: String, token: String? = null): String {
+        val builder = Request.Builder()
+            .url(buildUrl(path, emptyMap()))
+            .put(body.toRequestBody(JSON))
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        return execute(builder.build())
+    }
+
     suspend fun postForm(path: String, parts: Map<String, String>, token: String? = null): String {
         val form = MultipartBody.Builder().setType(MultipartBody.FORM)
         parts.forEach { (k, v) -> form.addFormDataPart(k, v) }

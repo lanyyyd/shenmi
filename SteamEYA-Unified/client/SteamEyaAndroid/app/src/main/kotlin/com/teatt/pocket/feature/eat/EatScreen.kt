@@ -29,6 +29,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarHalf
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -79,6 +81,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * 「今天吃点啥」原生版。
@@ -394,7 +397,7 @@ private fun StoreCard(store: EatStore, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height(4.dp))
-                StarRow(rating = store.rating, count = store.ratingCount)
+                StarRow(store.rating)
                 if (store.location.isNotBlank()) {
                     Spacer(Modifier.height(3.dp))
                     Text(
@@ -438,6 +441,8 @@ private fun StoreDetailPage(
     var pending by remember { mutableStateOf(false) }
     var choosing by remember { mutableStateOf(false) }
     var confirmTask by remember { mutableStateOf<EatTask?>(null) }
+    var cover by remember(store.id) { mutableStateOf(store.image) }
+    var aiOpen by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val bottomInset = LocalBarInset.current + 20.dp
@@ -471,7 +476,7 @@ private fun StoreDetailPage(
             }
             item {
                 EatCover(
-                    url = store.image,
+                    url = cover,
                     modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(18.dp))
                 )
             }
@@ -479,7 +484,7 @@ private fun StoreDetailPage(
                 Column(Modifier.padding(top = 12.dp)) {
                     Text(store.name, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(5.dp))
-                    StarRow(rating = store.rating, count = store.ratingCount)
+                    StarRow(store.rating)
                     if (store.location.isNotBlank()) {
                         Spacer(Modifier.height(4.dp))
                         Text(
@@ -487,6 +492,9 @@ private fun StoreDetailPage(
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                    TextButton(onClick = { aiOpen = true }, contentPadding = PaddingValues(0.dp)) {
+                        Text("🎨 AI 重绘配图", fontSize = 12.sp, color = BrandPink)
                     }
                 }
             }
@@ -555,8 +563,13 @@ private fun StoreDetailPage(
     picked?.let { dish ->
         DishDetailDialog(
             dish = dish,
+            token = token,
             busy = choosing,
             onDismiss = { picked = null },
+            onImageUpdated = { url ->
+                picked = dish.copy(image = url)
+                scope.launch { runCatching { dishes = EatApi.storeDetail(token, store.id).dishes } }
+            },
             onChoose = {
                 if (!choosing) {
                     choosing = true
@@ -571,6 +584,21 @@ private fun StoreDetailPage(
                         choosing = false
                     }
                 }
+            }
+        )
+    }
+
+    if (aiOpen) {
+        AiRegenDialog(
+            token = token,
+            kind = "store",
+            id = store.id,
+            title = store.name,
+            currentImage = cover,
+            onDismiss = { aiOpen = false },
+            onUpdated = { url ->
+                cover = url
+                scope.launch { runCatching { dishes = EatApi.storeDetail(token, store.id).dishes } }
             }
         )
     }
@@ -606,8 +634,8 @@ private fun DishCard(dish: EatDish, modifier: Modifier = Modifier, onClick: () -
 // ---------------------------------------------------------------- 通用小组件
 
 @Composable
-fun EatCover(url: String?, modifier: Modifier = Modifier, fallback: String = "🍽️") {
-    val real = EatApi.imageUrl(url)
+fun EatCover(url: String?, modifier: Modifier = Modifier, fallback: String = "🍽️", cacheTick: Int = 0) {
+    val real = EatApi.imageUrl(url)?.let { if (cacheTick > 0) "$it?t=$cacheTick" else it }
     Box(modifier.background(Brush.linearGradient(listOf(BrandPink.copy(alpha = .22f), BrandViolet.copy(alpha = .18f))))) {
         if (!real.isNullOrBlank()) {
             AsyncImage(
@@ -625,24 +653,32 @@ fun EatCover(url: String?, modifier: Modifier = Modifier, fallback: String = "�
 }
 
 @Composable
-fun StarRow(rating: Double?, count: Int) {
+fun StarRow(rating: Double?, modifier: Modifier = Modifier) {
     if (rating == null) {
-        Text("暂无评分", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("暂无评分", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = modifier)
         return
     }
-    Text("★", fontSize = 12.sp, color = Color(0xFFF59E0B))
-    Spacer(Modifier.width(3.dp))
-    Text(
-        String.format(Locale.US, "%.1f", rating),
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = Color(0xFFF59E0B)
-    )
-    if (count > 0) {
+    // 按分数画星，就近取 0.5：4.0 → 4 颗，4.5 → 4.5 颗，4.8 → 5 颗
+    val half = (rating * 2).roundToInt() / 2.0
+    val full = half.toInt()
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        repeat(full) {
+            Icon(Icons.Filled.Star, null, Modifier.size(13.dp), tint = StarColor)
+        }
+        if (half - full >= 0.5) {
+            Icon(Icons.Filled.StarHalf, null, Modifier.size(13.dp), tint = StarColor)
+        }
         Spacer(Modifier.width(4.dp))
-        Text("($count)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            "(${String.format(Locale.US, "%.1f", rating)})",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = StarColor
+        )
     }
 }
+
+private val StarColor = Color(0xFFF59E0B)
 
 @Composable
 fun PrimaryButton(

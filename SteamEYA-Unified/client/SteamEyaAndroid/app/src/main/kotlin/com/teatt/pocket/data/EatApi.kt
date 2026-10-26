@@ -2,6 +2,7 @@ package com.teatt.pocket.data
 
 import com.teatt.pocket.core.Api
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -160,6 +161,14 @@ data class EatUploadDto(val ok: Boolean = false, val url: String = "")
 @Serializable
 data class EatLikeDto(val ok: Boolean = false, val liked: Boolean = false)
 
+@Serializable
+data class EatImageStatusDto(
+    val ok: Boolean = false,
+    val image: String = "",
+    val status: String = "",
+    val error: String = ""
+)
+
 object EatApi {
 
     private const val BASE = "/api/eat"
@@ -232,6 +241,41 @@ object EatApi {
         val raw = Api.postJson("$BASE/reviews", body, token)
         return Api.decode<ReviewCreateDto>(raw).review
     }
+
+    /** 编辑自己的评价：店铺/菜品不可改，只能改评分、评语、图片和「一起吃」。 */
+    suspend fun updateReview(
+        token: String,
+        reviewId: Int,
+        rating: Int?,
+        comment: String,
+        images: List<String>,
+        guestIds: List<Int>
+    ): EatReview {
+        val body = buildJsonObject {
+            put("rating", if (rating != null) JsonPrimitive(rating) else JsonNull)
+            put("comment", JsonPrimitive(comment))
+            put("images", buildJsonArray { images.forEach { add(JsonPrimitive(it)) } })
+            put("guestIds", buildJsonArray { guestIds.forEach { add(JsonPrimitive(it)) } })
+        }.toString()
+        val raw = Api.putJson("$BASE/reviews/$reviewId", body, token)
+        return Api.decode<ReviewCreateDto>(raw).review
+    }
+
+    suspend fun deleteReview(token: String, reviewId: Int) {
+        Api.delete("$BASE/reviews/$reviewId", token = token)
+    }
+
+    /** AI 重新生图：kind 取 store / dish，补充提示词会追加到原有提示词后面。 */
+    suspend fun regenImage(token: String, kind: String, id: Int, extraPrompt: String) {
+        val path = if (kind == "store") "$BASE/stores/$id/regen-image" else "$BASE/dishes/$id/regen-image"
+        val body = buildJsonObject { put("extraPrompt", JsonPrimitive(extraPrompt)) }.toString()
+        Api.postJson(path, body, token)
+    }
+
+    suspend fun imageStatus(token: String, kind: String, id: Int): EatImageStatusDto =
+        Api.decode(
+            Api.get("$BASE/image-status", token, mapOf("kind" to kind, "id" to id.toString()))
+        )
 
     suspend fun addStore(token: String, name: String, location: String, image: String) {
         val body = buildJsonObject {

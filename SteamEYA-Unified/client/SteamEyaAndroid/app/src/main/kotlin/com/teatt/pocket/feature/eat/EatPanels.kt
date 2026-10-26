@@ -1,5 +1,12 @@
 package com.teatt.pocket.feature.eat
 
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Paint
+import android.graphics.Rect
+import android.os.Environment
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,11 +40,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -73,7 +83,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.FileProvider
 import coil3.compose.AsyncImage
+import com.teatt.pocket.core.Api
 import com.teatt.pocket.core.Session
 import com.teatt.pocket.data.EatApi
 import com.teatt.pocket.data.EatDish
@@ -86,7 +98,13 @@ import com.teatt.pocket.data.EatTaskState
 import com.teatt.pocket.data.EatUser
 import com.teatt.pocket.ui.BrandPink
 import com.teatt.pocket.ui.LocalBarInset
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.Request
+import java.io.File
+import java.io.FileOutputStream
 import java.util.Locale
 
 // ---------------------------------------------------------------- 转盘
@@ -368,10 +386,13 @@ fun FeedPage(token: String, topInset: Dp, refreshTick: Int) {
     var offset by remember { mutableStateOf(0) }
     var showEditor by remember { mutableStateOf(false) }
     var sameTarget by remember { mutableStateOf<EatReview?>(null) }
+    var editing by remember { mutableStateOf<EatReview?>(null) }
+    var deleting by remember { mutableStateOf<EatReview?>(null) }
     var viewer by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val bottomInset = LocalBarInset.current + 20.dp
+    val myId = Session.state.value.userId
 
     suspend fun load(reset: Boolean) {
         if (reset) {
@@ -409,6 +430,8 @@ fun FeedPage(token: String, topInset: Dp, refreshTick: Int) {
                 items(reviews, key = { it.id }) { review ->
                     ReviewCard(
                         review = review,
+                        canEdit = myId != 0 && review.user.id == myId,
+                        canDelete = myId != 0 && review.user.id == myId,
                         onLike = {
                             scope.launch {
                                 runCatching { EatApi.like(token, review.id) }
@@ -423,6 +446,8 @@ fun FeedPage(token: String, topInset: Dp, refreshTick: Int) {
                             }
                         },
                         onSame = { sameTarget = review },
+                        onEdit = { editing = review },
+                        onDelete = { deleting = review },
                         onImage = { viewer = it }
                     )
                 }
@@ -455,6 +480,51 @@ fun FeedPage(token: String, topInset: Dp, refreshTick: Int) {
         )
     }
 
+    editing?.let { review ->
+        ReviewEditor(
+            token = token,
+            parent = null,
+            editing = review,
+            onDismiss = { editing = null },
+            onDone = { editing = null; scope.launch { load(true) } }
+        )
+    }
+
+    deleting?.let { review ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("删除评价") },
+            text = {
+                Column {
+                    Text(
+                        if (review.sames.isNotEmpty())
+                            "这条评价下有 ${review.sames.size} 条同评：删除后第一条同评会自动升为主评，其余同评跟随过来。"
+                        else
+                            "删除后，这条消费记录会从店铺评分、我的评价、月度/年度总结和图片墙中一并去掉。",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "${review.dishName.ifBlank { "评价" }}：${review.comment.ifBlank { "（没有写评语）" }}",
+                        fontSize = 13.sp
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleting = null
+                    scope.launch {
+                        runCatching { EatApi.deleteReview(token, review.id) }
+                            .onSuccess { message = "评价已删除"; load(true) }
+                            .onFailure { message = it.message ?: "删除失败" }
+                    }
+                }) { Text("确认删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } }
+        )
+    }
+
     viewer?.let { url -> FullImageDialog(url) { viewer = null } }
 
     message?.let {
@@ -470,8 +540,12 @@ fun FeedPage(token: String, topInset: Dp, refreshTick: Int) {
 @Composable
 private fun ReviewCard(
     review: EatReview,
+    canEdit: Boolean,
+    canDelete: Boolean,
     onLike: () -> Unit,
     onSame: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
     onImage: (String) -> Unit
 ) {
     Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
@@ -554,6 +628,29 @@ private fun ReviewCard(
                     if (review.sameCount > 0) {
                         Spacer(Modifier.width(4.dp))
                         Text(review.sameCount.toString(), fontSize = 12.sp, color = BrandPink)
+                    }
+                }
+
+                Spacer(Modifier.weight(1f))
+
+                if (canEdit) {
+                    IconButton(onClick = onEdit, modifier = Modifier.size(30.dp)) {
+                        Icon(
+                            Icons.Filled.Edit,
+                            contentDescription = "编辑评价",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+                if (canDelete) {
+                    IconButton(onClick = onDelete, modifier = Modifier.size(30.dp)) {
+                        Icon(
+                            Icons.Filled.DeleteOutline,
+                            contentDescription = "删除评价",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(17.dp)
+                        )
                     }
                 }
             }
@@ -643,6 +740,53 @@ private fun FullImageDialog(url: String, onDismiss: () -> Unit) {
 
 // ---------------------------------------------------------------- 我的
 
+private suspend fun loadWallBitmap(url: String): Bitmap? = withContext(Dispatchers.IO) {
+    runCatching {
+        Api.http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+            if (!resp.isSuccessful) null
+            else resp.body?.bytes()?.let { bytes -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }
+        }
+    }.getOrNull()
+}
+
+/** 与网页端一致：3 列、每格 400px、间隔 8px，图片居中裁剪填满格子。 */
+private suspend fun buildWallBitmap(urls: List<String>): Bitmap? {
+    val bitmaps = urls.map { loadWallBitmap(it) }.filterNotNull()
+    if (bitmaps.isEmpty()) return null
+    return withContext(Dispatchers.Default) {
+        val cols = 3
+        val cell = 400
+        val gap = 8
+        val rows = (bitmaps.size + cols - 1) / cols
+        val out = Bitmap.createBitmap(
+            cols * cell + (cols + 1) * gap,
+            rows * cell + (rows + 1) * gap,
+            Bitmap.Config.ARGB_8888
+        )
+        val canvas = android.graphics.Canvas(out)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        bitmaps.forEachIndexed { i, bmp ->
+            val x = gap + (i % cols) * (cell + gap)
+            val y = gap + (i / cols) * (cell + gap)
+            val scale = maxOf(cell.toFloat() / bmp.width, cell.toFloat() / bmp.height)
+            val dw = bmp.width * scale
+            val dh = bmp.height * scale
+            val dst = Rect(
+                (x + (cell - dw) / 2).toInt(),
+                (y + (cell - dh) / 2).toInt(),
+                (x + (cell + dw) / 2).toInt(),
+                (y + (cell + dh) / 2).toInt()
+            )
+            canvas.save()
+            canvas.clipRect(x.toFloat(), y.toFloat(), (x + cell).toFloat(), (y + cell).toFloat())
+            canvas.drawBitmap(bmp, null, dst, paint)
+            canvas.restore()
+        }
+        out
+    }
+}
+
 @Composable
 fun MinePage(
     token: String,
@@ -654,13 +798,19 @@ fun MinePage(
     var period by remember { mutableStateOf("month") }
     var summary by remember { mutableStateOf<EatSummary?>(null) }
     var wall by remember { mutableStateOf<List<EatImageRef>>(emptyList()) }
+    var reviews by remember { mutableStateOf<List<EatReview>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var viewer by remember { mutableStateOf<String?>(null) }
     var showAddStore by remember { mutableStateOf(false) }
     var showAddDish by remember { mutableStateOf(false) }
     var taskState by remember { mutableStateOf<EatTaskState?>(null) }
     var reviewingTask by remember { mutableStateOf<EatTask?>(null) }
+    var editingReview by remember { mutableStateOf<EatReview?>(null) }
+    var deletingReview by remember { mutableStateOf<EatReview?>(null) }
+    var exporting by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val myId = Session.state.value.userId
     val bottomInset = LocalBarInset.current + 20.dp
 
     LaunchedEffect(token, period, refreshTick) {
@@ -668,7 +818,54 @@ fun MinePage(
         runCatching { taskState = EatApi.task(token) }
         runCatching { summary = EatApi.summary(token, period) }
         runCatching { wall = EatApi.wall(token) }
+        runCatching { reviews = EatApi.reviews(token, limit = 100).reviews }
         loading = false
+    }
+
+    val myReviews = reviews.filter { r ->
+        r.user.id == myId || r.guests.any { it.id == myId }
+    }
+
+    fun exportWall() {
+        if (exporting) return
+        val urls = wall.mapNotNull { ref ->
+            ref.image.takeIf { it.startsWith("/uploads/") }?.let { EatApi.imageUrl(it) }
+        }
+        if (urls.isEmpty()) {
+            Toast.makeText(context, "没有可导出的图片（仅支持本地上传图）", Toast.LENGTH_SHORT).show()
+            return
+        }
+        exporting = true
+        Toast.makeText(context, "正在合成大图…", Toast.LENGTH_SHORT).show()
+        scope.launch {
+            val bmp = buildWallBitmap(urls)
+            if (bmp == null) {
+                Toast.makeText(context, "图片加载失败", Toast.LENGTH_SHORT).show()
+                exporting = false
+                return@launch
+            }
+            val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.cacheDir
+            val file = File(dir, "eat-wall-${System.currentTimeMillis()}.png")
+            val saved = runCatching {
+                FileOutputStream(file).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            }.isSuccess
+            exporting = false
+            if (!saved) {
+                Toast.makeText(context, "导出失败", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            runCatching {
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "image/png"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(intent, "导出图片墙"))
+            }.onFailure {
+                Toast.makeText(context, "大图已保存：${file.absolutePath}", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     LazyColumn(
@@ -727,11 +924,43 @@ fun MinePage(
 
         item {
             Text(
-                "图片墙",
+                "我的评价",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 6.dp)
             )
+        }
+
+        if (myReviews.isEmpty()) {
+            item {
+                Text(
+                    if (loading) "加载中…" else "还没有评价，快去抽一个任务吧～",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            items(myReviews, key = { "mine-${it.id}" }) { review ->
+                MineReviewCard(
+                    review = review,
+                    onEdit = { editingReview = review },
+                    onDelete = { deletingReview = review }
+                )
+            }
+        }
+
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "图片墙",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { exportWall() }, enabled = !exporting, contentPadding = PaddingValues(0.dp)) {
+                    Text(if (exporting) "合成中…" else "⬇️ 导出大图", fontSize = 12.sp, color = BrandPink)
+                }
+            }
         }
 
         if (wall.isEmpty()) {
@@ -793,6 +1022,118 @@ fun MinePage(
                 onNeedReload()
             }
         )
+    }
+    editingReview?.let { review ->
+        ReviewEditor(
+            token = token,
+            parent = null,
+            editing = review,
+            onDismiss = { editingReview = null },
+            onDone = {
+                editingReview = null
+                onNeedReload()
+            }
+        )
+    }
+    deletingReview?.let { review ->
+        AlertDialog(
+            onDismissRequest = { deletingReview = null },
+            title = { Text("删除评价") },
+            text = {
+                Column {
+                    Text(
+                        if (review.sames.isNotEmpty())
+                            "这条评价下有 ${review.sames.size} 条同评：删除后第一条同评会自动升为主评，其余同评跟随过来。"
+                        else
+                            "删除后，这条消费记录会从店铺评分、我的评价、月度/年度总结和图片墙中一并去掉。",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "${review.dishName.ifBlank { "评价" }}：${review.comment.ifBlank { "（没有写评语）" }}",
+                        fontSize = 13.sp
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    deletingReview = null
+                    scope.launch {
+                        runCatching { EatApi.deleteReview(token, review.id) }
+                            .onSuccess {
+                                Toast.makeText(context, "评价已删除", Toast.LENGTH_SHORT).show()
+                                onNeedReload()
+                            }
+                            .onFailure {
+                                Toast.makeText(context, it.message ?: "删除失败", Toast.LENGTH_SHORT).show()
+                            }
+                    }
+                }) { Text("确认删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deletingReview = null }) { Text("取消") } }
+        )
+    }
+}
+
+/** 「我的评价」里的一条记录，展示为主评或同评都算自己的消费。 */
+@Composable
+private fun MineReviewCard(review: EatReview, onEdit: () -> Unit, onDelete: () -> Unit) {
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
+        Row(Modifier.fillMaxWidth().padding(10.dp)) {
+            EatCover(
+                url = review.dishImage,
+                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp))
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        review.dishName.ifBlank { "菜品" },
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    val rating = review.rating
+                    if (rating != null) {
+                        Spacer(Modifier.width(6.dp))
+                        Text("★".repeat(rating), fontSize = 11.sp, color = Color(0xFFF59E0B))
+                    }
+                }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "🍽️ " + review.storeName.ifBlank { "—" },
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (review.comment.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        review.comment,
+                        fontSize = 12.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Text(
+                    eatTimeText(review.createdAt),
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Column {
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Filled.Edit, "编辑评价", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Filled.DeleteOutline, "删除评价", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
     }
 }
 
@@ -991,15 +1332,20 @@ fun TaskConfirmDialog(task: EatTask, onConfirm: () -> Unit, onDismiss: () -> Uni
 @Composable
 fun DishDetailDialog(
     dish: EatDish,
+    token: String,
+    busy: Boolean = false,
     onDismiss: () -> Unit,
-    onChoose: () -> Unit,
-    busy: Boolean = false
+    onImageUpdated: (String) -> Unit,
+    onChoose: () -> Unit
 ) {
+    var cover by remember(dish.id) { mutableStateOf(dish.image) }
+    var aiOpen by remember { mutableStateOf(false) }
+
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface) {
             Column(Modifier.padding(16.dp)) {
                 EatCover(
-                    url = dish.image,
+                    url = cover,
                     modifier = Modifier.fillMaxWidth().aspectRatio(4f / 3f).clip(RoundedCornerShape(16.dp))
                 )
                 Spacer(Modifier.height(12.dp))
@@ -1014,9 +1360,136 @@ fun DishDetailDialog(
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                TextButton(onClick = { aiOpen = true }, contentPadding = PaddingValues(0.dp)) {
+                    Text("🎨 AI 重绘配图", fontSize = 12.sp, color = BrandPink)
+                }
                 Spacer(Modifier.height(14.dp))
                 PrimaryButton(if (busy) "提交中…" else "🍽️ 就吃这个了！", enabled = !busy, onClick = onChoose)
                 Spacer(Modifier.height(8.dp))
+                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("关闭") }
+            }
+        }
+    }
+
+    if (aiOpen) {
+        AiRegenDialog(
+            token = token,
+            kind = "dish",
+            id = dish.id,
+            title = dish.name,
+            currentImage = cover,
+            onDismiss = { aiOpen = false },
+            onUpdated = { url ->
+                cover = url
+                onImageUpdated(url)
+            }
+        )
+    }
+}
+
+/**
+ * AI 重新生图。补充提示词会追加到原有提示词后面，提交后每 3 秒轮询一次状态，
+ * 成功即回调新图地址；最多轮询 40 次（约 2 分钟）。
+ */
+@Composable
+fun AiRegenDialog(
+    token: String,
+    kind: String,
+    id: Int,
+    title: String,
+    currentImage: String,
+    onDismiss: () -> Unit,
+    onUpdated: (String) -> Unit
+) {
+    var prompt by remember { mutableStateOf("") }
+    var preview by remember { mutableStateOf(currentImage) }
+    var previewTick by remember { mutableStateOf(0) }
+    var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp)
+                    .heightIn(max = 560.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text("🎨 AI 重新生图", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Text(title.ifBlank { "当前对象" }, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
+                EatCover(
+                    url = preview,
+                    modifier = Modifier.fillMaxWidth().aspectRatio(4f / 3f).clip(RoundedCornerShape(14.dp)),
+                    cacheTick = previewTick
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "补充提示词会追加到原有提示词后面，点「重新生图」后后台生成，完成后自动替换并删除旧图。",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = prompt,
+                    onValueChange = { prompt = it.take(300) },
+                    label = { Text("补充提示词（可不填）") },
+                    placeholder = { Text("例如：加一杯冰可乐、背景换成木质餐桌") },
+                    minLines = 2,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (status.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(status, fontSize = 12.sp, color = BrandPink)
+                }
+                Spacer(Modifier.height(14.dp))
+                PrimaryButton(
+                    text = if (busy) "生成中…" else "重新生图",
+                    enabled = !busy
+                ) {
+                    busy = true
+                    status = "提交中…"
+                    scope.launch {
+                        val submitted = runCatching {
+                            EatApi.regenImage(token, kind, id, prompt.trim())
+                        }
+                        if (submitted.isFailure) {
+                            status = submitted.exceptionOrNull()?.message ?: "提交失败"
+                            busy = false
+                            return@launch
+                        }
+                        status = "AI 生成中…（约 30–60 秒）"
+                        var finished = false
+                        repeat(40) {
+                            if (finished) return@repeat
+                            delay(3000)
+                            val st = runCatching { EatApi.imageStatus(token, kind, id) }.getOrNull()
+                            when {
+                                st == null -> Unit
+                                st.status == "ok" -> {
+                                    status = "✅ 已生成"
+                                    if (st.image.isNotBlank()) {
+                                        preview = st.image
+                                        previewTick++
+                                        onUpdated(st.image)
+                                    }
+                                    finished = true
+                                }
+                                st.status == "failed" -> {
+                                    status = "生成失败：" + st.error.ifBlank { "未知错误" }
+                                    finished = true
+                                }
+                            }
+                        }
+                        if (!finished) status = "仍在生成，可关闭窗口稍后查看"
+                        busy = false
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
                 TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("关闭") }
             }
         }
@@ -1217,20 +1690,27 @@ fun ReviewEditor(
     token: String,
     parent: EatReview?,
     presetTask: EatTask? = null,
+    editing: EatReview? = null,
     onDismiss: () -> Unit,
     onDone: () -> Unit
 ) {
     val isSame = parent != null
+    val isEdit = editing != null
     val lockedTask = presetTask?.takeIf { !isSame }
     var stores by remember { mutableStateOf<List<EatStore>>(emptyList()) }
     var dishes by remember { mutableStateOf<List<EatDish>>(emptyList()) }
     var users by remember { mutableStateOf<List<EatUser>>(emptyList()) }
-    var storeId by remember { mutableStateOf(parent?.storeId ?: presetTask?.storeId ?: 0) }
-    var dishId by remember { mutableStateOf(parent?.dishId ?: presetTask?.dishId ?: 0) }
-    var rating by remember { mutableStateOf(0) }
-    var comment by remember { mutableStateOf("") }
-    val guests = remember { mutableStateListOf<Int>() }
-    val images = remember { mutableStateListOf<String>() }
+    var storeId by remember { mutableStateOf(parent?.storeId ?: presetTask?.storeId ?: editing?.storeId ?: 0) }
+    var dishId by remember { mutableStateOf(parent?.dishId ?: presetTask?.dishId ?: editing?.dishId ?: 0) }
+    var rating by remember { mutableStateOf(editing?.rating ?: 0) }
+    var comment by remember { mutableStateOf(editing?.comment.orEmpty()) }
+    val guests = remember { mutableStateListOf<Int>().apply { addAll(editing?.guests?.map { it.id } ?: emptyList()) } }
+    val images = remember {
+        mutableStateListOf<String>().apply {
+            addAll(editing?.images?.take(9) ?: emptyList())
+            if (isEmpty() && !editing?.image.isNullOrBlank()) add(editing!!.image)
+        }
+    }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var pickStore by remember { mutableStateOf(false) }
@@ -1248,12 +1728,14 @@ fun ReviewEditor(
 
     val storeName = stores.firstOrNull { it.id == storeId }?.name
         ?: parent?.storeName
-        ?: lockedTask?.storeName.orEmpty()
+        ?: lockedTask?.storeName
+        ?: editing?.storeName.orEmpty()
     val dishName = dishes.firstOrNull { it.id == dishId }?.name
         ?: parent?.dishName
-        ?: lockedTask?.dishName.orEmpty()
-    val lockedPrice = parent?.price ?: lockedTask?.price ?: 0.0
-    val locked = isSame || lockedTask != null
+        ?: lockedTask?.dishName
+        ?: editing?.dishName.orEmpty()
+    val lockedPrice = parent?.price ?: lockedTask?.price ?: editing?.price ?: 0.0
+    val locked = isSame || lockedTask != null || isEdit
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
@@ -1264,11 +1746,22 @@ fun ReviewEditor(
                     .heightIn(max = 580.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Text(if (isSame) "💬 同评" else "✍️ 发评价", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    when {
+                        isSame -> "💬 同评"
+                        isEdit -> "✏️ 编辑评价"
+                        else -> "✍️ 发评价"
+                    },
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    if (isSame) "同意这道菜？说说你的看法～打分、评语、图片都可留空"
-                    else "说说这一顿吃得怎么样～打分、评语、图片都可以留空",
+                    when {
+                        isSame -> "同意这道菜？说说你的看法～打分、评语、图片都可留空"
+                        isEdit -> "店铺和菜品不可改，评分、评语、图片和「一起吃」可以重新填"
+                        else -> "说说这一顿吃得怎么样～打分、评语、图片都可以留空"
+                    },
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1385,23 +1878,40 @@ fun ReviewEditor(
 
                 Spacer(Modifier.height(16.dp))
                 PrimaryButton(
-                    text = if (busy) "提交中…" else "提交",
-                    enabled = dishId != 0 && !busy
+                    text = when {
+                        busy -> "提交中…"
+                        isEdit -> "保存修改"
+                        else -> "提交"
+                    },
+                    enabled = (dishId != 0 || isEdit) && !busy
                 ) {
                     busy = true
                     scope.launch {
-                        runCatching {
-                            EatApi.addReview(
-                                token = token,
-                                storeId = storeId.takeIf { it != 0 },
-                                dishId = dishId,
-                                rating = rating.takeIf { it > 0 },
-                                comment = comment.trim(),
-                                images = images.toList(),
-                                guestIds = guests.toList(),
-                                parentId = parent?.id
-                            )
-                        }.onSuccess { onDone() }.onFailure { error = it.message ?: "提交失败" }
+                        if (editing != null) {
+                            runCatching {
+                                EatApi.updateReview(
+                                    token = token,
+                                    reviewId = editing.id,
+                                    rating = rating.takeIf { it > 0 },
+                                    comment = comment.trim(),
+                                    images = images.toList(),
+                                    guestIds = guests.toList()
+                                )
+                            }.onSuccess { onDone() }.onFailure { error = it.message ?: "提交失败" }
+                        } else {
+                            runCatching {
+                                EatApi.addReview(
+                                    token = token,
+                                    storeId = storeId.takeIf { it != 0 },
+                                    dishId = dishId,
+                                    rating = rating.takeIf { it > 0 },
+                                    comment = comment.trim(),
+                                    images = images.toList(),
+                                    guestIds = guests.toList(),
+                                    parentId = parent?.id
+                                )
+                            }.onSuccess { onDone() }.onFailure { error = it.message ?: "提交失败" }
+                        }
                         busy = false
                     }
                 }
