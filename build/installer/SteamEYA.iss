@@ -59,7 +59,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; restartreplace：jiyu\JiYuTrainerHooks.dll 会被注入到极域进程里，升级时若仍被占用，
+; 交给系统在下次重启时替换，避免安装失败或静默保留旧 Hook。
+Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs restartreplace
 
 [Icons]
 ; 快捷方式显示为「茶π」；开始菜单分组与安装向导标题用全名「茶π·次元口袋」。

@@ -10,3 +10,13 @@ SHA256  ：03231f35406136a3aa0c41b2e89375451177fe8cb025ed1341443b4bd4c21c7f
 
 本目录下的 JiYuTrainer.exe 为上游发布产物，未做任何修改。客户端「小工具」页
 只负责启动 / 显示 / 停止该程序，注入与各项功能全部由原版自带界面完成。
+
+src/ 为上游 tag 1.7.6（commit 977823d9）中 JiYuTrainerHooks 项目的源码副本，
+用于在 CI 中重新编译注入模块 JiYuTrainerHooks.dll。原版 exe 首次运行只会把
+内置的 Hook DLL 释放到自身目录（已存在则跳过），因此随安装包额外放置本目录
+编译出的 JiYuTrainerHooks.dll 即可替换注入模块，不需要改动 exe 本体。
+
+相对上游源码仅有两处修改（均在 src/JiYuTrainerHooks/JiYuTrainerHooks.cpp）：
+1. 广播窗口右键菜单标题改为「神秘の魔法武器提供的菜单」。
+2. 弹出右键菜单前按广播窗口真实的 WS_EX_TOPMOST 状态同步「广播窗口置顶」的
+   勾选状态，修复第二次广播时「菜单显示未置顶、窗口实际已置顶」的问题。

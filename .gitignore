@@ -7,6 +7,9 @@ publish/
 .vs/
 .idea/
 
+# ---- 内置极域 Hook 的 CI 编译产物 ----
+third_party/JiYuTrainer/out/
+
 # ---- Python ----
 __pycache__/
 *.py[cod]

@@ -48,6 +48,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ---- 极域注入模块（原版 1.7.6 + 菜单修复）----
+      # 原版 exe 只在 Hook DLL 不存在时才释放内置副本，所以把这里编译出的
+      # JiYuTrainerHooks.dll 随包放到 jiyu 目录即可替换注入模块，exe 保持原版不动。
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build JiYuTrainerHooks (Win32 Release)
+        shell: pwsh
+        run: |
+          $out = "$env:GITHUB_WORKSPACE\third_party\JiYuTrainer\out\"
+          msbuild "third_party\JiYuTrainer\src\JiYuTrainerHooks\JiYuTrainerHooks.vcxproj" `
+            /m /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 `
+            /p:OutDir="$out" /p:IntDir="$out\obj\"
+          if ($LASTEXITCODE -ne 0) { throw "JiYuTrainerHooks 编译失败" }
+          if (-not (Test-Path "$out\JiYuTrainerHooks.dll")) { throw "JiYuTrainerHooks.dll 未生成" }
+          Get-Item "$out\JiYuTrainerHooks.dll" | Select-Object Name, Length
+
       # 不开 setup-dotnet 的 cache：Windows 上 NuGet 全局包目录单个缓存就有 ~500MB，
       # 已经顶满账号 500MB 的 Actions 存储免费额度（PR 的 merge ref 还会另存一份独立副本），
       # 超配额后 Actions 会被锁停。代价只是每次构建多花约 1 分钟做 restore。
@@ -150,17 +167,25 @@ jobs:
         shell: pwsh
         run: choco install innosetup -y --no-progress
 
-      # ---- 极域助手（内置原版 JiYuTrainer 1.7.6）----
-      # 原版 exe 已提交在 third_party\JiYuTrainer，由 csproj 的 Content 拷到发布目录的 <安装目录>\jiyu。
-      # 这里只做存在性与哈希校验，防止发布漏拷或被替换。
-      - name: 校验内置极域助手
+      # ---- 极域助手（内置原版 JiYuTrainer 1.7.6 + 修复版 Hook）----
+      # 原版 exe 由 csproj 的 Content 拷到 <安装目录>\jiyu；Hook DLL 在这里补进发布目录。
+      # 校验 exe 哈希（确保仍是未修改的原版）和 DLL 里的菜单补丁，防止发布漏拷/被替换。
+      - name: 内置极域助手（原版 exe + 修复版 Hook）
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force publish\jiyu | Out-Null
+          Copy-Item "third_party\JiYuTrainer\JiYuTrainer.exe" "publish\jiyu\" -Force
+          Copy-Item "third_party\JiYuTrainer\out\JiYuTrainerHooks.dll" "publish\jiyu\" -Force
+
           $exe = "publish\jiyu\JiYuTrainer.exe"
-          if (-not (Test-Path $exe)) { throw "内置 JiYuTrainer.exe 未拷到发布目录" }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
           $expected = "03231f35406136a3aa0c41b2e89375451177fe8cb025ed1341443b4bd4c21c7f"
           if ($hash -ne $expected) { throw "内置 JiYuTrainer.exe 哈希不匹配：$hash" }
+
+          $dll = "publish\jiyu\JiYuTrainerHooks.dll"
+          $text = [Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($dll))
+          if (-not $text.Contains("神秘の魔法武器提供的菜单")) { throw "JiYuTrainerHooks.dll 未包含菜单补丁" }
+
           Get-ChildItem "publish\jiyu" | Select-Object Name, Length
 
       # 体积诊断：安装包 50MB+ 时先看清构成，避免盲目裁剪。
