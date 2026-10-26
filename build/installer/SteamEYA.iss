@@ -71,6 +71,10 @@ Name: "{autodesktop}\茶π"; Filename: "{app}\SteamEyaWinUI.exe"; Tasks: desktop
 Type: files; Name: "{autoprograms}\SteamEYA"
 Type: files; Name: "{autodesktop}\SteamEYA"
 Type: dirifempty; Name: "{autoprograms}\SteamEYA"
+; 旧版内置的是自研极域组件，现已改为内置原版 JiYuTrainer（jiyu\JiYuTrainer.exe）；
+; 升级时清掉这两个遗留文件，避免与新方案混用（旧 Hook 若仍被极域加载，删除失败不影响安装）。
+Type: files; Name: "{app}\jiyu\JiYuHost.exe"
+Type: files; Name: "{app}\jiyu\SteamEya.JiYuHook.dll"
 
 [Run]
 Filename: "{app}\SteamEyaWinUI.exe"; Description: "{cm:LaunchProgram,SteamEYA}"; Flags: nowait postinstall skipifsilent

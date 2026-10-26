@@ -13,6 +13,8 @@ on:
       - 'SteamEYA-Unified/engine/**'
       - 'SteamEYA-Unified/native/**'
       - 'SteamEYA-Unified/build/**'
+      - 'build/installer/**'
+      - 'third_party/JiYuTrainer/**'
       - '.github/workflows/build.yml'
   pull_request:
     paths:
@@ -22,6 +24,8 @@ on:
       - 'SteamEYA-Unified/engine/**'
       - 'SteamEYA-Unified/native/**'
       - 'SteamEYA-Unified/build/**'
+      - 'build/installer/**'
+      - 'third_party/JiYuTrainer/**'
       - '.github/workflows/build.yml'
   workflow_dispatch:
 
@@ -146,31 +150,18 @@ jobs:
         shell: pwsh
         run: choco install innosetup -y --no-progress
 
-      # ---- 极域电子教室绕过组件（32 位原生）----
-      # JiYuHost.exe 由客户端启动，负责向 StudentMain.exe 注入 SteamEya.JiYuHook.dll。
-      # 两个工程都是 Win32（极域学生端是 32 位进程），随安装包放到 <安装目录>\jiyu。
-      - name: 构建极域绕过组件（JiYuHost + Hook DLL）
+      # ---- 极域助手（内置原版 JiYuTrainer 1.7.6）----
+      # 原版 exe 已提交在 third_party\JiYuTrainer，由 csproj 的 Content 拷到发布目录的 <安装目录>\jiyu。
+      # 这里只做存在性与哈希校验，防止发布漏拷或被替换。
+      - name: 校验内置极域助手
         shell: pwsh
         run: |
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-          if (-not (Test-Path $vswhere)) { throw "vswhere.exe 未找到" }
-          $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
-          if (-not $msbuild) { throw "MSBuild.exe 未找到" }
-
-          & $msbuild "native\JiYu\Hook\JiYuTrainerHooks.vcxproj" /p:Configuration=Release /p:Platform=Win32 /m /v:minimal
-          if ($LASTEXITCODE -ne 0) { throw "Hook DLL 构建失败" }
-          & $msbuild "native\JiYu\Host\JiYuHost.vcxproj" /p:Configuration=Release /p:Platform=Win32 /m /v:minimal
-          if ($LASTEXITCODE -ne 0) { throw "JiYuHost 构建失败" }
-
-          $hook = "native\JiYu\Hook\bin\Win32\Release\SteamEya.JiYuHook.dll"
-          $hostExe = "native\JiYu\Host\bin\Win32\Release\JiYuHost.exe"
-          if (-not (Test-Path $hook)) { throw "Hook DLL 未生成" }
-          if (-not (Test-Path $hostExe)) { throw "JiYuHost.exe 未生成" }
-
-          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\publish\jiyu" | Out-Null
-          Copy-Item $hook "$env:GITHUB_WORKSPACE\publish\jiyu\" -Force
-          Copy-Item $hostExe "$env:GITHUB_WORKSPACE\publish\jiyu\" -Force
-          Get-ChildItem "$env:GITHUB_WORKSPACE\publish\jiyu" | Select-Object -ExpandProperty Name
+          $exe = "publish\jiyu\JiYuTrainer.exe"
+          if (-not (Test-Path $exe)) { throw "内置 JiYuTrainer.exe 未拷到发布目录" }
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          $expected = "03231f35406136a3aa0c41b2e89375451177fe8cb025ed1341443b4bd4c21c7f"
+          if ($hash -ne $expected) { throw "内置 JiYuTrainer.exe 哈希不匹配：$hash" }
+          Get-ChildItem "publish\jiyu" | Select-Object Name, Length
 
       # 体积诊断：安装包 50MB+ 时先看清构成，避免盲目裁剪。
       - name: 诊断 · 发布目录体积构成

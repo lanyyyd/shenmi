@@ -1,0 +1,12 @@
+JiYuTrainer 1.7.6（官方原版，MIT License）
+==========================================
+
+来源仓库：https://github.com/imengyu/JiYuTrainer
+下载地址：https://github.com/imengyu/JiYuTrainer/releases/download/1.7.6/JiYuTrainer.exe
+发布版本：1.7.6，发布于 2021-04-09
+文件大小：4712960 字节
+SHA256  ：03231f35406136a3aa0c41b2e89375451177fe8cb025ed1341443b4bd4c21c7f
+许可证  ：MIT（见同目录 LICENSE，Copyright (c) 2019 Mengyu）
+
+本目录下的 JiYuTrainer.exe 为上游发布产物，未做任何修改。客户端「小工具」页
+只负责启动 / 显示 / 停止该程序，注入与各项功能全部由原版自带界面完成。

@@ -5,180 +5,184 @@ using System.Text;
 namespace SteamEyaWinUI.Services;
 
 /// <summary>
-/// 极域电子教室绕过模块的客户端侧托管：启动 32 位 JiYuHost.exe（由它向 StudentMain.exe 注入 Hook DLL），
-/// 通过 WM_COPYDATA 下发配置，并读取宿主写出的状态文件供「小工具」页展示。
-/// 与网关/云游戏引擎一样由客户端拉起、随客户端退出，不单独安装第三方软件。
+/// 极域助手（内置原版 JiYuTrainer 1.7.6）的启动壳。
+/// 这里不做任何注入：启动、注入、界面与各项功能全部由原版 exe 完成，客户端只负责
+/// 拉起（静默）、唤出窗口、打开「更多设置」、停止，以及在停止前先让原版卸载注入
+/// （等价于原版退出提示里的「分离极域并退出」）。
 /// </summary>
 internal static partial class JiYuService
 {
-    public const uint ModAlt = 0x0001;
-    public const uint ModControl = 0x0002;
-    public const uint ModShift = 0x0004;
-    public const uint ModWin = 0x0008;
+    public const string BundledVersion = "1.7.6";
+
+    // 原版 exe 的窗口类名与注入后由 Hook DLL 创建的接收窗口标题（见 JiYuTrainer 源码）。
+    private const string MainWindowClass = "JiYuTrainerWindow";
+    private const string HookWindowTitle = "JiYu Trainer Virus Window";
+    private const string TrainerProcessName = "JiYuTrainer";
+    private const string StudentProcessName = "StudentMain";
 
     private const uint WmCopyData = 0x004A;
     private const uint SmtoAbortIfHung = 0x0002;
-    private const string HostWindowTitle = "SteamEYA.JiYuHost.Window";
+    private const int SwShow = 5;
 
     private static readonly object Gate = new();
-    private static Process? _process;
-    private static DateTime _lastStartAttempt = DateTime.MinValue;
 
-    public static string StatusFilePath { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SteamEYA", "jiyu-status.txt");
+    /// <summary>内置助手所在目录（随安装包下发到 &lt;安装目录&gt;\jiyu）。</summary>
+    public static string InstallDir => Path.Combine(AppContext.BaseDirectory, "jiyu");
 
-    public static string IniFilePath { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SteamEYA", "jiyu.ini");
+    public static string ExePath => Path.Combine(InstallDir, "JiYuTrainer.exe");
 
-    /// <summary>客户端启动即调用：拉起宿主并下发当前配置；失败不影响主界面（极域未安装时属正常）。</summary>
-    public static void Start(AppSettings settings)
-    {
-        EnsureStarted();
-        _ = ConfigureWhenReadyAsync(settings);
-    }
+    private static string IniPath => Path.Combine(InstallDir, "JiYuTrainer.ini");
 
-    /// <summary>启动宿主进程；已在运行（包括上一次启动残留）时直接复用。</summary>
-    public static void EnsureStarted()
+    /// <summary>内置助手是否随安装包就位。</summary>
+    public static bool IsAvailable => File.Exists(ExePath);
+
+    /// <summary>启动内置助手（静默注入）；已在运行则直接复用。</summary>
+    public static bool Start()
     {
         lock (Gate)
         {
-            if (HostWindow != 0)
+            EnsureIni();
+
+            if (!IsAvailable)
             {
-                return;
+                AppLog.Warn($"未找到内置极域助手：{ExePath}");
+                return false;
             }
 
-            if (_process is { HasExited: false })
+            if (IsRunning)
             {
-                return;
+                return true;
             }
-
-            // 失败后 10 秒内不重复拉起，避免页面刷新时反复弹进程创建错误。
-            if (DateTime.UtcNow - _lastStartAttempt < TimeSpan.FromSeconds(10))
-            {
-                return;
-            }
-
-            _lastStartAttempt = DateTime.UtcNow;
-
-            var hostExe = ResolveHostExe();
-            var hookDll = ResolveHookDll();
-            if (hostExe is null || hookDll is null)
-            {
-                AppLog.Warn("未找到极域绕过组件（jiyu/JiYuHost.exe 或 SteamEya.JiYuHook.dll）。");
-                return;
-            }
-
-            Directory.CreateDirectory(Path.GetDirectoryName(StatusFilePath)!);
 
             try
             {
-                var psi = new ProcessStartInfo
+                Process.Start(new ProcessStartInfo
                 {
-                    FileName = hostExe,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    WorkingDirectory = Path.GetDirectoryName(hostExe)!
-                };
-                psi.ArgumentList.Add("--status");
-                psi.ArgumentList.Add(StatusFilePath);
-                psi.ArgumentList.Add("--ini");
-                psi.ArgumentList.Add(IniFilePath);
-                psi.ArgumentList.Add("--dll");
-                psi.ArgumentList.Add(hookDll);
-
-                _process = Process.Start(psi);
-                if (_process is null)
-                {
-                    AppLog.Warn("极域绕过宿主启动失败：Process.Start 返回 null。");
-                    return;
-                }
-
-                ChildProcessJob.Assign(_process);
+                    FileName = ExePath,
+                    Arguments = "-hidden",
+                    WorkingDirectory = InstallDir,
+                    UseShellExecute = false
+                });
+                return true;
             }
             catch (Exception ex)
             {
-                AppLog.Warn($"极域绕过宿主启动失败：{ex.Message}");
+                AppLog.Warn($"启动内置极域助手失败：{ex.Message}");
+                return false;
             }
         }
     }
 
-    /// <summary>退出客户端时结束宿主；已注入的 Hook 会随极域进程结束而失效。</summary>
-    public static void Stop()
+    /// <summary>唤出原版助手窗口；未运行则先启动。</summary>
+    public static void ShowMainWindow()
+    {
+        var hwnd = FindWindowW(MainWindowClass, null);
+        if (hwnd == 0)
+        {
+            Start();
+            return;
+        }
+
+        // 跨进程调用：用异步版本避免被原版 UI 线程阻塞。
+        ShowWindowAsync(hwnd, SwShow);
+        SetForegroundWindow(hwnd);
+    }
+
+    /// <summary>打开原版的「更多设置」对话框（热键、广播置顶等都在里面）。</summary>
+    public static bool OpenSettings()
+    {
+        EnsureIni();
+        if (!IsAvailable)
+        {
+            return false;
+        }
+
+        try
+        {
+            // -config 由原版单独处理，不影响正在运行的助手实例。
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = ExePath,
+                Arguments = "-config",
+                WorkingDirectory = InstallDir,
+                UseShellExecute = false
+            });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"打开极域助手设置失败：{ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>打开内置助手所在目录，便于查看原版日志或手动替换。</summary>
+    public static void OpenFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(InstallDir);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = InstallDir,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"打开极域助手目录失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 停止内置助手：先让原版卸载注入（分离极域），再结束本次内置的 JiYuTrainer 进程。
+    /// 对应原版退出提示中的「分离极域并退出」，可随时从「小工具」页触发。
+    /// </summary>
+    /// <param name="detach">是否先分离极域；紧急退出（如保队友）可置 false 以求最快。</param>
+    public static void Stop(bool detach = true)
     {
         lock (Gate)
         {
-            // 即使宿主不是本次客户端拉起的（上次异常退出残留），也通过窗口消息让它正常退出。
-            var hwnd = HostWindow;
-            if (hwnd != 0)
+            if (detach)
             {
-                PostMessageW(hwnd, 0x0010 /* WM_CLOSE */, 0, 0);
+                Detach();
             }
 
-            try
+            foreach (var process in FindOwnedProcesses())
             {
-                if (_process is { HasExited: false })
+                try
                 {
-                    _process.WaitForExit(1500);
-                    if (!_process.HasExited)
+                    if (!process.HasExited)
                     {
-                        _process.Kill(entireProcessTree: true);
-                        _process.WaitForExit(2000);
+                        process.Kill(entireProcessTree: true);
+                        process.WaitForExit(1500);
                     }
                 }
-            }
-            catch
-            {
-                // 忽略：作业对象也会在客户端退出时兜底结束宿主。
-            }
-            finally
-            {
-                _process = null;
-            }
-
-            // 宿主退出后状态文件已无意义，删除避免下次启动瞬间显示上一次的旧状态。
-            try
-            {
-                File.Delete(StatusFilePath);
-            }
-            catch
-            {
-                // 忽略：文件被占用时下次读取仍会按新宿主写入的内容覆盖。
+                catch
+                {
+                    // 忽略：进程可能已自行退出，或权限不足以结束。
+                }
+                finally
+                {
+                    process.Dispose();
+                }
             }
         }
     }
 
-    /// <summary>把设置下发给宿主：绕过开关、广播置顶许可、老板键；宿主未运行时返回 false。</summary>
-    public static bool ApplySettings(AppSettings settings)
+    /// <summary>
+    /// 让原版卸载注入：给 Hook DLL 在其宿主（极域学生端）里创建的窗口发 hk:ckend，
+    /// 效果等同原版「分离极域退出」——注入停止生效，极域恢复原始控制。
+    /// </summary>
+    public static bool Detach()
     {
-        var ok = Send($"cfg:bypass:{(settings.JiYuBypassEnabled ? 1 : 0)}");
-        ok &= Send($"cfg:allowtop:{(settings.JiYuAllowGbTop ? 1 : 0)}");
-        ok &= Send($"cfg:hotkey:{(settings.JiYuBossKeyEnabled ? 1 : 0)}:{settings.JiYuBossKeyMods}:{settings.JiYuBossKeyVk}");
-        return ok;
-    }
-
-    /// <summary>立即触发一次老板键（用于小工具页的“测试”按钮）。</summary>
-    public static bool TriggerBossKey()
-    {
-        return Send("cmd:boss");
-    }
-
-    /// <summary>请求宿主刷新一次状态文件。</summary>
-    public static bool RequestRefresh()
-    {
-        return Send("cmd:status");
-    }
-
-    /// <summary>向宿主窗口发送一条 WM_COPYDATA 命令；宿主未启动时返回 false。</summary>
-    public static bool Send(string command)
-    {
-        var hwnd = HostWindow;
+        var hwnd = FindWindowW(null, HookWindowTitle);
         if (hwnd == 0)
         {
             return false;
         }
 
+        const string command = "hk:ckend";
         var buffer = Marshal.StringToHGlobalUni(command);
         try
         {
@@ -187,224 +191,172 @@ internal static partial class JiYuService
                 cbData = (uint)((command.Length + 1) * sizeof(char)),
                 lpData = buffer
             };
-            SendMessageTimeoutW(hwnd, WmCopyData, 0, ref data, SmtoAbortIfHung, 500, out _);
-            return true;
+            SendMessageTimeoutW(hwnd, WmCopyData, 0, ref data, SmtoAbortIfHung, 1000, out _);
         }
         catch (Exception ex)
         {
-            AppLog.Warn($"向极域宿主发送命令失败：{ex.Message}");
+            AppLog.Warn($"分离极域失败：{ex.Message}");
             return false;
         }
         finally
         {
             Marshal.FreeHGlobal(buffer);
         }
-    }
 
-    /// <summary>
-    /// 宿主刚启动时窗口可能还没建好，按短间隔重试下发配置；成功后不再重复。
-    /// </summary>
-    private static async Task ConfigureWhenReadyAsync(AppSettings settings)
-    {
-        for (var i = 0; i < 40; i++)
+        // 原版处理完会销毁该窗口；短暂等待，确认注入确实退出了。
+        for (var i = 0; i < 20; i++)
         {
-            if (HostWindow != 0)
+            if (FindWindowW(null, HookWindowTitle) == 0)
             {
-                ApplySettings(settings);
-                RequestRefresh();
-                return;
+                return true;
             }
 
-            if (!IsOwnedProcessAlive)
-            {
-                return;
-            }
-
-            try
-            {
-                await Task.Delay(250);
-            }
-            catch
-            {
-                return;
-            }
-        }
-    }
-
-    private static bool IsOwnedProcessAlive
-    {
-        get
-        {
-            lock (Gate)
-            {
-                return _process is { HasExited: false };
-            }
-        }
-    }
-
-    /// <summary>读取宿主写出的状态文件；宿主未运行或文件正在写入时返回“不可用”状态。</summary>
-    public static JiYuStatus ReadStatus()
-    {
-        // 宿主窗口不在时状态文件只可能是上一次运行残留，直接忽略，避免页面显示过期状态。
-        if (HostWindow == 0)
-        {
-            return JiYuStatus.Unavailable;
+            Thread.Sleep(50);
         }
 
+        return false;
+    }
+
+    /// <summary>读取一次当前状态（供「小工具」页每两秒轮询）。</summary>
+    public static JiYuState Query()
+    {
+        var processes = FindOwnedProcesses();
+        var running = processes.Count > 0 || FindWindowW(MainWindowClass, null) != 0;
+        var pid = processes.Count > 0 ? processes[0].Id : 0;
+        foreach (var process in processes)
+        {
+            process.Dispose();
+        }
+
+        var injected = FindWindowW(null, HookWindowTitle) != 0;
+
+        var studentPid = 0;
         try
         {
-            if (!File.Exists(StatusFilePath))
+            var students = Process.GetProcessesByName(StudentProcessName);
+            if (students.Length > 0)
             {
-                return JiYuStatus.Unavailable;
+                studentPid = students[0].Id;
             }
 
-            using var stream = new FileStream(StatusFilePath, FileMode.Open, FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete);
-            // 宿主已改为 UTF-8 无 BOM 输出；detectEncodingFromByteOrderMarks 兼容旧的 UTF-16 状态文件。
-            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-            var status = new JiYuStatus { Available = true };
-
-            while (reader.ReadLine() is { } line)
+            foreach (var student in students)
             {
-                var index = line.IndexOf('=');
-                if (index <= 0)
-                {
-                    continue;
-                }
-
-                var key = line[..index];
-                var value = line[(index + 1)..];
-                switch (key)
-                {
-                    case "student": status.StudentRunning = value == "1"; break;
-                    case "pid": status.Pid = int.TryParse(value, out var pid) ? pid : 0; break;
-                    case "studentPath": status.StudentPath = value; break;
-                    case "injected": status.Injected = value == "1"; break;
-                    case "controlled": status.Controlled = value == "1"; break;
-                    case "hook": status.HookFound = value == "1"; break;
-                    case "bypass": status.BypassEnabled = value == "1"; break;
-                    case "allowTop": status.AllowGbTop = value == "1"; break;
-                    case "gbTop": status.GbTopmost = value == "1"; break;
-                    case "gbFull": status.GbFullscreen = value == "1"; break;
-                    case "locked": status.InputLocked = value == "1"; break;
-                    case "hotkeyEnabled": status.HotkeyEnabled = value == "1"; break;
-                    case "hotkeyRegistered": status.HotkeyRegistered = value == "1"; break;
-                    case "hotkey": status.HotkeyText = value; break;
-                    case "message": status.Message = value; break;
-                }
+                student.Dispose();
             }
-
-            return status;
         }
         catch
         {
-            return JiYuStatus.Unavailable;
-        }
-    }
-
-    /// <summary>把修饰键与虚拟键格式化成界面显示文本（与宿主状态文件中的 hotkey 一致）。</summary>
-    public static string FormatHotkey(uint mods, uint vk)
-    {
-        if (vk == 0)
-        {
-            return string.Empty;
+            // 枚举进程失败按「未检测到极域」处理。
         }
 
-        var text = new StringBuilder();
-        if ((mods & ModControl) != 0) text.Append("Ctrl+");
-        if ((mods & ModAlt) != 0) text.Append("Alt+");
-        if ((mods & ModShift) != 0) text.Append("Shift+");
-        if ((mods & ModWin) != 0) text.Append("Win+");
-        text.Append(KeyName(vk));
-        return text.ToString();
-    }
-
-    private static string KeyName(uint vk)
-    {
-        if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9'))
+        return new JiYuState
         {
-            return ((char)vk).ToString();
-        }
-
-        if (vk is >= 0x70 and <= 0x87)
-        {
-            return $"F{vk - 0x70 + 1}";
-        }
-
-        return vk switch
-        {
-            0x20 => "Space",
-            0x0D => "Enter",
-            0x1B => "Esc",
-            0x09 => "Tab",
-            0x08 => "Backspace",
-            0x2E => "Delete",
-            0x2D => "Insert",
-            0x24 => "Home",
-            0x23 => "End",
-            0x21 => "PageUp",
-            0x22 => "PageDown",
-            0x25 => "Left",
-            0x27 => "Right",
-            0x26 => "Up",
-            0x28 => "Down",
-            0xC0 => "`",
-            0xBD => "-",
-            0xBB => "=",
-            0xDB => "[",
-            0xDD => "]",
-            0xDC => "\\",
-            0xBA => ";",
-            0xDE => "'",
-            0xBC => ",",
-            0xBE => ".",
-            0xBF => "/",
-            _ => $"0x{vk:X2}"
+            Available = IsAvailable,
+            Running = running,
+            ProcessId = pid,
+            Injected = injected,
+            StudentPid = studentPid
         };
     }
 
-    private static string? ResolveHostExe()
+    /// <summary>
+    /// 写入原版需要的 ini：跳过首次使用的协议弹窗、关闭自动更新与看门狗。
+    /// 看门狗必须关掉——否则助手被停止后，注入到极域里的 Hook 会自动把它重新拉起来。
+    /// 文件已存在时不再覆盖，避免冲掉用户在「更多设置」里的改动。
+    /// </summary>
+    private static void EnsureIni()
     {
-        var bundled = Path.Combine(AppContext.BaseDirectory, "jiyu", "JiYuHost.exe");
-        if (File.Exists(bundled))
+        try
         {
-            return bundled;
+            Directory.CreateDirectory(InstallDir);
+
+            if (File.Exists(IniPath) &&
+                File.ReadAllText(IniPath).Contains("Argeed", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            const string template =
+                "[JTArgeement]\r\n" +
+                "FirstUse=false\r\n" +
+                "Argeed=true\r\n" +
+                "\r\n" +
+                "[JTSettings]\r\n" +
+                "AlwaysCheckUpdate=false\r\n" +
+                "DoNotShowVirusWindow=true\r\n" +
+                "ForceDisableWatchDog=true\r\n";
+
+            // 原版用 GetPrivateProfileString 读取，内容全为 ASCII，UTF-8 无 BOM 与 ANSI 等价。
+            File.WriteAllText(IniPath, template, new UTF8Encoding(false));
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"准备极域助手配置失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 只枚举从本安装目录启动的 JiYuTrainer，避免误杀用户自己另外安装的副本。
+    /// </summary>
+    private static List<Process> FindOwnedProcesses()
+    {
+        var owned = new List<Process>();
+        Process[] all;
+        try
+        {
+            all = Process.GetProcessesByName(TrainerProcessName);
+        }
+        catch
+        {
+            return owned;
         }
 
-        // 开发期：从输出目录向上找仓库里的原生工程产物。
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        foreach (var process in all)
         {
-            var candidate = Path.Combine(dir.FullName, "native", "JiYu", "Host", "bin", "Win32", "Release", "JiYuHost.exe");
-            if (File.Exists(candidate))
+            var isOwned = false;
+            try
             {
-                return candidate;
+                var path = process.MainModule?.FileName;
+                isOwned = path is not null &&
+                          string.Equals(path, ExePath, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                // 取不到路径（权限/位数差异）时保守跳过。
+            }
+
+            if (isOwned)
+            {
+                owned.Add(process);
+            }
+            else
+            {
+                process.Dispose();
             }
         }
 
-        return null;
+        return owned;
     }
 
-    private static string? ResolveHookDll()
+    private static bool IsRunning
     {
-        var bundled = Path.Combine(AppContext.BaseDirectory, "jiyu", "SteamEya.JiYuHook.dll");
-        if (File.Exists(bundled))
+        get
         {
-            return bundled;
-        }
-
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            var candidate = Path.Combine(dir.FullName, "native", "JiYu", "Hook", "bin", "Win32", "Release", "SteamEya.JiYuHook.dll");
-            if (File.Exists(candidate))
+            if (FindWindowW(MainWindowClass, null) != 0)
             {
-                return candidate;
+                return true;
             }
+
+            var processes = FindOwnedProcesses();
+            var running = processes.Count > 0;
+            foreach (var process in processes)
+            {
+                process.Dispose();
+            }
+
+            return running;
         }
-
-        return null;
     }
-
-    private static nint HostWindow => FindWindowW(null, HostWindowTitle);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct CopyDataStruct
@@ -415,11 +367,15 @@ internal static partial class JiYuService
     }
 
     [LibraryImport("user32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
-    private static partial nint FindWindowW(string? lpClassName, string lpWindowName);
+    private static partial nint FindWindowW(string? lpClassName, string? lpWindowName);
 
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool PostMessageW(nint hWnd, uint msg, nint wParam, nint lParam);
+    private static partial bool ShowWindowAsync(nint hWnd, int nCmdShow);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetForegroundWindow(nint hWnd);
 
     [LibraryImport("user32.dll", SetLastError = true)]
     private static partial nint SendMessageTimeoutW(
@@ -427,25 +383,21 @@ internal static partial class JiYuService
         uint flags, uint timeout, out nint result);
 }
 
-/// <summary>宿主状态文件快照。</summary>
-internal sealed class JiYuStatus
+/// <summary>「小工具」页展示的极域助手状态快照。</summary>
+internal sealed class JiYuState
 {
-    public static JiYuStatus Unavailable { get; } = new();
-
+    /// <summary>内置的 JiYuTrainer.exe 是否存在。</summary>
     public bool Available { get; set; }
-    public bool StudentRunning { get; set; }
-    public int Pid { get; set; }
-    public string StudentPath { get; set; } = string.Empty;
+
+    /// <summary>内置助手是否在运行。</summary>
+    public bool Running { get; set; }
+
+    public int ProcessId { get; set; }
+
+    /// <summary>是否已注入极域学生端（Hook 的接收窗口存在）。</summary>
     public bool Injected { get; set; }
-    public bool Controlled { get; set; }
-    public bool HookFound { get; set; }
-    public bool BypassEnabled { get; set; }
-    public bool AllowGbTop { get; set; }
-    public bool GbTopmost { get; set; }
-    public bool GbFullscreen { get; set; }
-    public bool InputLocked { get; set; }
-    public bool HotkeyEnabled { get; set; }
-    public bool HotkeyRegistered { get; set; }
-    public string HotkeyText { get; set; } = string.Empty;
-    public string Message { get; set; } = string.Empty;
+
+    public int StudentPid { get; set; }
+
+    public bool StudentRunning => StudentPid > 0;
 }

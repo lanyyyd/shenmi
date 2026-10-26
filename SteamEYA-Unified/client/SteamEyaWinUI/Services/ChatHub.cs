@@ -106,7 +106,7 @@ internal static class ChatHub
         }
     }
 
-    /// <summary>「保队友」：立即结束本软件。先停极域宿主，Application.Exit 不保证触发 Closed 清理。</summary>
+    /// <summary>「保队友」：立即结束本软件。先分离极域并结束内置助手，Application.Exit 不保证触发 Closed 清理。</summary>
     private static void ForceExit()
     {
         try

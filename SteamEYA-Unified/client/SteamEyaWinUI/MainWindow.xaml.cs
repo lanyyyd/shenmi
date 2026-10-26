@@ -81,7 +81,12 @@ public sealed partial class MainWindow : Window
             ChatHub.Shutdown();
             EngineLauncher.Stop();
             GatewayLauncher.Stop();
-            JiYuService.Stop();
+
+            // 极域助手：勾选「退出时一并结束」就先分离注入再退出，否则让它继续在后台运行。
+            if (AppState.SettingsService.Load().JiYuCloseWithApp)
+            {
+                JiYuService.Stop();
+            }
         };
 
         StartTipBubble();

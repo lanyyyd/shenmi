@@ -19,30 +19,10 @@
 
             <InfoBar x:Name="PageInfoBar" IsClosable="True" IsOpen="False" />
 
-            <!-- 运行状态 -->
+            <!-- 内置助手状态 -->
             <Border Style="{StaticResource CardBorderStyle}">
                 <StackPanel Spacing="12">
-                    <Grid ColumnSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock
-                            x:Name="StatusTitle"
-                            Grid.Column="0"
-                            Style="{StaticResource SectionTitleTextStyle}"
-                            VerticalAlignment="Center" />
-                        <Button
-                            x:Name="RefreshButton"
-                            Grid.Column="1"
-                            Style="{StaticResource AuroraGlassButtonStyle}"
-                            Click="OnRefreshClick">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon FontSize="14" Glyph="&#xE72C;" />
-                                <TextBlock x:Name="RefreshLabel" />
-                            </StackPanel>
-                        </Button>
-                    </Grid>
+                    <TextBlock x:Name="HelperTitle" Style="{StaticResource SectionTitleTextStyle}" />
 
                     <Grid ColumnSpacing="12" RowSpacing="8">
                         <Grid.ColumnDefinitions>
@@ -56,78 +36,42 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <TextBlock x:Name="StudentLabel" Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabelTextStyle}" />
-                        <TextBlock x:Name="StudentValue" Grid.Row="0" Grid.Column="1" Style="{StaticResource FieldValueTextStyle}" TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="BypassLabel" Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabelTextStyle}" />
-                        <TextBlock x:Name="BypassValue" Grid.Row="1" Grid.Column="1" Style="{StaticResource FieldValueTextStyle}" />
-                        <TextBlock x:Name="BroadcastLabel" Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabelTextStyle}" />
-                        <TextBlock x:Name="BroadcastValue" Grid.Row="2" Grid.Column="1" Style="{StaticResource FieldValueTextStyle}" />
-                        <TextBlock x:Name="HotkeyLabel" Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabelTextStyle}" />
-                        <TextBlock x:Name="HotkeyValue" Grid.Row="3" Grid.Column="1" Style="{StaticResource FieldValueTextStyle}" />
+                        <TextBlock x:Name="HelperLabel" Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabelTextStyle}" />
+                        <TextBlock x:Name="HelperValue" Grid.Row="0" Grid.Column="1" Style="{StaticResource FieldValueTextStyle}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="InjectionLabel" Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabelTextStyle}" />
+                        <TextBlock x:Name="InjectionValue" Grid.Row="1" Grid.Column="1" Style="{StaticResource FieldValueTextStyle}" />
+                        <TextBlock x:Name="StudentLabel" Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabelTextStyle}" />
+                        <TextBlock x:Name="StudentValue" Grid.Row="2" Grid.Column="1" Style="{StaticResource FieldValueTextStyle}" />
+                        <TextBlock x:Name="VersionLabel" Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabelTextStyle}" />
+                        <TextBlock x:Name="VersionValue" Grid.Row="3" Grid.Column="1" Style="{StaticResource FieldValueTextStyle}" />
                     </Grid>
 
-                    <TextBlock
-                        x:Name="DetailText"
-                        Style="{StaticResource FieldLabelTextStyle}"
-                        TextWrapping="Wrap"
-                        Visibility="Collapsed" />
+                    <TextBlock x:Name="HelperDesc" Style="{StaticResource FieldLabelTextStyle}" TextWrapping="Wrap" />
+
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button x:Name="ShowButton" Style="{StaticResource AuroraGlassButtonStyle}" Click="OnShowClick" />
+                        <Button x:Name="ConfigButton" Style="{StaticResource AuroraGlassButtonStyle}" Click="OnConfigClick" />
+                        <Button x:Name="FolderButton" Style="{StaticResource AuroraGlassButtonStyle}" Click="OnFolderClick" />
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
-            <!-- 绕过开关 -->
+            <!-- 注入开关 -->
             <Border Style="{StaticResource CardBorderStyle}">
                 <StackPanel Spacing="8">
-                    <TextBlock x:Name="BypassTitle" Style="{StaticResource SectionTitleTextStyle}" />
-                    <ToggleSwitch x:Name="BypassSwitch" Toggled="OnBypassToggled" />
-                    <TextBlock x:Name="BypassDesc" Style="{StaticResource FieldLabelTextStyle}" TextWrapping="Wrap" />
+                    <TextBlock x:Name="InjectionTitle" Style="{StaticResource SectionTitleTextStyle}" />
+                    <ToggleSwitch x:Name="InjectionSwitch" Toggled="OnInjectionToggled" />
+                    <TextBlock x:Name="InjectionDesc" Style="{StaticResource FieldLabelTextStyle}" TextWrapping="Wrap" />
+                    <Button x:Name="DetachButton" Style="{StaticResource AuroraGlassButtonStyle}" Click="OnDetachClick" />
                 </StackPanel>
             </Border>
 
-            <!-- 广播窗口置顶 -->
+            <!-- 退出行为 -->
             <Border Style="{StaticResource CardBorderStyle}">
                 <StackPanel Spacing="8">
-                    <TextBlock x:Name="AllowTopTitle" Style="{StaticResource SectionTitleTextStyle}" />
-                    <ToggleSwitch x:Name="AllowTopSwitch" Toggled="OnAllowTopToggled" />
-                    <TextBlock x:Name="AllowTopDesc" Style="{StaticResource FieldLabelTextStyle}" TextWrapping="Wrap" />
-                </StackPanel>
-            </Border>
-
-            <!-- 老板键 -->
-            <Border Style="{StaticResource CardBorderStyle}">
-                <StackPanel Spacing="10">
-                    <TextBlock x:Name="BossTitle" Style="{StaticResource SectionTitleTextStyle}" />
-                    <ToggleSwitch x:Name="BossSwitch" Toggled="OnBossToggled" />
-
-                    <Grid ColumnSpacing="10">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock
-                            x:Name="BossHotkeyLabel"
-                            Grid.Column="0"
-                            VerticalAlignment="Center"
-                            Style="{StaticResource FieldLabelTextStyle}" />
-                        <TextBox
-                            x:Name="HotkeyBox"
-                            Grid.Column="1"
-                            IsReadOnly="True"
-                            IsSpellCheckEnabled="False"
-                            KeyDown="OnHotkeyKeyDown" />
-                        <Button
-                            x:Name="RecordButton"
-                            Grid.Column="2"
-                            Style="{StaticResource AuroraGlassButtonStyle}"
-                            Click="OnRecordClick" />
-                    </Grid>
-
-                    <TextBlock x:Name="BossDesc" Style="{StaticResource FieldLabelTextStyle}" TextWrapping="Wrap" />
-
-                    <Button
-                        x:Name="TestButton"
-                        Style="{StaticResource AuroraGlassButtonStyle}"
-                        Click="OnTestClick" />
+                    <TextBlock x:Name="CloseWithAppTitle" Style="{StaticResource SectionTitleTextStyle}" />
+                    <ToggleSwitch x:Name="CloseWithAppSwitch" Toggled="OnCloseWithAppToggled" />
+                    <TextBlock x:Name="CloseWithAppDesc" Style="{StaticResource FieldLabelTextStyle}" TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 

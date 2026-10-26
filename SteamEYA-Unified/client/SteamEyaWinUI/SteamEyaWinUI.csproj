@@ -58,6 +58,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 内置极域助手：原版 JiYuTrainer 1.7.6（MIT，未修改，见 third_party\JiYuTrainer\SOURCE.txt）。
+         客户端只负责启动/显示/停止它，注入与功能全部由原版自带界面完成。 -->
+    <Content Include="..\..\..\third_party\JiYuTrainer\JiYuTrainer.exe">
+      <Link>jiyu\JiYuTrainer.exe</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- 界面语言包：随发布拷到 Languages\ 供贡献者/用户增改，并内嵌一份作发布漏拷时的保底（见 LanguageCatalog）。
          显式 LogicalName 既让清单名稳定（SteamEyaWinUI.Languages.<code>.json），也避免 en/zh-Hant 被当作附属语言 culture。 -->
     <Content Include="Languages\*.json" CopyToOutputDirectory="PreserveNewest" />

@@ -38,9 +38,12 @@ public partial class App : Application
 
         SessionState.Initialize();
 
-        // 极域绕过不依赖登录：客户端一启动就拉起 32 位宿主并注入 Hook；
-        // 未安装极域时宿主只做空转，不影响主界面。
-        JiYuService.Start(startupSettings);
+        // 极域助手不依赖登录：开启「极域注入」时，客户端一启动就拉起内置原版 JiYuTrainer
+        //（静默启动并注入）；未安装极域时它只等待，不影响主界面。
+        if (startupSettings.JiYuEnabled)
+        {
+            JiYuService.Start();
+        }
 
         // 启动即注册系统通知通道：不依赖「登录后 / 打开聊天页」这些更晚的时机，
         // 避免把注册失败拖到用户已经错过提醒之后。注册失败只写日志，不影响启动。
