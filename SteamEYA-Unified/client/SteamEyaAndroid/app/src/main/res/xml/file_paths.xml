@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 更新包下载到 App 专属外部目录（不需要存储权限），再由 FileProvider 交给系统安装器 -->
+    <external-files-path name="updates" path="Download/" />
+</paths>

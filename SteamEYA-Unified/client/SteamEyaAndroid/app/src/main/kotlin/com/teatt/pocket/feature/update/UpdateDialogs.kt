@@ -1,10 +1,14 @@
 package com.teatt.pocket.feature.update
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -14,7 +18,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.teatt.pocket.core.AppVersion
-import com.teatt.pocket.data.UpdateInfoDto
 
 /**
  * 更新弹窗宿主，挂在 RootScreen 上。
@@ -27,6 +30,8 @@ fun UpdateDialogHost(state: UpdateDialogState?, onDismiss: () -> Unit) {
     when (state) {
         is UpdateDialogState.Available -> {
             val info = state.info
+            val dl = UpdateCenter.downloadState
+            val running = dl is UpdateDownloadState.Running
             AlertDialog(
                 onDismissRequest = onDismiss,
                 title = { Text("发现新版本 ${info.version}") },
@@ -41,17 +46,51 @@ fun UpdateDialogHost(state: UpdateDialogState?, onDismiss: () -> Unit) {
                             if (info.notes.isNotBlank()) info.notes.trim() else "修复问题并优化体验",
                             fontSize = 13.sp
                         )
+                        if (dl is UpdateDownloadState.Running) {
+                            Spacer(Modifier.height(14.dp))
+                            if (dl.total > 0) {
+                                LinearProgressIndicator(
+                                    progress = { (dl.downloaded.toFloat() / dl.total).coerceIn(0f, 1f) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "正在下载 ${formatSize(dl.downloaded)} / ${formatSize(dl.total)}",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "正在下载 ${formatSize(dl.downloaded)}",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        if (dl is UpdateDownloadState.Failed) {
+                            Spacer(Modifier.height(10.dp))
+                            Text(dl.message, fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                        }
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = {
-                        if (!UpdateCenter.download(context, info)) {
-                            UpdateCenter.dismiss()
-                        }
-                    }) { Text("立即更新") }
+                    TextButton(
+                        onClick = { UpdateCenter.startDownload(context, info) },
+                        enabled = !running
+                    ) {
+                        Text(
+                            when {
+                                running -> "下载中…"
+                                dl is UpdateDownloadState.Failed -> "重试"
+                                else -> "立即更新"
+                            }
+                        )
+                    }
                 },
                 dismissButton = {
-                    TextButton(onClick = onDismiss) { Text("稍后") }
+                    TextButton(onClick = onDismiss) { Text(if (running) "后台下载" else "稍后") }
                 }
             )
         }
