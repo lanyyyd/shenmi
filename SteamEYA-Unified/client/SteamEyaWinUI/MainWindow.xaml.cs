@@ -83,6 +83,7 @@ public sealed partial class MainWindow : Window
             GatewayLauncher.Stop();
 
             // 极域助手：勾选「退出时一并结束」就先分离注入再退出，否则让它继续在后台运行。
+            JiYuService.UnregisterHotkeys();
             if (AppState.SettingsService.Load().JiYuCloseWithApp)
             {
                 JiYuService.Stop();
@@ -121,6 +122,8 @@ public sealed partial class MainWindow : Window
 
         // 截图全局热键：必须等 hwnd 就绪后再注册（失败说明被其它程序占用，状态栏会提示）。
         ApplyScreenshotHotkey(startupSettings);
+        // 极域相关的两个热键：伪装全屏（默认 Ctrl+Shift+F）与老板键（默认 Ctrl+Alt+B）。
+        ApplyJiYuHotkeys(startupSettings);
 
         // 关闭拦截：先问「隐藏到托盘还是退出」，再决定是否真的关窗。
         AppWindow.Closing += OnAppWindowClosing;
@@ -280,6 +283,30 @@ public sealed partial class MainWindow : Window
         }
 
         return ok;
+    }
+
+    /// <summary>注册/重注册极域相关热键；「小工具」页改键后也走这里。</summary>
+    internal static (bool BossOk, bool FullscreenOk) ApplyJiYuHotkeys(AppSettings settings)
+    {
+        if (s_hwnd == 0)
+        {
+            return (false, false);
+        }
+
+        JiYuService.ApplyHotkeys(s_hwnd, settings, out var bossOk, out var fullscreenOk);
+
+        // 失败通常是热键被其它程序占用，或与截图/另一极域热键冲突，明确提示一下。
+        if (!bossOk && settings.JiYuBossKeyEnabled)
+        {
+            Instance?.ShowStatus(Loc.T("Tools_Hotkey_BossConflict"), InfoBarSeverity.Warning);
+        }
+
+        if (!fullscreenOk && settings.JiYuFullscreenHotkeyEnabled)
+        {
+            Instance?.ShowStatus(Loc.T("Tools_Hotkey_FullConflict"), InfoBarSeverity.Warning);
+        }
+
+        return (bossOk, fullscreenOk);
     }
 
     // ---------------- 关闭确认与托盘 ----------------
@@ -841,7 +868,9 @@ public sealed partial class MainWindow : Window
 
         if (message == WmHotkey)
         {
-            if ((int)wParam == ScreenshotService.HotkeyId)
+            var hotkeyId = (int)wParam;
+
+            if (hotkeyId == ScreenshotService.HotkeyId)
             {
                 // UnmanagedCallersOnly 里不能让异常跨边界，兜底住。
                 try
@@ -851,6 +880,40 @@ public sealed partial class MainWindow : Window
                 catch (Exception ex)
                 {
                     AppLog.Warn($"截图触发失败：{ex.Message}");
+                }
+
+                return 0;
+            }
+
+            if (hotkeyId == JiYuService.BossHotkeyId)
+            {
+                try
+                {
+                    // 老板键：把当前广播窗口拉成全屏并激活；按设置可连茶π窗口一起藏到托盘。
+                    JiYuService.TriggerBossKey();
+                    if (AppState.SettingsService.Load().JiYuBossKeyHideWindows)
+                    {
+                        Instance?.HideToTray();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Warn($"老板键触发失败：{ex.Message}");
+                }
+
+                return 0;
+            }
+
+            if (hotkeyId == JiYuService.FullscreenHotkeyId)
+            {
+                try
+                {
+                    // 转发给原版助手执行伪装全屏（原版默认 Ctrl+Alt+F，这里用客户端注册的键位）。
+                    JiYuService.TriggerFakeFullscreen();
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Warn($"伪装全屏热键触发失败：{ex.Message}");
                 }
 
                 return 0;

@@ -1,8 +1,12 @@
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
 using SteamEyaWinUI.Localization;
 using SteamEyaWinUI.Services;
+using Windows.UI.Core;
+using VirtualKey = Windows.System.VirtualKey;
 
 // Windows.System 与 Microsoft.UI.Dispatching 都有 DispatcherQueue 系列类型，
 // 客户端必须使用 WinUI 3 的 Microsoft.UI.Dispatching 版本，这里用别名消除歧义。
@@ -50,6 +54,8 @@ public sealed partial class ToolsPage : Page
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         _timer.Stop();
+        _recordingFullscreen = false;
+        _recordingBoss = false;
     }
 
     private void OnLanguageChanged()
@@ -77,6 +83,24 @@ public sealed partial class ToolsPage : Page
         ConfigButton.Content = Loc.T("Tools_Btn_Config");
         FolderButton.Content = Loc.T("Tools_Btn_Folder");
 
+        HotkeyTitle.Text = Loc.T("Tools_Hotkey_Title");
+        HotkeyDesc.Text = Loc.T("Tools_Hotkey_Desc");
+        FullscreenHotkeySwitch.Header = Loc.T("Tools_Hotkey_Fullscreen");
+        BossHotkeySwitch.Header = Loc.T("Tools_Hotkey_Boss");
+        BossHideSwitch.Header = Loc.T("Tools_Hotkey_BossHide");
+        FullscreenHotkeySwitch.OnContent = Loc.T("Tools_On");
+        FullscreenHotkeySwitch.OffContent = Loc.T("Tools_Off");
+        BossHotkeySwitch.OnContent = Loc.T("Tools_On");
+        BossHotkeySwitch.OffContent = Loc.T("Tools_Off");
+        BossHideSwitch.OnContent = Loc.T("Tools_On");
+        BossHideSwitch.OffContent = Loc.T("Tools_Off");
+        FullscreenRecordButton.Content = Loc.T(
+            _recordingFullscreen ? "Tools_Hotkey_Recording" : "Tools_Hotkey_Record");
+        BossRecordButton.Content = Loc.T(
+            _recordingBoss ? "Tools_Hotkey_Recording" : "Tools_Hotkey_Record");
+        BossTestButton.Content = Loc.T("Tools_Hotkey_Test");
+        UpdateHotkeyText();
+
         InjectionTitle.Text = Loc.T("Tools_Injection_Title");
         InjectionDesc.Text = Loc.T("Tools_Injection_Desc");
         InjectionSwitch.OnContent = Loc.T("Tools_On");
@@ -103,11 +127,17 @@ public sealed partial class ToolsPage : Page
         {
             InjectionSwitch.IsOn = settings.JiYuEnabled;
             CloseWithAppSwitch.IsOn = settings.JiYuCloseWithApp;
+            FullscreenHotkeySwitch.IsOn = settings.JiYuFullscreenHotkeyEnabled;
+            BossHotkeySwitch.IsOn = settings.JiYuBossKeyEnabled;
+            BossHideSwitch.IsOn = settings.JiYuBossKeyHideWindows;
         }
         finally
         {
             _syncing = false;
         }
+
+        UpdateHotkeyText();
+        UpdateHotkeyControls(settings);
     }
 
     private AppSettings SaveSetting(Action<AppSettings> update)
@@ -166,6 +196,224 @@ public sealed partial class ToolsPage : Page
         _ = SaveSetting(s => s.JiYuCloseWithApp = CloseWithAppSwitch.IsOn);
         ShowStatus(Loc.T("Tools_Saved"), InfoBarSeverity.Success);
     }
+
+    // ---------- 快捷键（伪装全屏 / 老板键） ----------
+
+    private bool _recordingFullscreen;
+    private bool _recordingBoss;
+
+    private void UpdateHotkeyText()
+    {
+        var settings = AppState.SettingsService.Load();
+
+        FullscreenHotkeyBox.Text = _recordingFullscreen
+            ? Loc.T("Tools_Hotkey_PressKeys")
+            : ScreenshotService.FormatHotkey(
+                settings.JiYuFullscreenHotkeyMods, settings.JiYuFullscreenHotkeyVk);
+
+        BossHotkeyBox.Text = _recordingBoss
+            ? Loc.T("Tools_Hotkey_PressKeys")
+            : ScreenshotService.FormatHotkey(settings.JiYuBossKeyMods, settings.JiYuBossKeyVk);
+    }
+
+    private void UpdateHotkeyControls(AppSettings settings)
+    {
+        FullscreenHotkeyBox.IsEnabled = settings.JiYuFullscreenHotkeyEnabled;
+        FullscreenRecordButton.IsEnabled = settings.JiYuFullscreenHotkeyEnabled;
+        BossHotkeyBox.IsEnabled = settings.JiYuBossKeyEnabled;
+        BossRecordButton.IsEnabled = settings.JiYuBossKeyEnabled;
+        BossTestButton.IsEnabled = settings.JiYuBossKeyEnabled;
+    }
+
+    /// <summary>把设置里的热键重新注册到主窗口；失败时主窗口状态栏会给出占用提示。</summary>
+    private void ApplyHotkeys(AppSettings settings)
+    {
+        UpdateHotkeyControls(settings);
+
+        var (bossOk, fullscreenOk) = MainWindow.ApplyJiYuHotkeys(settings);
+        var allOk = (!settings.JiYuBossKeyEnabled || bossOk) &&
+                    (!settings.JiYuFullscreenHotkeyEnabled || fullscreenOk);
+
+        if (allOk)
+        {
+            ShowStatus(Loc.T("Tools_Saved"), InfoBarSeverity.Success);
+        }
+    }
+
+    private void OnFullscreenHotkeyToggled(object sender, RoutedEventArgs e)
+    {
+        if (_syncing)
+        {
+            return;
+        }
+
+        ApplyHotkeys(SaveSetting(s => s.JiYuFullscreenHotkeyEnabled = FullscreenHotkeySwitch.IsOn));
+    }
+
+    private void OnBossHotkeyToggled(object sender, RoutedEventArgs e)
+    {
+        if (_syncing)
+        {
+            return;
+        }
+
+        ApplyHotkeys(SaveSetting(s => s.JiYuBossKeyEnabled = BossHotkeySwitch.IsOn));
+    }
+
+    private void OnBossHideToggled(object sender, RoutedEventArgs e)
+    {
+        if (_syncing)
+        {
+            return;
+        }
+
+        _ = SaveSetting(s => s.JiYuBossKeyHideWindows = BossHideSwitch.IsOn);
+        ShowStatus(Loc.T("Tools_Saved"), InfoBarSeverity.Success);
+    }
+
+    private void OnFullscreenRecordClick(object sender, RoutedEventArgs e)
+    {
+        _recordingFullscreen = true;
+        FullscreenRecordButton.Content = Loc.T("Tools_Hotkey_Recording");
+        FullscreenHotkeyBox.Text = Loc.T("Tools_Hotkey_PressKeys");
+        FullscreenHotkeyBox.Focus(FocusState.Programmatic);
+    }
+
+    private void OnBossRecordClick(object sender, RoutedEventArgs e)
+    {
+        _recordingBoss = true;
+        BossRecordButton.Content = Loc.T("Tools_Hotkey_Recording");
+        BossHotkeyBox.Text = Loc.T("Tools_Hotkey_PressKeys");
+        BossHotkeyBox.Focus(FocusState.Programmatic);
+    }
+
+    private void OnFullscreenHotkeyKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (!_recordingFullscreen)
+        {
+            return;
+        }
+
+        if (TryReadHotkey(e, out var mods, out var vk))
+        {
+            _recordingFullscreen = false;
+            var settings = SaveSetting(s =>
+            {
+                s.JiYuFullscreenHotkeyMods = mods;
+                s.JiYuFullscreenHotkeyVk = vk;
+                s.JiYuFullscreenHotkeyEnabled = true;
+            });
+
+            RefreshText();
+            SetSwitchesSilently(settings);
+            ApplyHotkeys(settings);
+        }
+        else if (e.Key == VirtualKey.Escape)
+        {
+            _recordingFullscreen = false;
+            RefreshText();
+        }
+
+        e.Handled = true;
+    }
+
+    private void OnBossHotkeyKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (!_recordingBoss)
+        {
+            return;
+        }
+
+        if (TryReadHotkey(e, out var mods, out var vk))
+        {
+            _recordingBoss = false;
+            var settings = SaveSetting(s =>
+            {
+                s.JiYuBossKeyMods = mods;
+                s.JiYuBossKeyVk = vk;
+                s.JiYuBossKeyEnabled = true;
+            });
+
+            RefreshText();
+            SetSwitchesSilently(settings);
+            ApplyHotkeys(settings);
+        }
+        else if (e.Key == VirtualKey.Escape)
+        {
+            _recordingBoss = false;
+            RefreshText();
+        }
+
+        e.Handled = true;
+    }
+
+    /// <summary>录制时读取按下的组合键；按的是纯修饰键或 Esc 时返回 false（Esc 由调用方处理为取消）。</summary>
+    private bool TryReadHotkey(KeyRoutedEventArgs e, out uint mods, out uint vk)
+    {
+        vk = (uint)e.Key;
+        mods = CurrentModifiers();
+
+        if (vk == (uint)VirtualKey.Escape || IsModifierKey(vk))
+        {
+            return false;
+        }
+
+        if (mods == 0)
+        {
+            ShowStatus(Loc.T("Tools_Hotkey_NeedModifier"), InfoBarSeverity.Warning);
+            return false;
+        }
+
+        return true;
+    }
+
+    private void SetSwitchesSilently(AppSettings settings)
+    {
+        _syncing = true;
+        try
+        {
+            FullscreenHotkeySwitch.IsOn = settings.JiYuFullscreenHotkeyEnabled;
+            BossHotkeySwitch.IsOn = settings.JiYuBossKeyEnabled;
+            BossHideSwitch.IsOn = settings.JiYuBossKeyHideWindows;
+        }
+        finally
+        {
+            _syncing = false;
+        }
+    }
+
+    private void OnBossTestClick(object sender, RoutedEventArgs e)
+    {
+        if (!JiYuService.Query().Injected)
+        {
+            ShowStatus(Loc.T("Tools_Hotkey_NotInjected"), InfoBarSeverity.Warning);
+            return;
+        }
+
+        if (!JiYuService.TriggerBossKey())
+        {
+            ShowStatus(Loc.T("Tools_Hotkey_TestFailed"), InfoBarSeverity.Warning);
+            return;
+        }
+
+        ShowStatus(Loc.T("Tools_Hotkey_TestSent"), InfoBarSeverity.Success);
+    }
+
+    private static bool IsModifierKey(uint vk) =>
+        vk is 16 or 17 or 18 or 91 or 92 or 160 or 161 or 162 or 163 or 164 or 165;
+
+    private static uint CurrentModifiers()
+    {
+        var mods = 0u;
+        if (IsKeyDown(VirtualKey.Control)) mods |= ScreenshotService.ModControl;
+        if (IsKeyDown(VirtualKey.Menu)) mods |= ScreenshotService.ModAlt;
+        if (IsKeyDown(VirtualKey.Shift)) mods |= ScreenshotService.ModShift;
+        if (IsKeyDown(VirtualKey.LeftWindows) || IsKeyDown(VirtualKey.RightWindows)) mods |= ScreenshotService.ModWin;
+        return mods;
+    }
+
+    private static bool IsKeyDown(VirtualKey key) =>
+        (InputKeyboardSource.GetKeyStateForCurrentThread(key) & CoreVirtualKeyStates.Down) != 0;
 
     /// <summary>对应原版退出提示里的「分离极域并退出」：先卸载注入，再结束内置助手。</summary>
     private void OnDetachClick(object sender, RoutedEventArgs e)

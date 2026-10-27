@@ -66,6 +66,61 @@
                 </StackPanel>
             </Border>
 
+            <!-- 快捷键 -->
+            <Border Style="{StaticResource CardBorderStyle}">
+                <StackPanel Spacing="10">
+                    <TextBlock x:Name="HotkeyTitle" Style="{StaticResource SectionTitleTextStyle}" />
+                    <TextBlock x:Name="HotkeyDesc" Style="{StaticResource FieldLabelTextStyle}" TextWrapping="Wrap" />
+
+                    <!-- 伪装全屏：客户端注册热键后转发给原版助手执行 -->
+                    <ToggleSwitch x:Name="FullscreenHotkeySwitch" Toggled="OnFullscreenHotkeyToggled" />
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox
+                            x:Name="FullscreenHotkeyBox"
+                            Grid.Column="0"
+                            IsReadOnly="True"
+                            IsSpellCheckEnabled="False"
+                            KeyDown="OnFullscreenHotkeyKeyDown" />
+                        <Button
+                            x:Name="FullscreenRecordButton"
+                            Grid.Column="1"
+                            Style="{StaticResource AuroraGlassButtonStyle}"
+                            Click="OnFullscreenRecordClick" />
+                    </Grid>
+
+                    <!-- 老板键：把当前广播窗口拉成全屏并激活，可选同时隐藏茶π -->
+                    <ToggleSwitch x:Name="BossHotkeySwitch" Toggled="OnBossHotkeyToggled" />
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox
+                            x:Name="BossHotkeyBox"
+                            Grid.Column="0"
+                            IsReadOnly="True"
+                            IsSpellCheckEnabled="False"
+                            KeyDown="OnBossHotkeyKeyDown" />
+                        <Button
+                            x:Name="BossRecordButton"
+                            Grid.Column="1"
+                            Style="{StaticResource AuroraGlassButtonStyle}"
+                            Click="OnBossRecordClick" />
+                        <Button
+                            x:Name="BossTestButton"
+                            Grid.Column="2"
+                            Style="{StaticResource AuroraGlassButtonStyle}"
+                            Click="OnBossTestClick" />
+                    </Grid>
+                    <ToggleSwitch x:Name="BossHideSwitch" Toggled="OnBossHideToggled" />
+                </StackPanel>
+            </Border>
+
             <!-- 退出行为 -->
             <Border Style="{StaticResource CardBorderStyle}">
                 <StackPanel Spacing="8">

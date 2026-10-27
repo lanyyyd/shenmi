@@ -28,6 +28,7 @@ void VHookFWindow(const wchar_t * hWndStr);
 
 void VHookWindow(const wchar_t * hWndStr);
 void VFixGuangBoWindow(HWND hWnd);
+void VBossKey();
 bool VIsInIllegalWindows(HWND hWnd);
 void VBoom();
 void VSendMessageBack(LPCWSTR buff, HWND hDlg);

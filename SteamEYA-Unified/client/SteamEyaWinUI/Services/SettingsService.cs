@@ -283,6 +283,27 @@ internal sealed class AppSettings
 
     /// <summary>「小工具」页：退出客户端时是否一并结束本次启动的内置极域助手。</summary>
     public bool JiYuCloseWithApp { get; set; } = true;
+
+    /// <summary>「小工具」页：是否启用老板键（把广播窗口恢复成全屏）。</summary>
+    public bool JiYuBossKeyEnabled { get; set; } = true;
+
+    /// <summary>老板键修饰键（Win32 MOD_* 位组合，Ctrl=2 / Alt=1 / Shift=4 / Win=8），默认 Ctrl+Alt。</summary>
+    public uint JiYuBossKeyMods { get; set; } = ScreenshotService.ModControl | ScreenshotService.ModAlt;
+
+    /// <summary>老板键虚拟键码，默认 B。</summary>
+    public uint JiYuBossKeyVk { get; set; } = 0x42;
+
+    /// <summary>老板键触发时是否把茶π窗口一起隐藏到托盘。</summary>
+    public bool JiYuBossKeyHideWindows { get; set; }
+
+    /// <summary>「小工具」页：是否启用 Ctrl+Shift+F 伪装全屏热键（转发给内置助手执行）。</summary>
+    public bool JiYuFullscreenHotkeyEnabled { get; set; } = true;
+
+    /// <summary>伪装全屏热键修饰键，默认 Ctrl+Shift。</summary>
+    public uint JiYuFullscreenHotkeyMods { get; set; } = ScreenshotService.ModControl | ScreenshotService.ModShift;
+
+    /// <summary>伪装全屏热键虚拟键码，默认 F。</summary>
+    public uint JiYuFullscreenHotkeyVk { get; set; } = 0x46;
 }
 
 // 与账号历史一致用 source generator：JsonSerializerDefaults.Web（camelCase、大小写不敏感），AOT 下可读写。

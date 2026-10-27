@@ -24,6 +24,7 @@
 #define TIMER_COUNTDOWN_TICK 10013
 #define TIMER_LIGNT_DELAY1 10014
 #define TIMER_LIGNT_DELAY2 10015
+#define TIMER_UNTOP_ENFORCE 10021
 
 #define DirectorySeparatorChar L'\\'
 #define AltDirectorySeparatorChar  L'/'
@@ -87,6 +88,8 @@ bool bandAllRunOp = false, allowNextRunOp = false, allowAllRunOp  = false, Prohi
 bool allowMonitor = false, allowControl = false, allowGbTop = false, fakeFull = false, gbFullManual = false,
 doNotShowVirusWindow = true, forceDisableWatchDog = false;
 bool isLocked = false, gbCurrentIsTop = false, isGbFounded = false;
+//用户手动右键选择过「广播窗口置顶」的那个窗口；只有它允许保持置顶。
+HWND gs_userTopWnd = NULL;
 std::list<std::wstring> runOPWhiteList;
 bool forceKill = false;
 int wdCount = 0;
@@ -396,6 +399,7 @@ void VHandleMsg(LPWSTR buff) {
 				SendMessage(hWndMsgCenter, WM_COMMAND, IDC_SW_STATUS_FAKEFULL, NULL);
 				SendMessage(hWndMsgCenter, WM_COMMAND, IDC_SW_STATUS_RB_FLASH, 0);
 			}
+			else if (arr[1] == L"boss") VBossKey();
 		}
 		else if (arr[0] == L"ukt") {
 			VOutPutStatus(L"[T] %s", buff);
@@ -434,6 +438,80 @@ bool VWindowTextIsGb(const wchar_t* text) {
 	return StringHlp::StrContainsW(text, L"广播", nullptr) || StringHlp::StrContainsW(text, L"演示", nullptr)
 		|| StringHlp::StrContainsW(text, L"共享", nullptr) || StringHlp::StrEqualW(text, L"屏幕演播室窗口") 
 		|| StringHlp::StrContainsW(text, L"共享屏幕", nullptr);
+}
+
+// ——— 广播窗口置顶策略 ———
+// 需求：广播后自动取消窗口置顶；即使手动全屏（含假装全屏）后，如果当前是置顶也取消置顶；
+// 只有用户右键选择「广播窗口置顶」时，才允许该窗口置顶。
+// 原版主程序只在钩到广播窗口时取消一次置顶，而且用户点过一次置顶后会通过 AllowGbTop
+// 把「允许置顶」持久化下来，导致之后的广播又跟着极域一起置顶；这里补一套按窗口记忆
+// （gs_userTopWnd）+ 定时兜底，保证置顶只来自用户的右键菜单。
+void VStripTopMost(HWND hWnd, bool applyZOrder)
+{
+	if (!hWnd || !IsWindow(hWnd)) return;
+
+	LONG exStyle = GetWindowLong(hWnd, GWL_EXSTYLE);
+	if ((exStyle & WS_EX_TOPMOST) == WS_EX_TOPMOST)
+		SetWindowLong(hWnd, GWL_EXSTYLE, exStyle & ~WS_EX_TOPMOST);
+
+	//WS_EX_TOPMOST 位不一定能靠 SetWindowLong 真正改掉（文档明确说该样式要用 SetWindowPos 改），
+	//所以需要时总是再压一次 HWND_NOTOPMOST；对本来就非置顶的窗口这一步没有任何副作用。
+	if (applyZOrder)
+		SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+	gbCurrentIsTop = false;
+}
+
+void VEnforceUnTopPolicy()
+{
+	if (gs_userTopWnd && !IsWindow(gs_userTopWnd)) gs_userTopWnd = NULL;
+
+	//当前广播窗口不是用户手动置顶的那个，就一律压回非置顶
+	if (gbWindow && gbWindow != gs_userTopWnd)
+		VStripTopMost(gbWindow, true);
+}
+
+// 老板键按下时宿主可能还没来得及枚举到新广播窗口，这里在极域进程内部再找一次。
+static BOOL CALLBACK VBossFindGbProc(HWND hWnd, LPARAM)
+{
+	DWORD pid = 0;
+	GetWindowThreadProcessId(hWnd, &pid);
+	if (pid != GetCurrentProcessId() || !IsWindowVisible(hWnd)) return TRUE;
+
+	WCHAR text[128] = { 0 };
+	GetWindowTextW(hWnd, text, ARRAYSIZE(text));
+	if (VWindowTextIsGb(text)) {
+		VFixGuangBoWindow(hWnd);
+		return FALSE;
+	}
+	return TRUE;
+}
+
+// 老板键：任意页面按下快捷键后，直接把当前广播窗口拉成全屏并激活。
+// 按置顶策略这里不再主动置顶——置顶只允许由用户右键「广播窗口置顶」触发。
+void VBossKey()
+{
+	HWND w = gbWindow;
+	if ((!w || !IsWindow(w)) && jiYuGBWnd && IsWindow(jiYuGBWnd)) w = jiYuGBWnd;
+	if (!w || !IsWindow(w)) {
+		EnumWindows(VBossFindGbProc, 0);
+		w = gbWindow;
+	}
+	if (!w || !IsWindow(w)) {
+		VOutPutStatus(L"[B] Boss key ignored: no broadcast window");
+		return;
+	}
+
+	if (faShowWindow) faShowWindow(w, SW_RESTORE);
+	else ShowWindow(w, SW_RESTORE);
+
+	SetWindowPos(w, HWND_NOTOPMOST, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
+	SendMessage(w, WM_SIZE, 0, MAKEWPARAM(screenWidth, screenHeight));
+
+	if (faBringWindowToTop) faBringWindowToTop(w);
+	if (raSetForegroundWindow) raSetForegroundWindow(w);
+	else SetForegroundWindow(w);
+	VOutPutStatus(L"[B] Boss key applied to %d", w);
 }
 void VHookFWindow(const wchar_t* hWndStr) {
 	HWND hWnd = (HWND)_wtol(hWndStr);
@@ -475,6 +553,10 @@ void VFixGuangBoWindow(HWND hWnd)
 {
 	if (gbWindow != hWnd) {
 		gbWindow = hWnd;
+		//每一次广播都是新窗口：上一条广播的「用户置顶」不再延续，并且立即取消置顶，
+		//不用等主程序 3 秒一次的检查，避免广播刚出来时短暂压住其他窗口。
+		gs_userTopWnd = NULL;
+		VStripTopMost(hWnd, true);
 		VOutPutStatus(L"[H] Guang Bo Window : %d", hWnd);
 	}
 	//WNDPROC 接管
@@ -1762,6 +1844,8 @@ INT_PTR CALLBACK MainWndProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 
 		SetTimer(hDlg, TIMER_WATCH_DOG_SRV, 6666, NULL);
 		SetTimer(hDlg, TIMER_AUTO_HIDE, 2600, NULL);
+		//兜底：手动全屏等路径会先给窗口打上 WS_EX_TOPMOST，这里周期性压回非置顶
+		SetTimer(hDlg, TIMER_UNTOP_ENFORCE, 300, NULL);
 		break;
 	}
 	case WM_DESTROY: {
@@ -1769,6 +1853,7 @@ INT_PTR CALLBACK MainWndProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 		DeleteBitmap(hIconGreen);
 		DeleteBitmap(hIconGrey);
 		KillTimer(hDlg, TIMER_WATCH_DOG_SRV);
+		KillTimer(hDlg, TIMER_UNTOP_ENFORCE);
 		PostQuitMessage(0);
 		break;
 	}
@@ -1869,6 +1954,9 @@ INT_PTR CALLBACK MainWndProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 		break;
 	}
 	case WM_TIMER: {
+		if (wParam == TIMER_UNTOP_ENFORCE) {
+			VEnforceUnTopPolicy();
+		}
 		if (wParam == TIMER_AUTO_HIDE) {
 			KillTimer(hDlg, TIMER_AUTO_HIDE);
 			SendMessage(hDlg, WM_COMMAND, IDC_SHIDE, NULL);
@@ -2012,6 +2100,8 @@ INT_PTR CALLBACK JiYuWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 			if ((oldLong & WS_EX_TOPMOST) == WS_EX_TOPMOST)
 			{
 				gbCurrentIsTop = false;
+				//用户取消置顶：该窗口不再享有置顶特权，后续定时检查也会继续压回非置顶
+				gs_userTopWnd = NULL;
 
 				CheckMenuItem(hMenuGb, IDM_TOPMOST, MF_UNCHECKED);
 				CheckMenuItem(GetSystemMenu(hWnd, FALSE), IDM_TOPMOST, MF_UNCHECKED);
@@ -2021,6 +2111,8 @@ INT_PTR CALLBACK JiYuWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 				//通知允许置顶设置
 				if (!allowGbTop) VSendMessageBack(L"hkb:algbtop", hWndMsgCenter);
 				gbCurrentIsTop = true;
+				//只有用户在这里手动选择「广播窗口置顶」，才记下这个窗口允许保持置顶
+				gs_userTopWnd = hWnd;
 
 				CheckMenuItem(hMenuGb, IDM_TOPMOST, MF_CHECKED);
 				CheckMenuItem(GetSystemMenu(hWnd, FALSE), IDM_TOPMOST, MF_CHECKED);
@@ -2081,6 +2173,16 @@ INT_PTR CALLBACK JiYuWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 			ClientToScreen(hWnd, &pos);
 			int id = TrackPopupMenu(hMenuGb, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, pos.x + 10, pos.y + 10, NULL, hWnd, NULL);
 			SendMessage(hWnd, WM_COMMAND, id, NULL);
+		}
+	}
+	else if (message == WM_WINDOWPOSCHANGING) {
+		//置顶策略：当前广播窗口不是用户手动置顶的那个时，无论置顶请求来自极域自身、
+		//手动全屏还是假装全屏，都在真正应用前压回非置顶，避免先置顶再被定时器撤销的闪烁。
+		if (hWnd == gbWindow && hWnd != gs_userTopWnd) {
+			WINDOWPOS* wp = (WINDOWPOS*)lParam;
+			if (wp && (wp->flags & SWP_NOZORDER) == 0 && wp->hwndInsertAfter == HWND_TOPMOST)
+				wp->hwndInsertAfter = HWND_NOTOPMOST;
+			VStripTopMost(hWnd, false);
 		}
 	}
 JOUT:
