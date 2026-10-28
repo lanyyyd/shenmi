@@ -706,7 +706,6 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             UnreadVisibility = groupUnread > 0 ? Visibility.Visible : Visibility.Collapsed,
             AvatarText = "群",
             AvatarBrush = _accent,
-            AvatarCorner = 18,
             OnlineDotVisibility = Visibility.Collapsed,
             AiVisibility = Visibility.Collapsed,
             LevelVisibility = Visibility.Collapsed,
@@ -775,7 +774,6 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             AvatarText = ContactNameOf(u) is { Length: > 0 } n ? n[..1].ToUpperInvariant() : "?",
             AvatarImage = string.IsNullOrWhiteSpace(u.Avatar) ? null : SafeBitmap(u.Avatar),
             AvatarBrush = AvatarBrushFor(u.Id),
-            AvatarCorner = 18,
             OnlineDotVisibility = u.Online ? Visibility.Visible : Visibility.Collapsed,
             AiVisibility = isAi ? Visibility.Visible : Visibility.Collapsed,
             LevelText = LevelTextOf(u.Level),
@@ -2458,7 +2456,6 @@ public sealed class SidebarItemVm
     public string AvatarText { get; set; } = string.Empty;
     public ImageSource? AvatarImage { get; set; }
     public Brush AvatarBrush { get; set; } = null!;
-    public double AvatarCorner { get; set; } = 18;
     public string Room { get; set; } = string.Empty;
     public int PeerId { get; set; }
     public bool IsHeader { get; set; }

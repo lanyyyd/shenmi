@@ -168,7 +168,7 @@
                                     </Grid.ColumnDefinitions>
 
                                     <Grid Grid.Column="0" Width="36" Height="36">
-                                        <Border Background="{x:Bind AvatarBrush}" CornerRadius="{x:Bind AvatarCorner}">
+                                        <Border Background="{x:Bind AvatarBrush}" CornerRadius="18">
                                             <TextBlock
                                                 Text="{x:Bind AvatarText}"
                                                 Foreground="White"
