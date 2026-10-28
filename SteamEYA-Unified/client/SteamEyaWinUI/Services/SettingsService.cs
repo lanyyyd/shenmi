@@ -231,6 +231,12 @@ internal sealed class AppSettings
     /// <summary>同时进行的下载任务数，默认 1（避免多个任务同时各开 64 连接）。</summary>
     public int DownloadConcurrentTasks { get; set; } = 1;
 
+    /// <summary>
+    /// GitHub 加速源前缀列表（按用户排序，检查更新与下载更新都按此顺序取第一个可用）。
+    /// null 或空表示使用内置默认列表（gh.dayiu.cn 等）。
+    /// </summary>
+    public List<string>? UpdateMirrors { get; set; }
+
     public const int DefaultDownloadThreadCount = 64;
 
     /// <summary>自定义界面主题色，格式 #RRGGBB 或 #AARRGGBB；null 表示使用默认 Aurora 主题色。</summary>

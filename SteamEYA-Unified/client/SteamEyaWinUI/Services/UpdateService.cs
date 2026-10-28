@@ -29,15 +29,19 @@ internal sealed class UpdateService
     private const string GitHubApiUrl = "https://api.github.com/repos/lanyyyd/shenmi/releases?per_page=100";
 
     /// <summary>
-    /// GitHub 加速源前缀：用法是直接拼在原始链接前面，
+    /// 内置 GitHub 加速源前缀：用法是直接拼在原始链接前面，
     /// 例 https://gh.dayiu.cn/https://github.com/.../TeaTT-1.0.30-win-x64-setup.exe
+    /// 用户在设置页可增删/拖拽排序，见 <see cref="GetConfiguredMirrors"/>。
     /// </summary>
-    private static readonly string[] Mirrors =
+    internal static readonly string[] DefaultMirrors =
     [
         "https://gh.dayiu.cn/",
         "https://github.tbap.top/",
         "https://gh-proxy.com/"
     ];
+
+    /// <summary>测速用的探针地址（各加速源前缀都会拼上它）。</summary>
+    internal const string GitHubReleaseLatestUrl = "https://github.com/lanyyyd/shenmi/releases/latest";
 
     /// <summary>
     /// 能代理 api.github.com 的加速源（gh.dayiu.cn 只代理下载，实测 API 返回 404）。
@@ -103,11 +107,18 @@ internal sealed class UpdateService
         return await UseGitHubAsync(github, cancellationToken);
     }
 
-    /// <summary>把下载地址换成测速选出的加速源（只对 github.com 链接生效）。</summary>
+    /// <summary>把下载地址换成按用户排序选出的加速源（只对 github.com 链接生效），并记录源主机名。</summary>
     private static async Task<AppUpdateInfo> UseGitHubAsync(AppUpdateInfo github, CancellationToken cancellationToken)
     {
-        var url = await ChooseFastestMirrorAsync(github.Url, cancellationToken);
-        return string.Equals(url, github.Url, StringComparison.Ordinal) ? github : github with { Url = url };
+        var (url, mirror) = await ChooseMirrorAsync(github.Url, cancellationToken);
+        return string.Equals(url, github.Url, StringComparison.Ordinal)
+            ? github
+            : github with
+            {
+                Url = url,
+                Mirror = mirror,
+                MirrorLabel = mirror is null ? null : MirrorHost(mirror)
+            };
     }
 
     private static async Task<AppUpdateInfo> CheckServerAsync(CancellationToken cancellationToken)
@@ -232,8 +243,8 @@ internal sealed class UpdateService
     /// <summary>并发探测各加速源的 releases/latest，取最先返回 302 的那个 tag。</summary>
     private static async Task<(string Tag, long ElapsedMs)?> ProbeLatestTagAsync(CancellationToken cancellationToken)
     {
-        var pending = Mirrors
-            .Select(m => ProbeTagAsync(m + $"https://github.com/{RepoSlug}/releases/latest", cancellationToken))
+        var pending = GetConfiguredMirrors()
+            .Select(m => ProbeTagAsync(m + GitHubReleaseLatestUrl, cancellationToken))
             .ToList();
 
         while (pending.Count > 0)
@@ -342,19 +353,96 @@ internal sealed class UpdateService
             DateTimeOffset.Now);
     }
 
-    /// <summary>三路并发探测，取响应最快的加速源；全失败就用主源（直连 GitHub 在国内基本不可用）。</summary>
-    private static async Task<string> ChooseFastestMirrorAsync(string url, CancellationToken cancellationToken)
+    /// <summary>
+    /// 按用户排序挑加速源：并发探测，取**顺序最靠前**的可达源（测速后最快的已排到最前）。
+    /// 全部失败时退回列表首位。
+    /// </summary>
+    private static async Task<(string Url, string? Mirror)> ChooseMirrorAsync(string url, CancellationToken cancellationToken)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
             !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase))
         {
-            return url;
+            return (url, null);
         }
 
-        var probes = await Task.WhenAll(Mirrors.Select(m => ProbeAsync(m + url, cancellationToken)));
-        var fastest = probes.Where(p => p.Ok).MinBy(p => p.ElapsedMs);
-        return fastest.Ok ? fastest.Url : Mirrors[0] + url;
+        var mirrors = GetConfiguredMirrors();
+        var probes = await Task.WhenAll(mirrors.Select(m => ProbeAsync(m + url, cancellationToken)));
+        for (var i = 0; i < probes.Length; i++)
+        {
+            if (probes[i].Ok)
+            {
+                return (probes[i].Url, mirrors[i]);
+            }
+        }
+
+        return (mirrors[0] + url, mirrors[0]);
     }
+
+    /// <summary>测速：HEAD 一次 releases/latest，返回耗时；不可达返回 null。</summary>
+    internal static async Task<long?> ProbeMirrorLatencyAsync(string mirrorPrefix, CancellationToken cancellationToken)
+    {
+        var result = await ProbeAsync(mirrorPrefix + GitHubReleaseLatestUrl, cancellationToken);
+        return result.Ok ? result.ElapsedMs : null;
+    }
+
+    /// <summary>读取用户配置的镜像源（按排序）；未配置或全部非法时回退内置默认列表。</summary>
+    internal static IReadOnlyList<string> GetConfiguredMirrors()
+    {
+        try
+        {
+            var configured = NormalizeMirrors(AppState.SettingsService.Load().UpdateMirrors);
+            return configured.Count > 0 ? configured : DefaultMirrors;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"读取镜像源配置失败，改用默认列表：{ex.Message}");
+            return DefaultMirrors;
+        }
+    }
+
+    /// <summary>规整镜像源：去空白、补尾斜杠、只保留 http(s)、按忽略大小写去重。</summary>
+    internal static List<string> NormalizeMirrors(IEnumerable<string>? raw)
+    {
+        var result = new List<string>();
+        if (raw is null)
+        {
+            return result;
+        }
+
+        foreach (var item in raw)
+        {
+            var value = item?.Trim();
+            if (string.IsNullOrEmpty(value) ||
+                (!value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                 !value.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            if (!value.EndsWith('/'))
+            {
+                value += "/";
+            }
+
+            if (!Uri.TryCreate(value, UriKind.Absolute, out _))
+            {
+                continue;
+            }
+
+            if (result.Any(existing => string.Equals(existing, value, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            result.Add(value);
+        }
+
+        return result;
+    }
+
+    /// <summary>取镜像源主机名，用于「正在使用哪个源」的提示文案。</summary>
+    internal static string MirrorHost(string mirrorPrefix) =>
+        Uri.TryCreate(mirrorPrefix, UriKind.Absolute, out var uri) ? uri.Host : mirrorPrefix;
 
     private static async Task<(bool Ok, long ElapsedMs, string Url)> ProbeAsync(string url, CancellationToken cancellationToken)
     {

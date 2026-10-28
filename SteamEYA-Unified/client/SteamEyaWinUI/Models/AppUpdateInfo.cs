@@ -15,4 +15,11 @@ internal sealed record AppUpdateInfo(
     string Sha256,
     bool Available,
     bool HasUpdate,
-    DateTimeOffset CheckedAt);
+    DateTimeOffset CheckedAt)
+{
+    /// <summary>本次下载使用的加速源前缀（含尾斜杠）；null 表示自有服务器或直连 GitHub。</summary>
+    public string? Mirror { get; init; }
+
+    /// <summary>加速源主机名（用于下载提示文案，如 gh.dayiu.cn）。</summary>
+    public string? MirrorLabel { get; init; }
+}

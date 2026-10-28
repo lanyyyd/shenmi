@@ -12,7 +12,7 @@ internal static class UpdateFlow
 {
     public static async Task StartAsync(AppUpdateInfo info, Action closeApp)
     {
-        AppState.ShowStatus(Loc.T("About_Update_Downloading"), InfoBarSeverity.Informational);
+        AppState.ShowStatus(DescribeStart(info), InfoBarSeverity.Informational);
         var progress = new Progress<UpdateDownloadProgress>(
             p => AppState.ShowStatus(Describe(p), InfoBarSeverity.Informational));
 
@@ -34,11 +34,22 @@ internal static class UpdateFlow
         }
     }
 
-    private static string Describe(UpdateDownloadProgress p) => p.TotalBytes is > 0
-        ? Loc.Tf("About_Update_DownloadProgress_Format",
-            (int)(p.BytesReceived * 100 / p.TotalBytes.Value),
-            FormatBytes(p.BytesReceived), FormatBytes(p.TotalBytes.Value))
-        : Loc.T("About_Update_DownloadProgress_Unknown");
+    private static string DescribeStart(AppUpdateInfo info) => string.IsNullOrWhiteSpace(info.MirrorLabel)
+        ? Loc.T("About_Update_Downloading")
+        : Loc.Tf("About_Update_Downloading_Mirror_Format", info.MirrorLabel);
+
+    private static string Describe(UpdateDownloadProgress p)
+    {
+        var text = p.TotalBytes is > 0
+            ? Loc.Tf("About_Update_DownloadProgress_Format",
+                (int)(p.BytesReceived * 100 / p.TotalBytes.Value),
+                FormatBytes(p.BytesReceived), FormatBytes(p.TotalBytes.Value))
+            : Loc.T("About_Update_DownloadProgress_Unknown");
+
+        return string.IsNullOrWhiteSpace(p.MirrorLabel)
+            ? text
+            : Loc.Tf("About_Update_Mirror_Suffix_Format", text, p.MirrorLabel);
+    }
 
     internal static string FormatBytes(long bytes)
     {

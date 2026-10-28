@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -34,11 +35,16 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
     private bool _pickingBackground;
     private bool _recordingScreenshotHotkey;
 
+    // 更新镜像源列表（ListView 直接拖动重排这个集合）。
+    private readonly ObservableCollection<MirrorRow> _mirrors = [];
+    private bool _mirrorTesting;
+
     public SettingsPage()
     {
         // XAML 初始化取色器/滑杆/开关时可能触发变更事件；暂时屏蔽，避免首帧用默认值覆盖已保存设置。
         _syncing = true;
         InitializeComponent();
+        MirrorList.ItemsSource = _mirrors;
         _syncing = false;
 
         // 语言切换后，让本页所有 {x:Bind Strings.Get(...), Mode=OneWay} 重新求值（主题项文本等）。
@@ -136,6 +142,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
             CustomBackgroundOpacitySlider.Value = Math.Clamp(settings.CustomBackgroundOpacity, 0.1, 0.9);
             UpdateCustomBackgroundControls();
             DownloadThreadBox.Value = Math.Clamp(settings.DownloadThreadCount, 1, 256);
+            RefreshMirrorList();
             BuildNotifyModeItems(settings.NotificationMode);
             DebugModeSwitch.IsOn = settings.DebugMode;
             LogPathText.Text = AppLog.LogFilePath;
@@ -226,6 +233,136 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         settings.DownloadDirectory = null;
         AppState.SettingsService.Save(settings);
         UpdateDownloadDirText();
+    }
+
+    // ---------- 更新镜像源 ----------
+
+    /// <summary>把设置里的镜像源填入列表（未配置时用内置默认）。</summary>
+    private void RefreshMirrorList()
+    {
+        var sources = UpdateService.GetConfiguredMirrors();
+        _mirrors.Clear();
+        foreach (var source in sources)
+        {
+            _mirrors.Add(new MirrorRow { Url = source });
+        }
+    }
+
+    private void SaveMirrorOrder()
+    {
+        var settings = AppState.SettingsService.Load();
+        settings.UpdateMirrors = _mirrors.Select(row => row.Url).ToList();
+        AppState.SettingsService.Save(settings);
+    }
+
+    private void MirrorList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
+    {
+        // ListView 内部已把 ObservableCollection 重排，落盘即保留新顺序。
+        SaveMirrorOrder();
+        MirrorStatusText.Text = string.Empty;
+    }
+
+    private void RemoveMirrorButton_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not MirrorRow row)
+        {
+            return;
+        }
+
+        _mirrors.Remove(row);
+        SaveMirrorOrder();
+        MirrorStatusText.Text = string.Empty;
+    }
+
+    private void AddMirrorButton_Click(object sender, RoutedEventArgs e) => AddMirrorFromInput();
+
+    private void MirrorInputBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Enter)
+        {
+            AddMirrorFromInput();
+            e.Handled = true;
+        }
+    }
+
+    private void AddMirrorFromInput()
+    {
+        var normalized = UpdateService.NormalizeMirrors([MirrorInputBox.Text]);
+        if (normalized.Count == 0)
+        {
+            MirrorStatusText.Text = Loc.T("Settings_Mirror_Invalid");
+            return;
+        }
+
+        var url = normalized[0];
+        if (_mirrors.Any(row => string.Equals(row.Url, url, StringComparison.OrdinalIgnoreCase)))
+        {
+            MirrorStatusText.Text = Loc.T("Settings_Mirror_Duplicate");
+            return;
+        }
+
+        _mirrors.Add(new MirrorRow { Url = url });
+        MirrorInputBox.Text = string.Empty;
+        MirrorStatusText.Text = string.Empty;
+        SaveMirrorOrder();
+    }
+
+    private void MirrorResetButton_Click(object sender, RoutedEventArgs e)
+    {
+        _mirrors.Clear();
+        foreach (var source in UpdateService.DefaultMirrors)
+        {
+            _mirrors.Add(new MirrorRow { Url = source });
+        }
+
+        SaveMirrorOrder();
+        MirrorStatusText.Text = string.Empty;
+    }
+
+    private async void MirrorSpeedTestButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_mirrorTesting || _mirrors.Count == 0)
+        {
+            return;
+        }
+
+        _mirrorTesting = true;
+        MirrorSpeedTestButton.IsEnabled = false;
+        MirrorStatusText.Text = Loc.T("Settings_Mirror_Testing");
+
+        try
+        {
+            var rows = _mirrors.ToList();
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+            var results = await Task.WhenAll(
+                rows.Select(row => UpdateService.ProbeMirrorLatencyAsync(row.Url, cts.Token)));
+
+            for (var i = 0; i < rows.Count; i++)
+            {
+                rows[i].SetLatency(results[i]);
+            }
+
+            // 延迟升序重排（不可达排在最后，同延迟保持原顺序）。
+            var ordered = rows.OrderBy(row => row.LatencyMs ?? long.MaxValue).ToList();
+            _mirrors.Clear();
+            foreach (var row in ordered)
+            {
+                _mirrors.Add(row);
+            }
+
+            SaveMirrorOrder();
+            MirrorStatusText.Text = Loc.T("Settings_Mirror_TestDone");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"镜像源测速失败：{ex.Message}");
+            MirrorStatusText.Text = Loc.Tf("Settings_Mirror_TestFailed_Format", ex.Message);
+        }
+        finally
+        {
+            _mirrorTesting = false;
+            MirrorSpeedTestButton.IsEnabled = true;
+        }
     }
 
     // ---------- 截图快捷键 ----------
@@ -798,4 +935,36 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
             NotifyDiagText.Text = ex.Message;
         }
     }
+}
+
+/// <summary>设置页「更新镜像源」列表行：URL + 最近一次测速延迟。</summary>
+public sealed class MirrorRow : INotifyPropertyChanged
+{
+    private long? _latencyMs;
+    private bool _tested;
+
+    public string Url { get; init; } = string.Empty;
+
+    /// <summary>测速延迟（毫秒）；null 表示不可达。</summary>
+    public long? LatencyMs => _latencyMs;
+
+    /// <summary>是否已测过速（未测时右侧不显示延迟文本）。</summary>
+    public bool Tested => _tested;
+
+    public string LatencyText => !_tested
+        ? string.Empty
+        : _latencyMs is { } ms
+            ? Loc.Tf("Settings_Mirror_Latency_Format", ms)
+            : Loc.T("Settings_Mirror_Unreachable");
+
+    public void SetLatency(long? latencyMs)
+    {
+        _latencyMs = latencyMs;
+        _tested = true;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LatencyMs)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Tested)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LatencyText)));
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 }

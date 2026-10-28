@@ -43,7 +43,8 @@ internal sealed class UpdateInstallerService
         if (File.Exists(targetPath) &&
             (string.IsNullOrWhiteSpace(update.Sha256) || VerifySha256(targetPath, update.Sha256)))
         {
-            Report(progress, new FileInfo(targetPath).Length, new FileInfo(targetPath).Length);
+            var existing = new FileInfo(targetPath).Length;
+            Report(progress, existing, existing, update.MirrorLabel);
             return targetPath;
         }
 
@@ -56,7 +57,7 @@ internal sealed class UpdateInstallerService
         var runTask = engine.RunAsync();
         while (!runTask.IsCompleted)
         {
-            Report(progress, engine.ReceivedBytes, engine.TotalBytes > 0 ? engine.TotalBytes : null);
+            Report(progress, engine.ReceivedBytes, engine.TotalBytes > 0 ? engine.TotalBytes : null, update.MirrorLabel);
             await Task.WhenAny(runTask, Task.Delay(250, CancellationToken.None));
         }
 
@@ -69,7 +70,7 @@ internal sealed class UpdateInstallerService
         }
 
         var total = engine.TotalBytes > 0 ? engine.TotalBytes : (long?)null;
-        Report(progress, engine.ReceivedBytes, total);
+        Report(progress, engine.ReceivedBytes, total, update.MirrorLabel);
 
         if (!string.IsNullOrWhiteSpace(update.Sha256) && !VerifySha256(downloaded, update.Sha256))
         {
@@ -80,8 +81,8 @@ internal sealed class UpdateInstallerService
         return downloaded;
     }
 
-    private static void Report(IProgress<UpdateDownloadProgress>? progress, long received, long? total)
-        => progress?.Report(new UpdateDownloadProgress(received, total));
+    private static void Report(IProgress<UpdateDownloadProgress>? progress, long received, long? total, string? mirrorLabel)
+        => progress?.Report(new UpdateDownloadProgress(received, total, mirrorLabel));
 
     private static string DescribeFailure(DownloadEngine engine)
     {
@@ -196,4 +197,4 @@ internal sealed class UpdateInstallerService
     }
 }
 
-internal sealed record UpdateDownloadProgress(long BytesReceived, long? TotalBytes);
+internal sealed record UpdateDownloadProgress(long BytesReceived, long? TotalBytes, string? MirrorLabel = null);
