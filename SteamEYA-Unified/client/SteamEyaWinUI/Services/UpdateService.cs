@@ -14,6 +14,7 @@ namespace SteamEyaWinUI.Services;
 /// 检查更新：先看**自有服务器** <c>GET /api/update/latest</c>，再看 **GitHub Releases**。
 /// 两边版本一致时优先走服务器下载（更稳、有 sha256）；GitHub 版本更高时才走 GitHub，
 /// 并把下载链接接到自动测速选出的加速源上（国内直连 github.com 经常不通）。
+/// 无极域版（<see cref="AppEdition.IsNoJiYu"/>）跳过服务器，只从 GitHub 取 nojiyu 安装包。
 /// </summary>
 internal sealed class UpdateService
 {
@@ -64,16 +65,19 @@ internal sealed class UpdateService
 
     public async Task<AppUpdateInfo> CheckLatestAsync(CancellationToken cancellationToken = default)
     {
-        // 顺序按需求：先查服务器，再查 GitHub。
+        // 顺序按需求：先查服务器，再查 GitHub。无极域版不走服务器，避免装回带极域的包。
         Exception? serverError = null;
         AppUpdateInfo? server = null;
-        try
+        if (!AppEdition.IsNoJiYu)
         {
-            server = await CheckServerAsync(cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            serverError = ex;
+            try
+            {
+                server = await CheckServerAsync(cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                serverError = ex;
+            }
         }
 
         AppUpdateInfo? github = null;
@@ -156,6 +160,11 @@ internal sealed class UpdateService
             DateTimeOffset.Now);
     }
 
+    /// <summary>当前形态对应的安装包文件名后缀（CI 固定生成）。</summary>
+    private static string InstallerSuffix => AppEdition.IsNoJiYu
+        ? "-win-x64-nojiyu-setup.exe"
+        : "-win-x64-setup.exe";
+
     /// <summary>
     /// 读 GitHub Releases，取桌面端（tag 形如 v1.0.30）里版本最高的一个。
     /// API 优先（能拿说明/大小/sha256），但**并发走加速源**；全部失败时退回「最新 tag」探测。
@@ -177,8 +186,8 @@ internal sealed class UpdateService
         }
 
         var version = NormalizeVersion(latest.Tag);
-        // 资产名由 CI 固定生成：TeaTT-<版本>-win-x64-setup.exe
-        var fileName = $"TeaTT-{version}-win-x64-setup.exe";
+        // 资产名由 CI 固定生成：TeaTT-<版本>-win-x64-setup.exe / TeaTT-<版本>-win-x64-nojiyu-setup.exe
+        var fileName = $"TeaTT-{version}{InstallerSuffix}";
         return new AppUpdateInfo(
             CurrentVersion,
             version,
@@ -323,9 +332,7 @@ internal sealed class UpdateService
         }
 
         var asset = best.Assets.FirstOrDefault(a =>
-                        a.Name.EndsWith("-win-x64-setup.exe", StringComparison.OrdinalIgnoreCase))
-                    ?? best.Assets.FirstOrDefault(a =>
-                        a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
+            a.Name.EndsWith(InstallerSuffix, StringComparison.OrdinalIgnoreCase));
         if (asset is null || string.IsNullOrWhiteSpace(asset.BrowserDownloadUrl))
         {
             return null;

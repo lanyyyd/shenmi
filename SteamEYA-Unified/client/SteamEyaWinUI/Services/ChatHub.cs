@@ -111,7 +111,10 @@ internal static class ChatHub
     {
         try
         {
-            JiYuService.Stop();
+            if (!AppEdition.IsNoJiYu)
+            {
+                JiYuService.Stop();
+            }
         }
         catch
         {

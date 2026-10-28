@@ -17,6 +17,16 @@
   #define OutputDir SourcePath
 #endif
 
+; 安装包文件名：默认带极域助手的标准版；CI 另出一份 /DOutputBaseName=...-nojiyu-setup 的无极域版。
+#ifndef OutputBaseName
+  #define OutputBaseName "TeaTT-{#AppVersion}-win-x64-setup"
+#endif
+
+; 无极域版：/DNoJiYu=1 时安装前先删掉旧版遗留的 jiyu 目录（从标准版升级上来时不会残留注入模块）。
+#ifdef NoJiYu
+  #define IsNoJiYu
+#endif
+
 ; 中文语言包目录（Inno 官方不内置中文，需自带 ChineseSimplified.isl；CI 通过 /DLanguagesDir 传入）
 #ifndef LanguagesDir
   #define LanguagesDir "languages"
@@ -33,7 +43,7 @@ DefaultGroupName=茶π
 DisableDirPage=no
 DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
-OutputBaseFilename=TeaTT-{#AppVersion}-win-x64-setup
+OutputBaseFilename={#OutputBaseName}
 Compression=lzma2/ultra64
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
@@ -77,6 +87,12 @@ Type: dirifempty; Name: "{autoprograms}\SteamEYA"
 ; 升级时清掉这两个遗留文件，避免与新方案混用（旧 Hook 若仍被极域加载，删除失败不影响安装）。
 Type: files; Name: "{app}\jiyu\JiYuHost.exe"
 Type: files; Name: "{app}\jiyu\SteamEya.JiYuHook.dll"
+; 安装形态标记：无极域版由 [Files] 再放回 nojiyu 标记；标准版则清掉它，避免从无极域版升级后仍被当成无极域版。
+Type: files; Name: "{app}\nojiyu"
+#ifdef IsNoJiYu
+; 无极域版：清掉旧版遗留的整个注入目录。
+Type: filesandordirs; Name: "{app}\jiyu"
+#endif
 
 [Run]
 Filename: "{app}\SteamEyaWinUI.exe"; Description: "{cm:LaunchProgram,SteamEYA}"; Flags: nowait postinstall skipifsilent

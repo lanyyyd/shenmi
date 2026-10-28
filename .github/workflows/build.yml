@@ -213,7 +213,8 @@ jobs:
           }
 
       # 把 Native AOT 自包含发布目录整体压成单个安装包 exe：用户只需下载/运行这一个文件。
-      - name: Package installer (single setup.exe)
+      # 同一份产物打两个包：标准版（内置极域助手）+ 无极域版（剔除 jiyu、带 nojiyu 标记）。
+      - name: Package installers (standard + no-JiYu)
         shell: pwsh
         run: |
           $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
@@ -229,8 +230,23 @@ jobs:
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
           $patch = [Math]::Max(0, ${{ github.run_number }} - 64)
           $version = "1.0.$patch"
-          & $iscc "/DAppVersion=$version" "/DPublishDir=$env:GITHUB_WORKSPACE\publish" "/DOutputDir=$env:GITHUB_WORKSPACE\artifacts" "/DLanguagesDir=$env:GITHUB_WORKSPACE\build\installer\languages" "$env:GITHUB_WORKSPACE\build\installer\SteamEYA.iss"
-          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+
+          # 标准版（内置极域助手）
+          & $iscc "/DAppVersion=$version" "/DPublishDir=$env:GITHUB_WORKSPACE\publish" "/DOutputDir=$env:GITHUB_WORKSPACE\artifacts" "/DLanguagesDir=$env:GITHUB_WORKSPACE\build\installer\languages" "/DOutputBaseName=TeaTT-$version-win-x64-setup" "$env:GITHUB_WORKSPACE\build\installer\SteamEYA.iss"
+          if ($LASTEXITCODE -ne 0) { throw "标准版 ISCC failed with exit code $LASTEXITCODE" }
+
+          # 无极域版：复制发布目录 → 剔除 jiyu 注入模块 → 放 nojiyu 标记（客户端据此隐藏「小工具」、更新只走 GitHub）
+          $noJiyuDir = "$env:GITHUB_WORKSPACE\publish-nojiyu"
+          if (Test-Path $noJiyuDir) { Remove-Item $noJiyuDir -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $noJiyuDir | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE\publish\*" $noJiyuDir -Recurse -Force
+          Remove-Item "$noJiyuDir\jiyu" -Recurse -Force -ErrorAction SilentlyContinue
+          if (Test-Path "$noJiyuDir\jiyu") { throw "无极域版仍残留 jiyu 目录" }
+          New-Item -ItemType File -Force -Path "$noJiyuDir\nojiyu" | Out-Null
+
+          & $iscc "/DAppVersion=$version" "/DPublishDir=$noJiyuDir" "/DOutputDir=$env:GITHUB_WORKSPACE\artifacts" "/DLanguagesDir=$env:GITHUB_WORKSPACE\build\installer\languages" "/DOutputBaseName=TeaTT-$version-win-x64-nojiyu-setup" "/DNoJiYu=1" "$env:GITHUB_WORKSPACE\build\installer\SteamEYA.iss"
+          if ($LASTEXITCODE -ne 0) { throw "无极域版 ISCC failed with exit code $LASTEXITCODE" }
+
           Get-ChildItem artifacts
 
       # 安装包传到 GitHub Release 而不是 Actions artifact：
@@ -244,15 +260,15 @@ jobs:
         run: |
           $patch = [Math]::Max(0, ${{ github.run_number }} - 64)
           $tag = "v1.0.$patch"
-          $exe = Get-ChildItem artifacts/*.exe | Select-Object -First 1
-          if (-not $exe) { throw "安装包 exe 不存在" }
+          $exes = @(Get-ChildItem artifacts/*.exe)
+          if ($exes.Count -lt 2) { throw "安装包不全（期望标准版 + 无极域版，实际 $($exes.Count) 个）" }
 
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --title "茶π·次元口袋 $tag" --notes "自动构建 ${{ github.sha }}"
             if ($LASTEXITCODE -ne 0) { throw "创建 Release 失败" }
           }
-          gh release upload $tag $exe.FullName --clobber
+          gh release upload $tag $exes.FullName --clobber
           if ($LASTEXITCODE -ne 0) { throw "上传安装包到 Release 失败" }
           Write-Host "Release: https://github.com/${{ github.repository }}/releases/tag/$tag"
 

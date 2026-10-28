@@ -54,6 +54,12 @@ public sealed partial class MainWindow : Window
 
         InitializeComponent();
 
+        // 无极域版：菜单栏不显示「小工具」（该页承载极域注入、老板键与伪装全屏热键）。
+        if (AppEdition.IsNoJiYu)
+        {
+            RootNavigationView.MenuItems.Remove(ToolsNavItem);
+        }
+
         Activated += (_, e) => IsActive = e.WindowActivationState != WindowActivationState.Deactivated;
 
         // 背景视频的播放器：MediaPlayerElement.MediaPlayer 只读，必须显式创建再 SetMediaPlayer，
@@ -83,10 +89,13 @@ public sealed partial class MainWindow : Window
             GatewayLauncher.Stop();
 
             // 极域助手：勾选「退出时一并结束」就先分离注入再退出，否则让它继续在后台运行。
-            JiYuService.UnregisterHotkeys();
-            if (AppState.SettingsService.Load().JiYuCloseWithApp)
+            if (!AppEdition.IsNoJiYu)
             {
-                JiYuService.Stop();
+                JiYuService.UnregisterHotkeys();
+                if (AppState.SettingsService.Load().JiYuCloseWithApp)
+                {
+                    JiYuService.Stop();
+                }
             }
         };
 
@@ -292,10 +301,10 @@ public sealed partial class MainWindow : Window
         return ok;
     }
 
-    /// <summary>注册/重注册极域相关热键；「小工具」页改键后也走这里。</summary>
+    /// <summary>注册/重注册极域相关热键；「小工具」页改键后也走这里。无极域版不注册。</summary>
     internal static (bool BossOk, bool FullscreenOk) ApplyJiYuHotkeys(AppSettings settings)
     {
-        if (s_hwnd == 0)
+        if (AppEdition.IsNoJiYu || s_hwnd == 0)
         {
             return (false, false);
         }
@@ -514,6 +523,12 @@ public sealed partial class MainWindow : Window
 
     private void NavigateTo(string pageName)
     {
+        // 无极域版没有「小工具」入口，任何途径（含历史状态）都不再跳转过去。
+        if (AppEdition.IsNoJiYu && pageName == "tools")
+        {
+            return;
+        }
+
         var pageType = pageName switch
         {
             "cloudGame" => typeof(CloudGamePage),
@@ -746,7 +761,10 @@ public sealed partial class MainWindow : Window
         CachedAccountsNavItem.Content = Loc.T("Nav_CachedAccounts");
         CloudSaveNavItem.Content = Loc.T("Nav_CloudSave");
         LanTransferNavItem.Content = Loc.T("Nav_LanTransfer");
-        ToolsNavItem.Content = Loc.T("Nav_Tools");
+        if (!AppEdition.IsNoJiYu)
+        {
+            ToolsNavItem.Content = Loc.T("Nav_Tools");
+        }
         SettingsNavItem.Content = Loc.T("Nav_Settings");
         AboutNavItem.Content = Loc.T("Nav_About");
 

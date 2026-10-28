@@ -40,7 +40,8 @@ public partial class App : Application
 
         // 极域助手不依赖登录：开启「极域注入」时，客户端一启动就拉起内置原版 JiYuTrainer
         //（静默启动并注入）；未安装极域时它只等待，不影响主界面。
-        if (startupSettings.JiYuEnabled)
+        // 无极域版没有内置助手，也不做任何注入。
+        if (!AppEdition.IsNoJiYu && startupSettings.JiYuEnabled)
         {
             JiYuService.Start();
         }
