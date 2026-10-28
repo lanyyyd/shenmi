@@ -89,6 +89,16 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     private ScrollViewer? _scrollViewer;
     private bool _profileLoading;
 
+    // 玩法中心（积分 / 抽卡 / 等级）与红包
+    private readonly ObservableCollection<PointsItemVm> _pointsItems = [];
+    private readonly ObservableCollection<PointsLogVm> _pointsLogs = [];
+    private readonly ObservableCollection<GachaResultVm> _gachaResults = [];
+    private readonly ObservableCollection<LevelSourceVm> _levelSources = [];
+    private readonly ObservableCollection<RedPacketGrabVm> _rpGrabs = [];
+    private readonly List<GachaPoolVm> _gachaPools = [];
+    private readonly Dictionary<string, ChatMessageVm> _aiStreams = [];
+    private long _rpCurrentId;
+
     private string _stickerSort = "hot";
     private bool _suppressStickerClick;
     private readonly List<string> _searchTypes = [];
@@ -116,12 +126,19 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         UsersList.ItemsSource = _users;
         StickerGrid.ItemsSource = _stickers;
         SearchResultsList.ItemsSource = _searchResults;
+        PointsItemsList.ItemsSource = _pointsItems;
+        PointsLogsList.ItemsSource = _pointsLogs;
+        GachaResultsList.ItemsSource = _gachaResults;
+        LevelSourcesList.ItemsSource = _levelSources;
+        RpGrabsList.ItemsSource = _rpGrabs;
 
         _chat.MessageReceived += OnMessageReceived;
         _chat.MessageRecalled += OnMessageRecalled;
         _chat.ReadStateChanged += OnReadStateChanged;
         _chat.UsersChanged += OnUsersChanged;
         _chat.ConnectionChanged += OnConnectionChanged;
+        _chat.AiStreamReceived += OnAiStream;
+        _chat.RedPacketChanged += OnRedPacketChanged;
         ChatHub.RoomOpenRequested += OnRoomOpenRequested;
 
         Loc.LanguageChanged += OnLanguageChanged;
@@ -194,6 +211,8 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         _chat.ReadStateChanged -= OnReadStateChanged;
         _chat.UsersChanged -= OnUsersChanged;
         _chat.ConnectionChanged -= OnConnectionChanged;
+        _chat.AiStreamReceived -= OnAiStream;
+        _chat.RedPacketChanged -= OnRedPacketChanged;
         ChatHub.RoomOpenRequested -= OnRoomOpenRequested;
     }
 
@@ -455,6 +474,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         UpdateRoomHeader();
 
         _readState.Clear();
+        ClearAiStreams();
         await LoadHistoryAsync(room, anchorId);
         await LoadReadStateAsync(room);
         RefreshReadLabels();
@@ -488,6 +508,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             _hasMore = history.HasMore;
             _oldestId = _rawMessages.Count > 0 ? _rawMessages[0].Id : 0;
             RebuildMessages();
+            _ = HydrateRedPacketsAsync();
 
             EmptyText.Text = Loc.T(room == "group" ? "Chat_Empty_Group" : "Chat_Empty_Pm");
             EmptyText.Visibility = _messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -1576,6 +1597,11 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             AvatarBrush = AvatarBrushFor(dto.FromId),
             AvatarLeftVisibility = isMine ? Visibility.Collapsed : Visibility.Visible,
             AvatarRightVisibility = isMine ? Visibility.Visible : Visibility.Collapsed,
+            RedPacketId = dto.RedPacketId,
+            RedPacketVisibility = !hidden && kind == "redpacket" ? Visibility.Visible : Visibility.Collapsed,
+            RedPacketTitle = RedPacketTitleOf(dto),
+            RedPacketSub = RedPacketSubOf(dto),
+            RedPacketAction = RedPacketActionOf(dto),
             FlashBackground = _transparent
         };
     }
@@ -1875,6 +1901,11 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             }
 
             var lastDay = _rawMessages.Count > 0 ? DayOf(_rawMessages[^1].CreatedAt) : (DateTime?)null;
+            // 小火流式收尾：正式消息到达后移除临时气泡
+            if (!string.IsNullOrEmpty(dto.StreamId) && _aiStreams.Remove(dto.StreamId, out var streamVm))
+            {
+                _messages.Remove(streamVm);
+            }
             var day = DayOf(dto.CreatedAt);
             var isFirst = _rawMessages.Count == 0;
             if (lastDay is null || lastDay != day)
@@ -1914,6 +1945,810 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             }
         });
     }
+
+    // ---------------- 小火人流式回复 ----------------
+    private void OnAiStream(ChatAiStreamDto dto)
+    {
+        _dispatcher.TryEnqueue(() =>
+        {
+            if (string.IsNullOrEmpty(dto.StreamId)
+                || (!string.IsNullOrEmpty(dto.Room) && dto.Room != _room))
+            {
+                return;
+            }
+            if (_aiStreams.TryGetValue(dto.StreamId, out var vm))
+            {
+                if (dto.Phase == "delta")
+                {
+                    vm.Content += dto.Text;
+                    RefreshStreamText(vm);
+                    ScrollToBottom();
+                }
+                else if (dto.Phase == "error")
+                {
+                    vm.Content = dto.Text;
+                    RefreshStreamText(vm);
+                }
+                return;
+            }
+            if (dto.Phase != "start")
+            {
+                return;
+            }
+            var name = string.IsNullOrWhiteSpace(dto.FromName) ? _aiName : dto.FromName;
+            var streamVm = new ChatMessageVm
+            {
+                Id = -1,
+                IsMine = false,
+                Kind = "text",
+                Content = string.IsNullOrEmpty(dto.Text) ? Loc.T("Chat_Ai_Thinking") : dto.Text,
+                DividerVisibility = Visibility.Collapsed,
+                MessageVisibility = Visibility.Visible,
+                RowAlign = HorizontalAlignment.Left,
+                BubbleBrush = _otherBubble,
+                ContentForeground = _otherText,
+                BubbleCorner = new CornerRadius(14, 14, 14, 5),
+                BubbleVisibility = Visibility.Visible,
+                TextVisibility = Visibility.Visible,
+                SenderText = name,
+                SenderVisibility = _room == "group" ? Visibility.Visible : Visibility.Collapsed,
+                SenderLevelText = LevelTextOf(0),
+                SenderLevelBrush = LevelBrushOf(0),
+                SenderLevelVisibility = Visibility.Visible,
+                AvatarText = (name.Length > 0 ? name[..1] : "?").ToUpperInvariant(),
+                AvatarImage = string.IsNullOrWhiteSpace(dto.FromAvatar) ? null : SafeBitmap(dto.FromAvatar),
+                AvatarBrush = AvatarBrushFor(dto.FromId),
+                AvatarLeftVisibility = Visibility.Visible,
+                AvatarRightVisibility = Visibility.Collapsed,
+                TimeText = FormatTime(dto.CreatedAt),
+                FlashBackground = _transparent
+            };
+            _aiStreams[dto.StreamId] = streamVm;
+            _messages.Add(streamVm);
+            EmptyText.Visibility = Visibility.Collapsed;
+            ScrollToBottom();
+        });
+    }
+
+    /// <summary>流式气泡内容变了：找到已实体的 TextBlock 重新铺 @高亮文本。</summary>
+    private void RefreshStreamText(ChatMessageVm vm)
+    {
+        if (MessagesList.ContainerFromItem(vm) is not DependencyObject container)
+        {
+            return;
+        }
+        if (FindDescendantTextBlock(container, vm) is { } tb)
+        {
+            ApplyMentionRuns(tb);
+        }
+    }
+
+    private static TextBlock? FindDescendantTextBlock(DependencyObject root, ChatMessageVm vm)
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is TextBlock tb && ReferenceEquals(tb.DataContext, vm))
+            {
+                return tb;
+            }
+            if (FindDescendantTextBlock(child, vm) is { } found)
+            {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    private void ClearAiStreams()
+    {
+        foreach (var vm in _aiStreams.Values)
+        {
+            _messages.Remove(vm);
+        }
+        _aiStreams.Clear();
+    }
+
+    // ---------------- 红包 ----------------
+    private static string RedPacketTitleOf(ChatMessageDto dto)
+    {
+        var remark = dto.RedPacket?.Remark ?? string.Empty;
+        return string.IsNullOrWhiteSpace(remark) ? Loc.T("Chat_RedPacket_Greeting") : remark;
+    }
+
+    private static string RedPacketSubOf(ChatMessageDto dto)
+    {
+        var p = dto.RedPacket;
+        if (p is null)
+        {
+            return Loc.T("Chat_RedPacket_Loading");
+        }
+        var asset = string.IsNullOrWhiteSpace(p.AssetName) ? p.Asset : p.AssetName;
+        return Loc.Tf("Chat_RedPacket_Sub_Format", asset, p.Count);
+    }
+
+    private static string RedPacketActionOf(ChatMessageDto dto)
+    {
+        var p = dto.RedPacket;
+        if (p is null)
+        {
+            return Loc.T("Chat_RedPacket_Action_View");
+        }
+        if (p.Status is "done" or "expired")
+        {
+            return Loc.T("Chat_RedPacket_Status_Done");
+        }
+        if (p.MyAmount is { } mine)
+        {
+            return Loc.Tf("Chat_RedPacket_Action_Mine_Format", mine);
+        }
+        return p.CanGrab ? Loc.T("Chat_RedPacket_Action_Grab") : Loc.T("Chat_RedPacket_Action_View");
+    }
+
+    /// <summary>历史消息只带 redpacketId，按 id 补齐卡片信息。</summary>
+    private async Task HydrateRedPacketsAsync()
+    {
+        var pending = _rawMessages
+            .Where(m => m.EffectiveKind == "redpacket" && m.RedPacketId > 0 && m.RedPacket is null)
+            .ToList();
+        if (pending.Count == 0)
+        {
+            return;
+        }
+        var room = _room;
+        var changed = false;
+        foreach (var dto in pending)
+        {
+            try
+            {
+                var res = await _chat.GetRedPacketAsync(dto.RedPacketId);
+                if (res.Ok && res.Packet is not null)
+                {
+                    dto.RedPacket = res.Packet;
+                    changed = true;
+                }
+            }
+            catch
+            {
+                // 单个红包失败不影响其它卡片
+            }
+        }
+        if (!changed)
+        {
+            return;
+        }
+        _dispatcher.TryEnqueue(() =>
+        {
+            if (_room != room)
+            {
+                return;
+            }
+            for (var i = 0; i < _messages.Count; i++)
+            {
+                var vm = _messages[i];
+                if (vm.IsDivider || vm.Id <= 0 || vm.Kind != "redpacket")
+                {
+                    continue;
+                }
+                var dto = _rawMessages.FirstOrDefault(m => m.Id == vm.Id);
+                if (dto?.RedPacket is not null)
+                {
+                    _messages[i] = BuildMessageVm(dto);
+                }
+            }
+        });
+    }
+
+    private void OnRedPacketChanged(long packetId, int grabbedCount, string status)
+    {
+        _dispatcher.TryEnqueue(() =>
+        {
+            var dto = _rawMessages.FirstOrDefault(m => m.RedPacketId == packetId);
+            if (dto?.RedPacket is not null)
+            {
+                dto.RedPacket.GrabbedCount = grabbedCount;
+                if (!string.IsNullOrEmpty(status))
+                {
+                    dto.RedPacket.Status = status;
+                }
+                var vm = _messages.FirstOrDefault(m => !m.IsDivider && m.Id == dto.Id);
+                if (vm is not null)
+                {
+                    vm.RedPacketAction = RedPacketActionOf(dto);
+                }
+            }
+            if (RpOverlay.Visibility == Visibility.Visible && _rpCurrentId == packetId)
+            {
+                _ = LoadRedPacketAsync(packetId);
+            }
+        });
+    }
+
+    private async void RedPacketCard_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe || fe.DataContext is not ChatMessageVm vm || vm.RedPacketId <= 0)
+        {
+            return;
+        }
+        await OpenRedPacketAsync(vm.RedPacketId);
+    }
+
+    private void RedPacket_Click(object sender, RoutedEventArgs e)
+    {
+        if (SessionState.Offline || string.IsNullOrWhiteSpace(SessionState.Token))
+        {
+            return;
+        }
+        BuildRpCombos();
+        RpSendStatusText.Text = string.Empty;
+        RpSendOverlay.Visibility = Visibility.Visible;
+    }
+
+    private void BuildRpCombos()
+    {
+        RpAssetBox.Items.Clear();
+        RpAssetBox.Items.Add(Loc.T("Chat_RedPacket_Asset_Points"));
+        if (_isAdmin)
+        {
+            RpAssetBox.Items.Add(Loc.T("Chat_RedPacket_Asset_Exp"));
+        }
+        RpAssetBox.SelectedIndex = 0;
+
+        RpModeBox.Items.Clear();
+        RpModeBox.Items.Add(Loc.T("Chat_RedPacket_Mode_Random"));
+        RpModeBox.Items.Add(Loc.T("Chat_RedPacket_Mode_Fixed"));
+        RpModeBox.SelectedIndex = 0;
+    }
+
+    private void RpMode_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (RpPerBox is null || RpTotalBox is null)
+        {
+            return;
+        }
+        var fixedMode = RpModeBox.SelectedIndex == 1;
+        RpPerBox.Visibility = fixedMode ? Visibility.Visible : Visibility.Collapsed;
+        RpTotalBox.Visibility = fixedMode ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private async void RpSend_Click(object sender, RoutedEventArgs e)
+    {
+        var asset = RpAssetBox.SelectedIndex == 1 ? "exp" : "points";
+        var mode = RpModeBox.SelectedIndex == 1 ? "fixed" : "random";
+        var count = ParseInt(RpCountBox.Text);
+        var total = ParseInt(RpTotalBox.Text);
+        var per = ParseInt(RpPerBox.Text);
+        var remark = (RpRemarkBox.Text ?? string.Empty).Trim();
+        if (count <= 0)
+        {
+            RpSendStatusText.Text = Loc.T("Chat_RedPacket_NeedCount");
+            return;
+        }
+        if (mode == "fixed")
+        {
+            if (per <= 0)
+            {
+                RpSendStatusText.Text = Loc.T("Chat_RedPacket_NeedPer");
+                return;
+            }
+            total = per * count;
+        }
+        else
+        {
+            if (total <= 0)
+            {
+                RpSendStatusText.Text = Loc.T("Chat_RedPacket_NeedTotal");
+                return;
+            }
+            per = 0;
+        }
+        RpSendButton.IsEnabled = false;
+        try
+        {
+            var res = await _chat.SendRedPacketAsync(asset, mode, total, per, count, remark);
+            if (!res.Ok)
+            {
+                RpSendStatusText.Text = res.Error ?? Loc.T("Chat_Request_Failed");
+                return;
+            }
+            RpSendOverlay.Visibility = Visibility.Collapsed;
+            RpRemarkBox.Text = string.Empty;
+            MainWindow.Instance?.ShowStatus(Loc.T("Chat_RedPacket_Sent"), InfoBarSeverity.Success);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"发红包失败：{ex.Message}");
+            RpSendStatusText.Text = Loc.T("Chat_Request_Failed");
+        }
+        finally
+        {
+            RpSendButton.IsEnabled = true;
+        }
+    }
+
+    private async Task OpenRedPacketAsync(long id)
+    {
+        _rpCurrentId = id;
+        RpOverlay.Visibility = Visibility.Visible;
+        RpMyAmountText.Text = string.Empty;
+        RpGrabButton.Visibility = Visibility.Collapsed;
+        _rpGrabs.Clear();
+        await LoadRedPacketAsync(id);
+    }
+
+    private async Task LoadRedPacketAsync(long id)
+    {
+        try
+        {
+            var res = await _chat.GetRedPacketAsync(id);
+            if (!res.Ok || res.Packet is null)
+            {
+                RpInfoText.Text = res.Error ?? Loc.T("Chat_RedPacket_NotFound");
+                return;
+            }
+            RenderRedPacket(res.Packet);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"加载红包失败：{ex.Message}");
+            RpInfoText.Text = Loc.T("Chat_Request_Failed");
+        }
+    }
+
+    private void RenderRedPacket(RedPacketBriefDto p)
+    {
+        RpTitleText.Text = string.IsNullOrWhiteSpace(p.Remark) ? Loc.T("Chat_RedPacket_Greeting") : p.Remark;
+        RpSenderText.Text = Loc.Tf("Chat_RedPacket_From_Format", p.SenderName);
+        var asset = string.IsNullOrWhiteSpace(p.AssetName) ? p.Asset : p.AssetName;
+        var mode = string.IsNullOrWhiteSpace(p.ModeName) ? p.Mode : p.ModeName;
+        RpInfoText.Text = Loc.Tf("Chat_RedPacket_Info_Format", asset, mode, p.Total, p.Count, p.GrabbedCount);
+        _rpGrabs.Clear();
+        foreach (var g in p.Grabs ?? [])
+        {
+            _rpGrabs.Add(new RedPacketGrabVm { Name = g.Name, AmountText = "+" + g.Amount });
+        }
+        if (p.MyAmount is { } mine)
+        {
+            RpMyAmountText.Text = Loc.Tf("Chat_RedPacket_Mine_Format", mine);
+        }
+        else
+        {
+            RpMyAmountText.Text = p.Status is "done" or "expired"
+                ? Loc.T("Chat_RedPacket_Status_Done")
+                : string.Empty;
+        }
+        RpGrabButton.Visibility = p.CanGrab ? Visibility.Visible : Visibility.Collapsed;
+        RpGrabButton.IsEnabled = p.CanGrab;
+    }
+
+    private async void RpGrab_Click(object sender, RoutedEventArgs e)
+    {
+        if (_rpCurrentId <= 0)
+        {
+            return;
+        }
+        RpGrabButton.IsEnabled = false;
+        try
+        {
+            var res = await _chat.GrabRedPacketAsync(_rpCurrentId);
+            if (!res.Ok)
+            {
+                RpMyAmountText.Text = res.Error ?? Loc.T("Chat_Request_Failed");
+                RpGrabButton.IsEnabled = true;
+                return;
+            }
+            RpMyAmountText.Text = res.Already
+                ? Loc.Tf("Chat_RedPacket_Mine_Format", res.Amount)
+                : Loc.Tf("Chat_RedPacket_Grabbed_Format", res.Amount);
+            if (res.Packet is not null)
+            {
+                RenderRedPacket(res.Packet);
+                var dto = _rawMessages.FirstOrDefault(m => m.RedPacketId == _rpCurrentId);
+                if (dto is not null)
+                {
+                    dto.RedPacket = res.Packet;
+                    var vm = _messages.FirstOrDefault(m => !m.IsDivider && m.Id == dto.Id);
+                    if (vm is not null)
+                    {
+                        vm.RedPacketAction = RedPacketActionOf(dto);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"领取红包失败：{ex.Message}");
+            RpGrabButton.IsEnabled = true;
+        }
+    }
+
+    private void CloseRp_Click(object sender, RoutedEventArgs e)
+    {
+        RpOverlay.Visibility = Visibility.Collapsed;
+        _rpCurrentId = 0;
+    }
+
+    private void CloseRpSend_Click(object sender, RoutedEventArgs e)
+        => RpSendOverlay.Visibility = Visibility.Collapsed;
+
+    // ---------------- 玩法中心：积分 / 抽卡 / 等级 ----------------
+    private async void Fun_Click(object sender, RoutedEventArgs e)
+    {
+        if (SessionState.Offline || string.IsNullOrWhiteSpace(SessionState.Token))
+        {
+            return;
+        }
+        FunOverlay.Visibility = Visibility.Visible;
+        PointsStatusText.Text = string.Empty;
+        GachaStatusText.Text = string.Empty;
+        LevelStatusText.Text = string.Empty;
+        await Task.WhenAll(LoadPointsAsync(), LoadGachaAsync(), LoadLevelAsync());
+    }
+
+    private void CloseFun_Click(object sender, RoutedEventArgs e)
+        => FunOverlay.Visibility = Visibility.Collapsed;
+
+    private async Task LoadPointsAsync()
+    {
+        try
+        {
+            var me = await _chat.GetPointsMeAsync();
+            if (me.Ok)
+            {
+                PointsBalanceText.Text = Loc.Tf("Chat_Points_Balance_Format", me.Balance);
+                PointsStreakText.Text = Loc.Tf("Chat_Points_Streak_Format", me.Streak);
+                SigninButton.IsEnabled = !me.SignedToday;
+                SigninButton.Content = Loc.T(me.SignedToday ? "Chat_Points_Signin_Done" : "Chat_Points_Signin");
+                RenderDays(me.Days);
+            }
+            await LoadPointsItemsAsync();
+            await LoadPointsLogsAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"加载积分失败：{ex.Message}");
+            PointsStatusText.Text = Loc.T("Chat_Request_Failed");
+        }
+    }
+
+    private async Task LoadPointsItemsAsync()
+    {
+        var res = await _chat.GetPointsItemsAsync();
+        _pointsItems.Clear();
+        foreach (var it in res.Items ?? [])
+        {
+            _pointsItems.Add(new PointsItemVm
+            {
+                ItemId = it.Id,
+                Name = it.Name,
+                Description = it.Description,
+                PriceText = Loc.Tf("Chat_Points_Price_Format", it.Price)
+            });
+        }
+    }
+
+    private async Task LoadPointsLogsAsync()
+    {
+        var res = await _chat.GetPointsLogsAsync();
+        _pointsLogs.Clear();
+        foreach (var l in res.Logs ?? [])
+        {
+            _pointsLogs.Add(new PointsLogVm
+            {
+                Title = l.Title,
+                Delta = l.Delta,
+                TimeText = FormatTime(l.CreatedAt)
+            });
+        }
+    }
+
+    private void RenderDays(PointsDayDto[]? days)
+    {
+        PointsDaysPanel.Children.Clear();
+        foreach (var d in days ?? [])
+        {
+            var signed = string.Equals(d.Status, "signed", StringComparison.OrdinalIgnoreCase);
+            var background = signed ? "#10B981" : d.Today ? "#F59E0B" : "#9CA3AF";
+            var foreground = signed || d.Today ? "#FFFFFF" : "#111827";
+            var panel = new StackPanel { Spacing = 2 };
+            panel.Children.Add(new TextBlock
+            {
+                Text = d.Weekday,
+                FontSize = 10,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Foreground = BrushOf(foreground)
+            });
+            panel.Children.Add(new TextBlock
+            {
+                Text = signed ? "+" + d.Points : d.Label,
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Foreground = BrushOf(foreground)
+            });
+            PointsDaysPanel.Children.Add(new Border
+            {
+                Width = 54,
+                Padding = new Thickness(3, 6, 3, 6),
+                CornerRadius = new CornerRadius(8),
+                Background = BrushOf(background),
+                Child = panel
+            });
+        }
+    }
+
+    private async void Signin_Click(object sender, RoutedEventArgs e)
+    {
+        SigninButton.IsEnabled = false;
+        try
+        {
+            var res = await _chat.SigninAsync();
+            if (!res.Ok)
+            {
+                PointsStatusText.Text = res.Error ?? Loc.T("Chat_Request_Failed");
+                SigninButton.IsEnabled = true;
+                return;
+            }
+            PointsStatusText.Text = res.Already
+                ? Loc.T("Chat_Points_Already")
+                : Loc.Tf("Chat_Points_Signed_Format", res.Points);
+            if (res.Days is not null)
+            {
+                RenderDays(res.Days);
+            }
+            PointsBalanceText.Text = Loc.Tf("Chat_Points_Balance_Format", res.Balance);
+            PointsStreakText.Text = Loc.Tf("Chat_Points_Streak_Format", res.Streak);
+            SigninButton.Content = Loc.T("Chat_Points_Signin_Done");
+            await LoadPointsLogsAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"签到失败：{ex.Message}");
+            PointsStatusText.Text = Loc.T("Chat_Request_Failed");
+        }
+        finally
+        {
+            SigninButton.IsEnabled = false;
+        }
+    }
+
+    private async void Redeem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe || fe.DataContext is not PointsItemVm vm)
+        {
+            return;
+        }
+        try
+        {
+            var res = await _chat.RedeemAsync(vm.ItemId);
+            if (!res.Ok)
+            {
+                PointsStatusText.Text = res.Error ?? Loc.T("Chat_Request_Failed");
+                return;
+            }
+            PointsStatusText.Text = Loc.Tf("Chat_Points_Redeemed_Format", vm.Name);
+            PointsBalanceText.Text = Loc.Tf("Chat_Points_Balance_Format", res.Balance);
+            await LoadPointsItemsAsync();
+            await LoadPointsLogsAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"兑换失败：{ex.Message}");
+            PointsStatusText.Text = Loc.T("Chat_Request_Failed");
+        }
+    }
+
+    private async void Transfer_Click(object sender, RoutedEventArgs e)
+    {
+        var amount = ParseInt(TransferAmountBox.Text);
+        var to = (TransferToBox.Text ?? string.Empty).Trim();
+        if (amount <= 0)
+        {
+            PointsStatusText.Text = Loc.T("Chat_Points_Amount_Invalid");
+            return;
+        }
+        if (to.Length == 0)
+        {
+            PointsStatusText.Text = Loc.T("Chat_Points_To_Invalid");
+            return;
+        }
+        try
+        {
+            var res = await _chat.TransferAsync(amount, to, string.Empty);
+            if (!res.Ok)
+            {
+                PointsStatusText.Text = res.Error ?? Loc.T("Chat_Request_Failed");
+                return;
+            }
+            PointsStatusText.Text = Loc.Tf("Chat_Points_Transferred_Format", amount, to);
+            TransferAmountBox.Text = string.Empty;
+            PointsBalanceText.Text = Loc.Tf("Chat_Points_Balance_Format", res.Balance);
+            await LoadPointsLogsAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"转账失败：{ex.Message}");
+            PointsStatusText.Text = Loc.T("Chat_Request_Failed");
+        }
+    }
+
+    private async Task LoadGachaAsync()
+    {
+        try
+        {
+            var info = await _chat.GetGachaInfoAsync();
+            _gachaPools.Clear();
+            foreach (var p in info.Pools ?? [])
+            {
+                _gachaPools.Add(new GachaPoolVm
+                {
+                    Id = p.Id,
+                    Label = p.Name,
+                    Cost1 = p.Cost1,
+                    Cost10 = p.Cost10,
+                    State = p.State
+                });
+            }
+            GachaPoolBox.ItemsSource = _gachaPools;
+            if (_gachaPools.Count == 0)
+            {
+                GachaInfoText.Text = info.Enabled
+                    ? Loc.T("Chat_Gacha_Empty")
+                    : Loc.T("Chat_Gacha_Disabled");
+                GachaOneButton.IsEnabled = false;
+                GachaTenButton.IsEnabled = false;
+                return;
+            }
+            GachaOneButton.IsEnabled = true;
+            GachaTenButton.IsEnabled = true;
+            GachaPoolBox.SelectedIndex = 0;
+            GachaInfoText.Text = Loc.Tf("Chat_Gacha_Balance_Format", info.Balance);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"加载卡池失败：{ex.Message}");
+            GachaStatusText.Text = Loc.T("Chat_Request_Failed");
+        }
+    }
+
+    private void GachaPool_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (GachaPoolBox.SelectedItem is not GachaPoolVm pool)
+        {
+            return;
+        }
+        GachaOneButton.Content = Loc.Tf("Chat_Gacha_One_Cost_Format", pool.Cost1);
+        GachaTenButton.Content = Loc.Tf("Chat_Gacha_Ten_Cost_Format", pool.Cost10);
+        if (pool.State is not null)
+        {
+            GachaInfoText.Text = Loc.Tf("Chat_Gacha_Pool_Format",
+                pool.State.Pity5, pool.State.ToPity, pool.State.TotalDraws, pool.State.RareTotal);
+        }
+    }
+
+    private async void GachaOne_Click(object sender, RoutedEventArgs e) => await DrawAsync(1);
+
+    private async void GachaTen_Click(object sender, RoutedEventArgs e) => await DrawAsync(10);
+
+    private async Task DrawAsync(int times)
+    {
+        if (GachaPoolBox.SelectedItem is not GachaPoolVm pool)
+        {
+            return;
+        }
+        GachaOneButton.IsEnabled = false;
+        GachaTenButton.IsEnabled = false;
+        try
+        {
+            var res = await _chat.DrawGachaAsync(pool.Id, times);
+            if (!res.Ok)
+            {
+                GachaStatusText.Text = res.Error ?? Loc.T("Chat_Request_Failed");
+                return;
+            }
+            _gachaResults.Clear();
+            foreach (var r in res.Results ?? [])
+            {
+                _gachaResults.Add(new GachaResultVm
+                {
+                    Name = r.Name,
+                    KindText = r.KindName,
+                    RarityName = string.IsNullOrWhiteSpace(r.RarityName) ? r.Label : r.RarityName,
+                    SubText = string.IsNullOrWhiteSpace(r.Label) ? r.KindName : r.Label,
+                    RarityBrush = RarityBrushOf(r.Rarity)
+                });
+            }
+            GachaStatusText.Text = Loc.Tf("Chat_Gacha_Cost_Format", res.Cost, res.Balance);
+            if (res.State is not null)
+            {
+                pool.State = res.State;
+                GachaInfoText.Text = Loc.Tf("Chat_Gacha_Pool_Format",
+                    res.State.Pity5, res.State.ToPity, res.State.TotalDraws, res.State.RareTotal);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"抽卡失败：{ex.Message}");
+            GachaStatusText.Text = Loc.T("Chat_Request_Failed");
+        }
+        finally
+        {
+            GachaOneButton.IsEnabled = true;
+            GachaTenButton.IsEnabled = true;
+        }
+    }
+
+    private static Brush RarityBrushOf(string rarity) => BrushOf(rarity switch
+    {
+        "limited" => "#F59E0B",
+        "rare" => "#8B5CF6",
+        "premium" => "#3B82F6",
+        _ => "#64748B"
+    });
+
+    private async Task LoadLevelAsync()
+    {
+        try
+        {
+            var info = await _chat.GetLevelMeAsync();
+            if (!info.Ok)
+            {
+                LevelStatusText.Text = info.Error ?? Loc.T("Chat_Request_Failed");
+                return;
+            }
+            LevelBadgeText.Text = Loc.Tf("Chat_Level_Badge_Format", info.Level, info.MaxLevel);
+            LevelExpText.Text = info.NextThreshold is { } next
+                ? Loc.Tf("Chat_Level_Exp_Format", info.Exp, info.CurThreshold, next)
+                : Loc.Tf("Chat_Level_Exp_Max_Format", info.Exp);
+            LevelProgress.Value = Math.Clamp(info.Ratio, 0, 1);
+            LevelRemainText.Text = info.IsMax
+                ? Loc.T("Chat_Level_Max")
+                : Loc.Tf("Chat_Level_Remain_Format", info.Remain);
+            _levelSources.Clear();
+            foreach (var s in info.Sources ?? [])
+            {
+                _levelSources.Add(new LevelSourceVm
+                {
+                    Name = s.Name,
+                    ExpText = Loc.Tf("Chat_Level_Source_Exp_Format", s.Exp),
+                    Desc = LevelSourceDesc(s)
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"加载等级失败：{ex.Message}");
+            LevelStatusText.Text = Loc.T("Chat_Request_Failed");
+        }
+    }
+
+    private static string LevelSourceDesc(LevelSourceDto s)
+    {
+        var parts = new List<string>();
+        if (s.DailyCap > 0)
+        {
+            parts.Add(Loc.Tf("Chat_Level_Source_DailyCap_Format", s.DailyCap));
+        }
+        if (s.DailyCountCap > 0)
+        {
+            parts.Add(Loc.Tf("Chat_Level_Source_CountCap_Format", s.DailyCountCap));
+        }
+        if (s.OncePerDay)
+        {
+            parts.Add(Loc.T("Chat_Level_Source_Once"));
+        }
+        if (s.StreakDays > 0)
+        {
+            parts.Add(Loc.Tf("Chat_Level_Source_Streak_Format", s.StreakDays, s.StreakMultiplier));
+        }
+        return parts.Count == 0
+            ? Loc.T(s.Enabled ? "Chat_Level_Source_On" : "Chat_Level_Source_Off")
+            : string.Join(" · ", parts);
+    }
+
+    private static int ParseInt(string? text)
+        => int.TryParse((text ?? string.Empty).Trim(), out var value) ? value : 0;
 
     private void OnReadStateChanged(string room, int userId, string username, long lastReadId)
     {
@@ -2338,6 +3173,21 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             CloseViewer_Click(this, new RoutedEventArgs());
             args.Handled = true;
         }
+        else if (RpSendOverlay.Visibility == Visibility.Visible)
+        {
+            RpSendOverlay.Visibility = Visibility.Collapsed;
+            args.Handled = true;
+        }
+        else if (RpOverlay.Visibility == Visibility.Visible)
+        {
+            CloseRp_Click(this, new RoutedEventArgs());
+            args.Handled = true;
+        }
+        else if (FunOverlay.Visibility == Visibility.Visible)
+        {
+            FunOverlay.Visibility = Visibility.Collapsed;
+            args.Handled = true;
+        }
         else if (ProfileOverlay.Visibility == Visibility.Visible)
         {
             CloseProfile();
@@ -2478,6 +3328,28 @@ public sealed class ChatMessageVm : INotifyPropertyChanged
     public Visibility AvatarLeftVisibility { get; set; } = Visibility.Collapsed;
     public Visibility AvatarRightVisibility { get; set; } = Visibility.Collapsed;
 
+    // 红包卡片
+    public long RedPacketId { get; set; }
+    public Visibility RedPacketVisibility { get; set; } = Visibility.Collapsed;
+    public string RedPacketTitle { get; set; } = string.Empty;
+    public string RedPacketSub { get; set; } = string.Empty;
+
+    private string _redPacketAction = string.Empty;
+
+    public string RedPacketAction
+    {
+        get => _redPacketAction;
+        set
+        {
+            if (_redPacketAction == value)
+            {
+                return;
+            }
+            _redPacketAction = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RedPacketAction)));
+        }
+    }
+
     public static ChatMessageVm Divider(string label) => new()
     {
         IsDivider = true,
@@ -2486,6 +3358,67 @@ public sealed class ChatMessageVm : INotifyPropertyChanged
         MessageVisibility = Visibility.Collapsed,
         FlashBackground = new SolidColorBrush(Microsoft.UI.Colors.Transparent)
     };
+}
+
+/// <summary>积分商城商品项。</summary>
+public sealed class PointsItemVm
+{
+    internal LocalizedStrings Strings => Loc.Strings;
+
+    public int ItemId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string PriceText { get; set; } = string.Empty;
+}
+
+/// <summary>积分明细项。</summary>
+public sealed class PointsLogVm
+{
+    public string Title { get; set; } = string.Empty;
+    public int Delta { get; set; }
+    public string TimeText { get; set; } = string.Empty;
+
+    public string DeltaText => Delta >= 0 ? "+" + Delta : Delta.ToString();
+
+    public Brush DeltaBrush => new SolidColorBrush(Delta >= 0
+        ? Windows.UI.Color.FromArgb(0xFF, 0x10, 0xB9, 0x81)
+        : Windows.UI.Color.FromArgb(0xFF, 0xEF, 0x44, 0x44));
+}
+
+/// <summary>抽卡结果项。</summary>
+public sealed class GachaResultVm
+{
+    public string Name { get; set; } = string.Empty;
+    public string KindText { get; set; } = string.Empty;
+    public string RarityName { get; set; } = string.Empty;
+    public string SubText { get; set; } = string.Empty;
+    public Brush RarityBrush { get; set; } = null!;
+}
+
+/// <summary>等级经验来源说明项。</summary>
+public sealed class LevelSourceVm
+{
+    public string Name { get; set; } = string.Empty;
+    public string Desc { get; set; } = string.Empty;
+    public string ExpText { get; set; } = string.Empty;
+}
+
+/// <summary>红包领取记录项。</summary>
+public sealed class RedPacketGrabVm
+{
+    public string Name { get; set; } = string.Empty;
+    public string AmountText { get; set; } = string.Empty;
+}
+
+/// <summary>抽卡卡池下拉项。</summary>
+public sealed class GachaPoolVm
+{
+    public int Id { get; set; }
+    public string Label { get; set; } = string.Empty;
+    public int Cost1 { get; set; }
+    public int Cost10 { get; set; }
+
+    internal GachaStateDto? State { get; set; }
 }
 
 /// <summary>表情包列表项视图模型。</summary>

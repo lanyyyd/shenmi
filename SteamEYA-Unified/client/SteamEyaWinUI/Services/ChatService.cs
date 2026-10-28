@@ -43,6 +43,12 @@ internal sealed class ChatService : IAsyncDisposable
     /// <summary>收到服务端广播的「保队友」指令：所有在线客户端应立即退出本软件。</summary>
     public event Action? PanicReceived;
 
+    /// <summary>小火人流式回复：phase = start / delta / error。</summary>
+    public event Action<ChatAiStreamDto>? AiStreamReceived;
+
+    /// <summary>红包领取进度广播：红包 id、已领个数、状态（active / done / expired）。</summary>
+    public event Action<long, int, string>? RedPacketChanged;
+
     public bool IsConnected => _ws?.State == WebSocketState.Open;
 
     private static string BaseUrl => SessionState.BaseUrl.TrimEnd('/');
@@ -265,6 +271,125 @@ internal sealed class ChatService : IAsyncDisposable
                ?? new ChatSimpleResponse();
     }
 
+    // ---------------- 积分 / 抽卡 / 等级 / 红包（玩法中心） ----------------
+    /// <summary>GET 请求并反序列化；失败时返回空对象。</summary>
+    private async Task<T> GetJsonAsync<T>(string path, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> type,
+        CancellationToken ct)
+        where T : new()
+    {
+        try
+        {
+            using var req = NewRequest(HttpMethod.Get, path);
+            using var resp = await _http.SendAsync(req, ct);
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            return await JsonSerializer.DeserializeAsync(stream, type, ct) ?? new T();
+        }
+        catch
+        {
+            return new T();
+        }
+    }
+
+    /// <summary>POST JSON 并反序列化；非 2xx 时把服务端 detail 填进 Error。</summary>
+    private async Task<T> PostJsonAsync<T>(string path, string body,
+        System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> type, CancellationToken ct)
+        where T : new()
+    {
+        using var req = NewRequest(HttpMethod.Post, path);
+        req.Content = new StringContent(body, Encoding.UTF8, "application/json");
+        using var resp = await _http.SendAsync(req, ct);
+        var text = await resp.Content.ReadAsStringAsync(ct);
+        T? result = null;
+        try
+        {
+            result = JsonSerializer.Deserialize(text, type);
+        }
+        catch
+        {
+            // 解析失败按空结果处理
+        }
+        var value = result ?? new T();
+        if (!resp.IsSuccessStatusCode && value is IChatResult chatResult && string.IsNullOrEmpty(chatResult.Error))
+        {
+            chatResult.Error = ErrorOf(text);
+        }
+        return value;
+    }
+
+    /// <summary>从 {"detail": "..."} / {"error": "..."} 中提取错误文案。</summary>
+    private static string ErrorOf(string text)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            if (doc.RootElement.TryGetProperty("detail", out var d)
+                && d.ValueKind == JsonValueKind.String)
+            {
+                return d.GetString() ?? string.Empty;
+            }
+            if (doc.RootElement.TryGetProperty("error", out var e)
+                && e.ValueKind == JsonValueKind.String)
+            {
+                return e.GetString() ?? string.Empty;
+            }
+        }
+        catch
+        {
+            // 非 JSON 响应
+        }
+        return string.Empty;
+    }
+
+    public Task<PointsMeResponse> GetPointsMeAsync(CancellationToken ct = default)
+        => GetJsonAsync("/api/points/me", ChatJsonContext.Default.PointsMeResponse, ct);
+
+    public Task<PointsSigninResponse> SigninAsync(CancellationToken ct = default)
+        => PostJsonAsync("/api/points/signin", "{}", ChatJsonContext.Default.PointsSigninResponse, ct);
+
+    public Task<PointsItemsResponse> GetPointsItemsAsync(CancellationToken ct = default)
+        => GetJsonAsync("/api/points/items", ChatJsonContext.Default.PointsItemsResponse, ct);
+
+    public Task<PointsRedeemResponse> RedeemAsync(int itemId, CancellationToken ct = default)
+        => PostJsonAsync("/api/points/redeem",
+            JsonSerializer.Serialize(new PointsRedeemRequest { ItemId = itemId }, ChatJsonContext.Default.PointsRedeemRequest),
+            ChatJsonContext.Default.PointsRedeemResponse, ct);
+
+    public Task<PointsTransferResponse> TransferAsync(int amount, string to, string remark, CancellationToken ct = default)
+        => PostJsonAsync("/api/points/transfer",
+            JsonSerializer.Serialize(new PointsTransferRequest { Amount = amount, To = to, Remark = remark },
+                ChatJsonContext.Default.PointsTransferRequest),
+            ChatJsonContext.Default.PointsTransferResponse, ct);
+
+    public Task<PointsLogsResponse> GetPointsLogsAsync(int limit = 30, int offset = 0, CancellationToken ct = default)
+        => GetJsonAsync($"/api/points/logs?limit={limit}&offset={offset}", ChatJsonContext.Default.PointsLogsResponse, ct);
+
+    public Task<GachaInfoResponse> GetGachaInfoAsync(CancellationToken ct = default)
+        => GetJsonAsync("/api/gacha/info", ChatJsonContext.Default.GachaInfoResponse, ct);
+
+    public Task<GachaDrawResponse> DrawGachaAsync(int poolId, int times, CancellationToken ct = default)
+        => PostJsonAsync("/api/gacha/draw",
+            JsonSerializer.Serialize(new GachaDrawRequest { PoolId = poolId, Times = times },
+                ChatJsonContext.Default.GachaDrawRequest),
+            ChatJsonContext.Default.GachaDrawResponse, ct);
+
+    public Task<LevelMeResponse> GetLevelMeAsync(CancellationToken ct = default)
+        => GetJsonAsync("/api/level/me", ChatJsonContext.Default.LevelMeResponse, ct);
+
+    public Task<RedPacketSendResponse> SendRedPacketAsync(string asset, string mode, int total, int per, int count,
+        string remark, CancellationToken ct = default)
+        => PostJsonAsync("/api/redpacket/send",
+            JsonSerializer.Serialize(new RedPacketSendRequest
+            {
+                Asset = asset, Mode = mode, Total = total, Per = per, Count = count, Remark = remark
+            }, ChatJsonContext.Default.RedPacketSendRequest),
+            ChatJsonContext.Default.RedPacketSendResponse, ct);
+
+    public Task<RedPacketDetailResponse> GetRedPacketAsync(long id, CancellationToken ct = default)
+        => GetJsonAsync($"/api/redpacket/{id}", ChatJsonContext.Default.RedPacketDetailResponse, ct);
+
+    public Task<RedPacketGrabResponse> GrabRedPacketAsync(long id, CancellationToken ct = default)
+        => PostJsonAsync($"/api/redpacket/{id}/grab", "{}", ChatJsonContext.Default.RedPacketGrabResponse, ct);
+
     // ---------------- WebSocket ----------------
     public void Start()
     {
@@ -435,6 +560,22 @@ internal sealed class ChatService : IAsyncDisposable
                         ReadStateChanged?.Invoke(readRoom, uid, uname, lastId);
                     }
                     break;
+                case "ai_stream":
+                    var stream = doc.RootElement.Deserialize(ChatJsonContext.Default.ChatAiStreamDto);
+                    if (stream is not null)
+                    {
+                        AiStreamReceived?.Invoke(stream);
+                    }
+                    break;
+                case "redpacket":
+                    var pid = doc.RootElement.TryGetProperty("packetId", out var pe) && pe.TryGetInt64(out var pv) ? pv : 0;
+                    var grabbed = doc.RootElement.TryGetProperty("grabbedCount", out var ge) && ge.TryGetInt32(out var gv) ? gv : 0;
+                    var status = doc.RootElement.TryGetProperty("status", out var se) ? se.GetString() ?? string.Empty : string.Empty;
+                    if (pid > 0)
+                    {
+                        RedPacketChanged?.Invoke(pid, grabbed, status);
+                    }
+                    break;
             }
         }
         catch
@@ -442,7 +583,6 @@ internal sealed class ChatService : IAsyncDisposable
             // 单条消息解析失败不影响后续接收
         }
     }
-
     private async Task SendRawAsync(string json, CancellationToken ct)
     {
         var ws = _ws;

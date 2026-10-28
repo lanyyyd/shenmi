@@ -64,7 +64,16 @@ internal sealed class ChatMessageDto
     /// <summary>所属会话的显示名（搜索结果里展示，群聊为「群聊大厅」）。</summary>
     public string? RoomName { get; set; }
 
-    /// <summary>归一化后的消息类型（text/image/video/file/sticker）。</summary>
+    /// <summary>AI 流式回复收尾后，正式消息会带上这个 streamId（前端据此移除临时气泡）。</summary>
+    public string? StreamId { get; set; }
+
+    /// <summary>红包消息对应的红包 id（type=redpacket 时由服务端回填）。</summary>
+    public long RedPacketId { get; set; }
+
+    /// <summary>实时推送红包消息时附带的简报（历史消息无此字段，需按 id 拉详情）。</summary>
+    public RedPacketBriefDto? RedPacket { get; set; }
+
+    /// <summary>归一化后的消息类型（text/image/video/file/sticker/redpacket）。</summary>
     public string EffectiveKind
     {
         get
@@ -72,7 +81,7 @@ internal sealed class ChatMessageDto
             var kind = !string.IsNullOrEmpty(MsgType) ? MsgType : Type;
             return kind switch
             {
-                "image" or "video" or "file" or "sticker" => kind,
+                "image" or "video" or "file" or "sticker" or "redpacket" => kind,
                 _ => "text"
             };
         }
@@ -376,6 +385,318 @@ internal sealed class ChatSimpleResponse
     public string? Error { get; set; }
 }
 
+// ---------------- 积分：签到 / 商城 / 转账 / 明细 ----------------
+
+/// <summary>带错误文案的接口：HTTP 非 2xx 时由 ChatService 回填服务端 detail。</summary>
+internal interface IChatResult
+{
+    string? Error { get; set; }
+}
+
+/// <summary>签到步骤条的一天。</summary>
+internal sealed class PointsDayDto
+{
+    public string Day { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string Weekday { get; set; } = string.Empty;
+    public int Points { get; set; }
+    public string Status { get; set; } = "pending";
+    public bool Today { get; set; }
+}
+
+internal sealed class PointsMeResponse
+{
+    public bool Ok { get; set; }
+    public int Balance { get; set; }
+    public bool SignedToday { get; set; }
+    public string Day { get; set; } = string.Empty;
+    public int Streak { get; set; }
+    public PointsDayDto[]? Days { get; set; }
+}
+
+internal sealed class PointsSigninResponse : IChatResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public bool Already { get; set; }
+    public int Points { get; set; }
+    public int Balance { get; set; }
+    public int Streak { get; set; }
+    public PointsDayDto[]? Days { get; set; }
+}
+
+internal sealed class PointsItemDto
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Image { get; set; } = string.Empty;
+    public int Price { get; set; }
+    public int Stock { get; set; }
+}
+
+internal sealed class PointsItemsResponse : IChatResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public int Balance { get; set; }
+    public PointsItemDto[]? Items { get; set; }
+}
+
+internal sealed class PointsRedeemRequest
+{
+    public int ItemId { get; set; }
+}
+
+internal sealed class PointsRedeemResponse : IChatResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public int Balance { get; set; }
+    public long RedemptionId { get; set; }
+}
+
+internal sealed class PointsTransferRequest
+{
+    public int Amount { get; set; }
+    public string To { get; set; } = string.Empty;
+    public string Remark { get; set; } = string.Empty;
+}
+
+internal sealed class PointsTransferResponse : IChatResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public int Balance { get; set; }
+}
+
+internal sealed class PointsLogDto
+{
+    public long Id { get; set; }
+    public int Delta { get; set; }
+    public int BalanceAfter { get; set; }
+    public string Type { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Ref { get; set; } = string.Empty;
+    public string Remark { get; set; } = string.Empty;
+    public long CreatedAt { get; set; }
+}
+
+internal sealed class PointsLogsResponse : IChatResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public int Total { get; set; }
+    public PointsLogDto[]? Logs { get; set; }
+}
+
+// ---------------- 抽卡 ----------------
+
+internal sealed class GachaPrizeDto
+{
+    public int Id { get; set; }
+    public int PoolId { get; set; }
+    public string Kind { get; set; } = string.Empty;
+    public string KindName { get; set; } = string.Empty;
+    public string Rarity { get; set; } = string.Empty;
+    public string RarityName { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Image { get; set; } = string.Empty;
+    public int Value { get; set; }
+    public int Stock { get; set; }
+    public string Weight { get; set; } = string.Empty;
+}
+
+internal sealed class GachaStateDto
+{
+    public int Pity5 { get; set; }
+    public int Pity4 { get; set; }
+    public bool Guaranteed { get; set; }
+    public int TotalDraws { get; set; }
+    public int RareTotal { get; set; }
+    public int LimitedTotal { get; set; }
+    public int Hard { get; set; }
+    public int SoftStart { get; set; }
+    public int ToPity { get; set; }
+}
+
+internal sealed class GachaPoolDto
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int Cost1 { get; set; }
+    public int Cost10 { get; set; }
+    public bool Active { get; set; }
+    public GachaPrizeDto[]? Prizes { get; set; }
+    public GachaStateDto? State { get; set; }
+}
+
+internal sealed class GachaInfoResponse : IChatResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public bool Enabled { get; set; }
+    public int Balance { get; set; }
+    public GachaPoolDto[]? Pools { get; set; }
+}
+
+internal sealed class GachaDrawRequest
+{
+    public int PoolId { get; set; }
+    public int Times { get; set; } = 1;
+}
+
+internal sealed class GachaResultDto
+{
+    public int? PrizeId { get; set; }
+    public string Kind { get; set; } = string.Empty;
+    public string KindName { get; set; } = string.Empty;
+    public string Rarity { get; set; } = string.Empty;
+    public string RarityName { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public int Value { get; set; }
+    public string Image { get; set; } = string.Empty;
+    public bool IsLimited { get; set; }
+    public int PullNo { get; set; }
+    public bool GuaranteedBefore { get; set; }
+    public string Tier { get; set; } = string.Empty;
+}
+
+internal sealed class GachaDrawResponse : IChatResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public GachaResultDto[]? Results { get; set; }
+    public int Balance { get; set; }
+    public GachaStateDto? State { get; set; }
+    public GachaPoolDto? Pool { get; set; }
+    public int Cost { get; set; }
+    public int Times { get; set; }
+}
+
+// ---------------- 等级 ----------------
+
+internal sealed class LevelSourceDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public bool Enabled { get; set; }
+    public int Exp { get; set; }
+    public int DailyCap { get; set; }
+    public int DailyCountCap { get; set; }
+    public bool OncePerDay { get; set; }
+    public int StreakDays { get; set; }
+    public double StreakMultiplier { get; set; }
+}
+
+internal sealed class LevelMeResponse : IChatResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public bool Enabled { get; set; }
+    public int[]? Thresholds { get; set; }
+    public LevelSourceDto[]? Sources { get; set; }
+    public int Exp { get; set; }
+    public int Level { get; set; }
+    public int MaxLevel { get; set; }
+    public int CurThreshold { get; set; }
+    public int? NextThreshold { get; set; }
+    public int Remain { get; set; }
+    public double Ratio { get; set; }
+    public bool IsMax { get; set; }
+}
+
+// ---------------- 群红包 ----------------
+
+internal sealed class RedPacketGrabDto
+{
+    public int UserId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int Amount { get; set; }
+    public long CreatedAt { get; set; }
+}
+
+internal sealed class RedPacketBriefDto
+{
+    public long Id { get; set; }
+    public string Asset { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public string Mode { get; set; } = string.Empty;
+    public string ModeName { get; set; } = string.Empty;
+    public int Total { get; set; }
+    public int Count { get; set; }
+    public int Per { get; set; }
+    public string Remark { get; set; } = string.Empty;
+    public int SenderId { get; set; }
+    public string SenderName { get; set; } = string.Empty;
+    public bool IsAdminFree { get; set; }
+    public int GrabbedCount { get; set; }
+    public int GrabbedAmount { get; set; }
+    public string Status { get; set; } = "active";
+    public long ExpireAt { get; set; }
+    public long CreatedAt { get; set; }
+    public bool IsMine { get; set; }
+    public int? MyAmount { get; set; }
+    public bool CanGrab { get; set; }
+    public RedPacketGrabDto[]? Grabs { get; set; }
+}
+
+internal sealed class RedPacketDetailResponse : IChatResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public RedPacketBriefDto? Packet { get; set; }
+}
+
+internal sealed class RedPacketSendRequest
+{
+    public string Asset { get; set; } = "points";
+    public string Mode { get; set; } = "random";
+    public int Total { get; set; }
+    public int Per { get; set; }
+    public int Count { get; set; }
+    public string Remark { get; set; } = string.Empty;
+}
+
+internal sealed class RedPacketSendResponse : IChatResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public long Id { get; set; }
+    public int Balance { get; set; }
+    public RedPacketBriefDto? Packet { get; set; }
+}
+
+internal sealed class RedPacketGrabResponse : IChatResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public bool Already { get; set; }
+    public int Amount { get; set; }
+    public int Balance { get; set; }
+    public RedPacketBriefDto? Packet { get; set; }
+}
+
+// ---------------- 小火人流式回复 ----------------
+
+internal sealed class ChatAiStreamDto
+{
+    public string Type { get; set; } = "ai_stream";
+    public string Phase { get; set; } = string.Empty;
+    public string StreamId { get; set; } = string.Empty;
+
+    /// <summary>start 帧带房间；delta / error 帧不带，留空表示沿用当前房间。</summary>
+    public string Room { get; set; } = string.Empty;
+    public int FromId { get; set; }
+    public string FromName { get; set; } = string.Empty;
+    public string FromAvatar { get; set; } = string.Empty;
+    public int? ToId { get; set; }
+    public long CreatedAt { get; set; }
+    public string Text { get; set; } = string.Empty;
+}
+
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
 [JsonSerializable(typeof(ChatReadRequest))]
 [JsonSerializable(typeof(ChatSendDto))]
@@ -400,6 +721,33 @@ internal sealed class ChatSimpleResponse
 [JsonSerializable(typeof(ChatContactsNoteRequest))]
 [JsonSerializable(typeof(ChatContactsPinRequest))]
 [JsonSerializable(typeof(ChatSimpleResponse))]
+[JsonSerializable(typeof(PointsDayDto))]
+[JsonSerializable(typeof(PointsMeResponse))]
+[JsonSerializable(typeof(PointsSigninResponse))]
+[JsonSerializable(typeof(PointsItemDto))]
+[JsonSerializable(typeof(PointsItemsResponse))]
+[JsonSerializable(typeof(PointsRedeemRequest))]
+[JsonSerializable(typeof(PointsRedeemResponse))]
+[JsonSerializable(typeof(PointsTransferRequest))]
+[JsonSerializable(typeof(PointsTransferResponse))]
+[JsonSerializable(typeof(PointsLogDto))]
+[JsonSerializable(typeof(PointsLogsResponse))]
+[JsonSerializable(typeof(GachaPrizeDto))]
+[JsonSerializable(typeof(GachaStateDto))]
+[JsonSerializable(typeof(GachaPoolDto))]
+[JsonSerializable(typeof(GachaInfoResponse))]
+[JsonSerializable(typeof(GachaDrawRequest))]
+[JsonSerializable(typeof(GachaResultDto))]
+[JsonSerializable(typeof(GachaDrawResponse))]
+[JsonSerializable(typeof(LevelSourceDto))]
+[JsonSerializable(typeof(LevelMeResponse))]
+[JsonSerializable(typeof(RedPacketGrabDto))]
+[JsonSerializable(typeof(RedPacketBriefDto))]
+[JsonSerializable(typeof(RedPacketDetailResponse))]
+[JsonSerializable(typeof(RedPacketSendRequest))]
+[JsonSerializable(typeof(RedPacketSendResponse))]
+[JsonSerializable(typeof(RedPacketGrabResponse))]
+[JsonSerializable(typeof(ChatAiStreamDto))]
 [JsonSerializable(typeof(LanInfoDto))]
 [JsonSerializable(typeof(LanPeersResponse))]
 [JsonSerializable(typeof(LanAddPeerResponse))]

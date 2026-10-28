@@ -334,6 +334,13 @@
                             <FontIcon FontSize="16" Glyph="&#xE721;" />
                         </Button>
                         <Button
+                            x:Name="FunButton"
+                            Style="{StaticResource ChatIconButtonStyle}"
+                            Click="Fun_Click"
+                            ToolTipService.ToolTip="{x:Bind Strings.Get('Chat_Fun_Title'), Mode=OneWay}">
+                            <TextBlock Text="{x:Bind Strings.Get('Chat_Fun'), Mode=OneWay}" FontSize="12" />
+                        </Button>
+                        <Button
                             x:Name="EatButton"
                             Style="{StaticResource ChatIconButtonStyle}"
                             Click="Eat_Click"
@@ -511,6 +518,44 @@
                                                                     <TextBlock Text="{x:Bind FileLabel}" FontSize="12.5" />
                                                                 </StackPanel>
                                                             </Button>
+                                                            <!-- 红包卡片 -->
+                                                            <Button
+                                                                Padding="0"
+                                                                Background="Transparent"
+                                                                BorderThickness="0"
+                                                                Click="RedPacketCard_Click"
+                                                                Visibility="{x:Bind RedPacketVisibility}">
+                                                                <Border
+                                                                    MinWidth="200"
+                                                                    Background="#F97316"
+                                                                    CornerRadius="10"
+                                                                    Padding="12,10">
+                                                                    <StackPanel Spacing="3">
+                                                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                                                            <TextBlock
+                                                                                Text="福"
+                                                                                FontSize="16"
+                                                                                FontWeight="Bold"
+                                                                                Foreground="White" />
+                                                                            <TextBlock
+                                                                                Text="{x:Bind RedPacketTitle}"
+                                                                                FontSize="14"
+                                                                                FontWeight="SemiBold"
+                                                                                Foreground="White"
+                                                                                TextTrimming="CharacterEllipsis" />
+                                                                        </StackPanel>
+                                                                        <TextBlock
+                                                                            Text="{x:Bind RedPacketSub}"
+                                                                            FontSize="11.5"
+                                                                            Foreground="#FFF7ED" />
+                                                                        <TextBlock
+                                                                            Text="{x:Bind RedPacketAction, Mode=OneWay}"
+                                                                            FontSize="11.5"
+                                                                            FontWeight="SemiBold"
+                                                                            Foreground="White" />
+                                                                    </StackPanel>
+                                                                </Border>
+                                                            </Button>
                                                         </StackPanel>
                                                     </Border>
 
@@ -635,6 +680,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
                         <TextBox
@@ -738,8 +784,20 @@
                             <FontIcon FontSize="17" Glyph="&#xE8B7;" />
                         </Button>
                         <Button
-                            x:Name="SendButton"
+                            x:Name="RedPacketButton"
                             Grid.Column="4"
+                            Style="{StaticResource ChatIconButtonStyle}"
+                            Click="RedPacket_Click"
+                            VerticalAlignment="Bottom"
+                            ToolTipService.ToolTip="{x:Bind Strings.Get('Chat_RedPacket_Send_Title'), Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <TextBlock Text="福" FontSize="13" Foreground="#EF4444" FontWeight="Bold" />
+                                <TextBlock Text="{x:Bind Strings.Get('Chat_RedPacket'), Mode=OneWay}" FontSize="12" />
+                            </StackPanel>
+                        </Button>
+                        <Button
+                            x:Name="SendButton"
+                            Grid.Column="5"
                             Style="{StaticResource AccentButtonStyle}"
                             Click="Send_Click"
                             VerticalAlignment="Bottom">
@@ -1066,6 +1124,537 @@
                 FontSize="12"
                 Foreground="#E5E7EB"
                 TextTrimming="CharacterEllipsis" />
+        </Grid>
+
+        <!-- ================= 玩法中心：积分签到 / 抽卡 / 等级 ================= -->
+        <Grid
+            x:Name="FunOverlay"
+            Grid.RowSpan="2"
+            Background="#99000000"
+            Visibility="Collapsed">
+            <Border
+                Width="620"
+                MaxHeight="720"
+                Background="{ThemeResource ChatPanelBrush}"
+                CornerRadius="16"
+                Padding="20"
+                BorderThickness="1"
+                BorderBrush="{ThemeResource ChatLineBrush}"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Grid.Row="0">
+                        <TextBlock
+                            Text="{x:Bind Strings.Get('Chat_Fun_Title'), Mode=OneWay}"
+                            FontSize="17"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource ChatTextBrush}"
+                            VerticalAlignment="Center" />
+                        <Button
+                            Content="✕"
+                            Style="{StaticResource ChatIconButtonStyle}"
+                            HorizontalAlignment="Right"
+                            Click="CloseFun_Click" />
+                    </Grid>
+
+                    <Pivot Grid.Row="1">
+                        <!-- 积分 -->
+                        <PivotItem Header="{x:Bind Strings.Get('Chat_Fun_Points'), Mode=OneWay}">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="600">
+                                <StackPanel Spacing="12">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="2">
+                                            <TextBlock
+                                                x:Name="PointsBalanceText"
+                                                FontSize="16"
+                                                FontWeight="SemiBold"
+                                                Foreground="{ThemeResource ChatTextBrush}" />
+                                            <TextBlock
+                                                x:Name="PointsStreakText"
+                                                FontSize="12"
+                                                Foreground="{ThemeResource ChatSubTextBrush}" />
+                                        </StackPanel>
+                                        <Button
+                                            x:Name="SigninButton"
+                                            Grid.Column="1"
+                                            Click="Signin_Click"
+                                            Content="{x:Bind Strings.Get('Chat_Points_Signin'), Mode=OneWay}" />
+                                    </Grid>
+
+                                    <StackPanel
+                                        x:Name="PointsDaysPanel"
+                                        Orientation="Horizontal"
+                                        Spacing="6" />
+
+                                    <TextBlock
+                                        Text="{x:Bind Strings.Get('Chat_Points_Shop'), Mode=OneWay}"
+                                        FontSize="13.5"
+                                        FontWeight="SemiBold"
+                                        Foreground="{ThemeResource ChatTextBrush}" />
+
+                                    <ListView
+                                        x:Name="PointsItemsList"
+                                        MaxHeight="200"
+                                        SelectionMode="None"
+                                        ItemContainerStyle="{StaticResource ChatSlimListItemStyle}">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="local:PointsItemVm">
+                                                <Grid Padding="6,5" ColumnSpacing="10">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel Grid.Column="0" Spacing="2">
+                                                        <TextBlock
+                                                            Text="{x:Bind Name}"
+                                                            FontSize="13"
+                                                            Foreground="{ThemeResource ChatTextBrush}" />
+                                                        <TextBlock
+                                                            Text="{x:Bind Description}"
+                                                            FontSize="11"
+                                                            Foreground="{ThemeResource ChatSubTextBrush}"
+                                                            TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                    <TextBlock
+                                                        Grid.Column="1"
+                                                        Text="{x:Bind PriceText}"
+                                                        FontSize="12.5"
+                                                        Foreground="{ThemeResource ChatAccentBrush}"
+                                                        VerticalAlignment="Center" />
+                                                    <Button
+                                                        Grid.Column="2"
+                                                        Content="{x:Bind Strings.Get('Chat_Points_Redeem'), Mode=OneWay}"
+                                                        FontSize="11"
+                                                        Click="Redeem_Click" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="86" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox
+                                            x:Name="TransferAmountBox"
+                                            Grid.Column="0"
+                                            InputScope="Number"
+                                            PlaceholderText="{x:Bind Strings.Get('Chat_Points_Amount'), Mode=OneWay}" />
+                                        <TextBox
+                                            x:Name="TransferToBox"
+                                            Grid.Column="1"
+                                            PlaceholderText="{x:Bind Strings.Get('Chat_Points_To'), Mode=OneWay}" />
+                                        <Button
+                                            Grid.Column="2"
+                                            Content="{x:Bind Strings.Get('Chat_Points_Transfer'), Mode=OneWay}"
+                                            Click="Transfer_Click" />
+                                    </Grid>
+
+                                    <TextBlock
+                                        Text="{x:Bind Strings.Get('Chat_Points_Logs'), Mode=OneWay}"
+                                        FontSize="13.5"
+                                        FontWeight="SemiBold"
+                                        Foreground="{ThemeResource ChatTextBrush}" />
+
+                                    <ListView
+                                        x:Name="PointsLogsList"
+                                        MaxHeight="200"
+                                        SelectionMode="None"
+                                        ItemContainerStyle="{StaticResource ChatSlimListItemStyle}">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="local:PointsLogVm">
+                                                <Grid Padding="6,4" ColumnSpacing="10">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock
+                                                        Grid.Column="0"
+                                                        Text="{x:Bind Title}"
+                                                        FontSize="12.5"
+                                                        Foreground="{ThemeResource ChatTextBrush}"
+                                                        TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock
+                                                        Grid.Column="1"
+                                                        Text="{x:Bind DeltaText}"
+                                                        FontSize="12.5"
+                                                        Foreground="{x:Bind DeltaBrush}" />
+                                                    <TextBlock
+                                                        Grid.Column="2"
+                                                        Text="{x:Bind TimeText}"
+                                                        FontSize="11"
+                                                        Foreground="{ThemeResource ChatSubTextBrush}" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+
+                                    <TextBlock
+                                        x:Name="PointsStatusText"
+                                        FontSize="12"
+                                        Foreground="{ThemeResource ChatSubTextBrush}"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </PivotItem>
+
+                        <!-- 抽卡 -->
+                        <PivotItem Header="{x:Bind Strings.Get('Chat_Fun_Gacha'), Mode=OneWay}">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="600">
+                                <StackPanel Spacing="10">
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <ComboBox
+                                            x:Name="GachaPoolBox"
+                                            Grid.Column="0"
+                                            HorizontalAlignment="Stretch"
+                                            DisplayMemberPath="Label"
+                                            SelectionChanged="GachaPool_Changed" />
+                                        <Button
+                                            x:Name="GachaOneButton"
+                                            Grid.Column="1"
+                                            Content="{x:Bind Strings.Get('Chat_Gacha_One'), Mode=OneWay}"
+                                            Click="GachaOne_Click" />
+                                        <Button
+                                            x:Name="GachaTenButton"
+                                            Grid.Column="2"
+                                            Content="{x:Bind Strings.Get('Chat_Gacha_Ten'), Mode=OneWay}"
+                                            Click="GachaTen_Click" />
+                                    </Grid>
+                                    <TextBlock
+                                        x:Name="GachaInfoText"
+                                        FontSize="12"
+                                        Foreground="{ThemeResource ChatSubTextBrush}"
+                                        TextWrapping="Wrap" />
+                                    <ListView
+                                        x:Name="GachaResultsList"
+                                        MaxHeight="300"
+                                        SelectionMode="None"
+                                        ItemContainerStyle="{StaticResource ChatSlimListItemStyle}">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="local:GachaResultVm">
+                                                <Border
+                                                    Margin="0,3"
+                                                    Padding="10,8"
+                                                    CornerRadius="8"
+                                                    Background="{ThemeResource ChatInputBrush}">
+                                                    <Grid ColumnSpacing="10">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Border
+                                                            Grid.Column="0"
+                                                            Width="42"
+                                                            Height="42"
+                                                            CornerRadius="8"
+                                                            Background="{x:Bind RarityBrush}">
+                                                            <TextBlock
+                                                                Text="{x:Bind KindText}"
+                                                                FontSize="11"
+                                                                FontWeight="SemiBold"
+                                                                Foreground="White"
+                                                                HorizontalAlignment="Center"
+                                                                VerticalAlignment="Center" />
+                                                        </Border>
+                                                        <StackPanel Grid.Column="1" Spacing="2">
+                                                            <TextBlock
+                                                                Text="{x:Bind Name}"
+                                                                FontSize="13.5"
+                                                                FontWeight="SemiBold"
+                                                                Foreground="{ThemeResource ChatTextBrush}"
+                                                                TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock
+                                                                Text="{x:Bind SubText}"
+                                                                FontSize="11.5"
+                                                                Foreground="{ThemeResource ChatSubTextBrush}" />
+                                                        </StackPanel>
+                                                        <TextBlock
+                                                            Grid.Column="2"
+                                                            Text="{x:Bind RarityName}"
+                                                            FontSize="12"
+                                                            Foreground="{x:Bind RarityBrush}"
+                                                            VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                    <TextBlock
+                                        x:Name="GachaStatusText"
+                                        FontSize="12"
+                                        Foreground="{ThemeResource ChatSubTextBrush}"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </PivotItem>
+
+                        <!-- 等级 -->
+                        <PivotItem Header="{x:Bind Strings.Get('Chat_Fun_Level'), Mode=OneWay}">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="600">
+                                <StackPanel Spacing="12">
+                                    <Border
+                                        Background="{ThemeResource ChatInputBrush}"
+                                        CornerRadius="12"
+                                        Padding="14">
+                                        <StackPanel Spacing="8">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock
+                                                    x:Name="LevelBadgeText"
+                                                    FontSize="15"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{ThemeResource ChatTextBrush}" />
+                                                <TextBlock
+                                                    x:Name="LevelExpText"
+                                                    FontSize="12"
+                                                    Foreground="{ThemeResource ChatSubTextBrush}"
+                                                    VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <ProgressBar
+                                                x:Name="LevelProgress"
+                                                Height="6"
+                                                Minimum="0"
+                                                Maximum="1" />
+                                            <TextBlock
+                                                x:Name="LevelRemainText"
+                                                FontSize="12"
+                                                Foreground="{ThemeResource ChatSubTextBrush}" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <TextBlock
+                                        Text="{x:Bind Strings.Get('Chat_Level_Sources'), Mode=OneWay}"
+                                        FontSize="13.5"
+                                        FontWeight="SemiBold"
+                                        Foreground="{ThemeResource ChatTextBrush}" />
+
+                                    <ListView
+                                        x:Name="LevelSourcesList"
+                                        MaxHeight="340"
+                                        SelectionMode="None"
+                                        ItemContainerStyle="{StaticResource ChatSlimListItemStyle}">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="local:LevelSourceVm">
+                                                <Grid Padding="6,5" ColumnSpacing="10">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel Grid.Column="0" Spacing="2">
+                                                        <TextBlock
+                                                            Text="{x:Bind Name}"
+                                                            FontSize="13"
+                                                            Foreground="{ThemeResource ChatTextBrush}" />
+                                                        <TextBlock
+                                                            Text="{x:Bind Desc}"
+                                                            FontSize="11"
+                                                            Foreground="{ThemeResource ChatSubTextBrush}"
+                                                            TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                    <TextBlock
+                                                        Grid.Column="1"
+                                                        Text="{x:Bind ExpText}"
+                                                        FontSize="12.5"
+                                                        Foreground="{ThemeResource ChatAccentBrush}"
+                                                        VerticalAlignment="Center" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+
+                                    <TextBlock
+                                        x:Name="LevelStatusText"
+                                        FontSize="12"
+                                        Foreground="{ThemeResource ChatSubTextBrush}"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </PivotItem>
+                    </Pivot>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ================= 发红包 ================= -->
+        <Grid
+            x:Name="RpSendOverlay"
+            Grid.RowSpan="2"
+            Background="#99000000"
+            Visibility="Collapsed">
+            <Border
+                Width="440"
+                Background="{ThemeResource ChatPanelBrush}"
+                CornerRadius="16"
+                Padding="22"
+                BorderThickness="1"
+                BorderBrush="{ThemeResource ChatLineBrush}"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+                <StackPanel Spacing="12">
+                    <Grid>
+                        <TextBlock
+                            Text="{x:Bind Strings.Get('Chat_RedPacket_Send_Title'), Mode=OneWay}"
+                            FontSize="17"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource ChatTextBrush}"
+                            VerticalAlignment="Center" />
+                        <Button
+                            Content="✕"
+                            Style="{StaticResource ChatIconButtonStyle}"
+                            HorizontalAlignment="Right"
+                            Click="CloseRpSend_Click" />
+                    </Grid>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <ComboBox
+                            x:Name="RpAssetBox"
+                            MinWidth="150"
+                            SelectionChanged="RpMode_Changed" />
+                        <ComboBox
+                            x:Name="RpModeBox"
+                            MinWidth="150"
+                            SelectionChanged="RpMode_Changed" />
+                    </StackPanel>
+                    <TextBox
+                        x:Name="RpTotalBox"
+                        InputScope="Number"
+                        Header="{x:Bind Strings.Get('Chat_RedPacket_Total'), Mode=OneWay}" />
+                    <TextBox
+                        x:Name="RpPerBox"
+                        InputScope="Number"
+                        Header="{x:Bind Strings.Get('Chat_RedPacket_Per'), Mode=OneWay}"
+                        Visibility="Collapsed" />
+                    <TextBox
+                        x:Name="RpCountBox"
+                        InputScope="Number"
+                        Header="{x:Bind Strings.Get('Chat_RedPacket_Count'), Mode=OneWay}" />
+                    <TextBox
+                        x:Name="RpRemarkBox"
+                        MaxLength="40"
+                        Header="{x:Bind Strings.Get('Chat_RedPacket_Remark'), Mode=OneWay}" />
+                    <TextBlock
+                        x:Name="RpSendStatusText"
+                        FontSize="12"
+                        Foreground="{ThemeResource ChatSubTextBrush}"
+                        TextWrapping="Wrap" />
+                    <Button
+                        x:Name="RpSendButton"
+                        Content="{x:Bind Strings.Get('Chat_RedPacket_Send'), Mode=OneWay}"
+                        HorizontalAlignment="Stretch"
+                        Click="RpSend_Click" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- ================= 红包详情 / 领取 ================= -->
+        <Grid
+            x:Name="RpOverlay"
+            Grid.RowSpan="2"
+            Background="#99000000"
+            Visibility="Collapsed">
+            <Border
+                Width="440"
+                MaxHeight="640"
+                Background="{ThemeResource ChatPanelBrush}"
+                CornerRadius="16"
+                Padding="20"
+                BorderThickness="1"
+                BorderBrush="{ThemeResource ChatLineBrush}"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+                <Grid RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0">
+                        <TextBlock
+                            x:Name="RpTitleText"
+                            FontSize="17"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource ChatTextBrush}"
+                            VerticalAlignment="Center"
+                            TextTrimming="CharacterEllipsis" />
+                        <Button
+                            Content="✕"
+                            Style="{StaticResource ChatIconButtonStyle}"
+                            HorizontalAlignment="Right"
+                            Click="CloseRp_Click" />
+                    </Grid>
+
+                    <StackPanel Grid.Row="1" Spacing="3">
+                        <TextBlock
+                            x:Name="RpSenderText"
+                            FontSize="12"
+                            Foreground="{ThemeResource ChatSubTextBrush}" />
+                        <TextBlock
+                            x:Name="RpInfoText"
+                            FontSize="12"
+                            Foreground="{ThemeResource ChatSubTextBrush}" />
+                    </StackPanel>
+
+                    <ListView
+                        x:Name="RpGrabsList"
+                        Grid.Row="2"
+                        SelectionMode="None"
+                        ItemContainerStyle="{StaticResource ChatSlimListItemStyle}">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="local:RedPacketGrabVm">
+                                <Grid Padding="6,4" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        Text="{x:Bind Name}"
+                                        FontSize="12.5"
+                                        Foreground="{ThemeResource ChatTextBrush}" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        Text="{x:Bind AmountText}"
+                                        FontSize="12.5"
+                                        Foreground="{ThemeResource ChatAccentBrush}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <TextBlock
+                        x:Name="RpMyAmountText"
+                        Grid.Row="3"
+                        FontSize="13"
+                        Foreground="{ThemeResource ChatTextBrush}"
+                        TextWrapping="Wrap" />
+
+                    <Button
+                        x:Name="RpGrabButton"
+                        Grid.Row="4"
+                        HorizontalAlignment="Stretch"
+                        Content="{x:Bind Strings.Get('Chat_RedPacket_Grab'), Mode=OneWay}"
+                        Click="RpGrab_Click" />
+                </Grid>
+            </Border>
         </Grid>
     </Grid>
 </Page>
