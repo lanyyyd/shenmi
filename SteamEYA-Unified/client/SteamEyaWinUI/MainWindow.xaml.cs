@@ -239,16 +239,23 @@ public sealed partial class MainWindow : Window
         {
             panel.Children.Add(new TextBlock { Text = info.Notes, TextWrapping = TextWrapping.Wrap });
         }
-        panel.Children.Add(new TextBlock
+        // GitHub「最新 tag」兜底拿不到资产大小/发布时间时，不显示这两行，避免出现「0 B / --」。
+        if (info.FileSize > 0)
         {
-            Text = Loc.Tf("Update_Dialog_Size_Format", UpdateFlow.FormatBytes(info.FileSize)),
-            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
-        });
-        panel.Children.Add(new TextBlock
+            panel.Children.Add(new TextBlock
+            {
+                Text = Loc.Tf("Update_Dialog_Size_Format", UpdateFlow.FormatBytes(info.FileSize)),
+                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+            });
+        }
+        if (info.UpdatedAt > 0)
         {
-            Text = Loc.Tf("Update_Dialog_Time_Format", UpdateFlow.FormatTime(info.UpdatedAt)),
-            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
-        });
+            panel.Children.Add(new TextBlock
+            {
+                Text = Loc.Tf("Update_Dialog_Time_Format", UpdateFlow.FormatTime(info.UpdatedAt)),
+                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+            });
+        }
 
         var dialog = new ContentDialog
         {

@@ -21,10 +21,15 @@ internal sealed class UpdateService
 
     private static readonly HttpClient GitHubClient = CreateGitHubClient();
 
+    /// <summary>查「最新 tag」用：不许自动跟随 302，否则会顺着跳转去下载整页 HTML。</summary>
+    private static readonly HttpClient NoRedirectClient = CreateNoRedirectClient();
+
+    private const string RepoSlug = "lanyyyd/shenmi";
+
     private const string GitHubApiUrl = "https://api.github.com/repos/lanyyyd/shenmi/releases?per_page=100";
 
     /// <summary>
-    /// GitHub 加速源前缀：用法是直接拼在原始下载链接前面，
+    /// GitHub 加速源前缀：用法是直接拼在原始链接前面，
     /// 例 https://gh.dayiu.cn/https://github.com/.../TeaTT-1.0.30-win-x64-setup.exe
     /// </summary>
     private static readonly string[] Mirrors =
@@ -34,8 +39,21 @@ internal sealed class UpdateService
         "https://gh-proxy.com/"
     ];
 
+    /// <summary>
+    /// 能代理 api.github.com 的加速源（gh.dayiu.cn 只代理下载，实测 API 返回 404）。
+    /// 国内直连 api.github.com 基本不通，所以检查更新也要走加速，否则永远发现不了 GitHub 新版本。
+    /// </summary>
+    private static readonly string[] ApiMirrors =
+    [
+        "https://gh-proxy.com/",
+        "https://github.tbap.top/"
+    ];
+
     /// <summary>探测加速源时最多等多久。</summary>
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>多路并发查 API 的总窗口：超过就改用「最新 tag」兜底，避免启动检查卡住。</summary>
+    private static readonly TimeSpan ApiRaceTimeout = TimeSpan.FromSeconds(8);
 
     /// <summary>当前程序版本（取程序集 InformationalVersion，构建时由 CI 注入 1.0.x）。</summary>
     public static string CurrentVersion { get; } = GetCurrentVersion();
@@ -127,26 +145,147 @@ internal sealed class UpdateService
             DateTimeOffset.Now);
     }
 
-    /// <summary>读 GitHub Releases，取桌面端（tag 形如 v1.0.30）里版本最高的一个。</summary>
+    /// <summary>
+    /// 读 GitHub Releases，取桌面端（tag 形如 v1.0.30）里版本最高的一个。
+    /// API 优先（能拿说明/大小/sha256），但**并发走加速源**；全部失败时退回「最新 tag」探测。
+    /// </summary>
     private static async Task<AppUpdateInfo?> CheckGitHubAsync(CancellationToken cancellationToken)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Get, GitHubApiUrl);
-        req.Headers.Accept.ParseAdd("application/vnd.github+json");
-        using var resp = await GitHubClient.SendAsync(req, cancellationToken);
-        if (!resp.IsSuccessStatusCode)
+        var releases = await FetchReleasesAsync(cancellationToken);
+        if (releases is not null)
         {
-            // 403 限流 / 网络不通：交给服务器源，不影响检查更新。
-            return null;
+            return BuildFromReleases(releases);
         }
 
-        await using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
-        var releases = await JsonSerializer.DeserializeAsync(
-            stream, GitHubJsonContext.Default.ListGitHubReleaseDto, cancellationToken);
-        if (releases is null)
+        // API 不可用（国内直连不通 / 加速源被限流）时的兜底：
+        // 加速源上的 releases/latest 会 302 到 tag 页，只读 Location 头就能拿到最新版本号。
+        var tag = await ProbeLatestTagAsync(cancellationToken);
+        if (tag is not { } latest)
         {
             return null;
         }
 
+        var version = NormalizeVersion(latest.Tag);
+        // 资产名由 CI 固定生成：TeaTT-<版本>-win-x64-setup.exe
+        var fileName = $"TeaTT-{version}-win-x64-setup.exe";
+        return new AppUpdateInfo(
+            CurrentVersion,
+            version,
+            string.Empty,
+            0,
+            0,
+            fileName,
+            $"https://github.com/{RepoSlug}/releases/download/{latest.Tag}/{fileName}",
+            string.Empty,
+            true,
+            IsNewerVersion(version, CurrentVersion),
+            DateTimeOffset.Now);
+    }
+
+    /// <summary>直连 + 各 API 加速源并发请求，谁先成功用谁；都失败返回 null。</summary>
+    private static async Task<List<GitHubReleaseDto>?> FetchReleasesAsync(CancellationToken cancellationToken)
+    {
+        using var raceCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        raceCts.CancelAfter(ApiRaceTimeout);
+
+        var urls = new List<string> { GitHubApiUrl };
+        urls.AddRange(ApiMirrors.Select(m => m + GitHubApiUrl));
+
+        var pending = urls.Select(u => FetchReleasesOneAsync(u, raceCts.Token)).ToList();
+        while (pending.Count > 0)
+        {
+            var done = await Task.WhenAny(pending);
+            pending.Remove(done);
+            var list = await done;
+            if (list is { Count: > 0 })
+            {
+                return list;
+            }
+        }
+
+        return null;
+    }
+
+    private static async Task<List<GitHubReleaseDto>?> FetchReleasesOneAsync(string url, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Accept.ParseAdd("application/vnd.github+json");
+            using var resp = await GitHubClient.SendAsync(req, cancellationToken);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            await using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
+            return await JsonSerializer.DeserializeAsync(
+                stream, GitHubJsonContext.Default.ListGitHubReleaseDto, cancellationToken);
+        }
+        catch
+        {
+            // 超时 / 断网 / 403 限流返回的对象结构不同：都交给下一条线路。
+            return null;
+        }
+    }
+
+    /// <summary>并发探测各加速源的 releases/latest，取最先返回 302 的那个 tag。</summary>
+    private static async Task<(string Tag, long ElapsedMs)?> ProbeLatestTagAsync(CancellationToken cancellationToken)
+    {
+        var pending = Mirrors
+            .Select(m => ProbeTagAsync(m + $"https://github.com/{RepoSlug}/releases/latest", cancellationToken))
+            .ToList();
+
+        while (pending.Count > 0)
+        {
+            var done = await Task.WhenAny(pending);
+            pending.Remove(done);
+            if (await done is { } result)
+            {
+                return result;
+            }
+        }
+
+        return null;
+    }
+
+    private static async Task<(string Tag, long ElapsedMs)?> ProbeTagAsync(string url, CancellationToken cancellationToken)
+    {
+        using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        probeCts.CancelAfter(ProbeTimeout);
+
+        var watch = Stopwatch.StartNew();
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            using var resp = await NoRedirectClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, probeCts.Token);
+            watch.Stop();
+
+            if ((int)resp.StatusCode is not (301 or 302 or 303 or 307 or 308))
+            {
+                return null;
+            }
+
+            // Location 形如 https://gh.dayiu.cn/https://github.com/.../releases/tag/v1.0.31
+            var location = resp.Headers.Location;
+            var segments = location?.ToString().TrimEnd('/').Split('/');
+            if (segments is null || segments.Length == 0)
+            {
+                return null;
+            }
+
+            var tag = segments[^1];
+            return tag.Length >= 2 && (tag[0] is 'v' or 'V') ? (tag, watch.ElapsedMilliseconds) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>从 API 返回的 release 列表里挑版本最高的桌面端，并解析出安装包信息。</summary>
+    private static AppUpdateInfo? BuildFromReleases(List<GitHubReleaseDto> releases)
+    {
         GitHubReleaseDto? best = null;
         Version? bestVersion = null;
         foreach (var release in releases)
@@ -244,6 +383,16 @@ internal sealed class UpdateService
     private static HttpClient CreateGitHubClient()
     {
         var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("SteamEYA-Updater");
+        return client;
+    }
+
+    private static HttpClient CreateNoRedirectClient()
+    {
+        var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+        {
+            Timeout = TimeSpan.FromSeconds(10)
+        };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("SteamEYA-Updater");
         return client;
     }
