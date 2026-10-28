@@ -299,16 +299,16 @@ internal sealed class ChatService : IAsyncDisposable
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var resp = await _http.SendAsync(req, ct);
         var text = await resp.Content.ReadAsStringAsync(ct);
-        T? result = null;
+        T value;
         try
         {
-            result = JsonSerializer.Deserialize(text, type);
+            value = JsonSerializer.Deserialize(text, type) ?? new T();
         }
         catch
         {
             // 解析失败按空结果处理
+            value = new T();
         }
-        var value = result ?? new T();
         if (!resp.IsSuccessStatusCode && value is IChatResult chatResult && string.IsNullOrEmpty(chatResult.Error))
         {
             chatResult.Error = ErrorOf(text);
