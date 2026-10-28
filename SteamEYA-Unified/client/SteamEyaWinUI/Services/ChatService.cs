@@ -222,6 +222,19 @@ internal sealed class ChatService : IAsyncDisposable
                ?? new ChatContactsResponse();
     }
 
+    /// <summary>小火人公开配置（公开接口）：名字、账号 id、头像、是否启用。</summary>
+    public async Task<ChatAiConfigDto?> GetAiConfigAsync(CancellationToken ct = default)
+    {
+        using var req = NewRequest(HttpMethod.Get, "/api/ai/config");
+        using var resp = await _http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            return null;
+        }
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        return await JsonSerializer.DeserializeAsync(stream, ChatJsonContext.Default.ChatAiConfigDto, ct);
+    }
+
     /// <summary>保存联系人备注（空字符串即清除备注）。</summary>
     public Task<ChatSimpleResponse> SaveNoteAsync(int peerId, string note, CancellationToken ct = default)
         => PostJsonAsync("/api/contacts/note",

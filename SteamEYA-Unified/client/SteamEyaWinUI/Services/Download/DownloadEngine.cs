@@ -27,6 +27,7 @@ internal sealed class DownloadEngine
 
     private readonly CancellationTokenSource _cts = new();
     private readonly object _stateGate = new();
+    private readonly int _exactSegments;
 
     private long _received;
     private long _total;
@@ -40,11 +41,12 @@ internal sealed class DownloadEngine
     private volatile bool _cancelRequested;
     private long[]? _segmentDone;
 
-    public DownloadEngine(string url, string directory, int threads)
+    public DownloadEngine(string url, string directory, int threads, int exactSegments = 0)
     {
         Url = url;
         TargetDirectory = directory;
         RequestedThreads = Math.Clamp(threads, 1, MaxThreads);
+        _exactSegments = Math.Clamp(exactSegments, 0, MaxThreads);
     }
 
     public string Url { get; }
@@ -137,7 +139,9 @@ internal sealed class DownloadEngine
             Interlocked.Exchange(ref _total, info.TotalBytes);
 
             PrepareTarget(info);
-            var segments = ResolveSegmentCount(info.TotalBytes, info.SupportsRange, RequestedThreads);
+            var segments = _exactSegments > 0 && info.SupportsRange && info.TotalBytes > 0
+                ? (int)Math.Min(_exactSegments, info.TotalBytes)
+                : ResolveSegmentCount(info.TotalBytes, info.SupportsRange, RequestedThreads);
 
             if (info.TotalBytes > 0 && !HasEnoughDiskSpace(info.TotalBytes))
             {

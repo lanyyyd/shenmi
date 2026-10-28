@@ -66,8 +66,10 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     private readonly Dictionary<int, (string Username, long LastReadId)> _readState = [];
     private readonly Dictionary<string, int> _unread = [];
     private readonly Dictionary<int, string> _notes = [];
-    private readonly HashSet<int> _pinned = [];
+    private readonly List<int> _pinned = [];
     private int _aiId;
+    private string _aiName = "小火人";
+    private string _aiAvatar = string.Empty;
 
     private int _myId;
     private string _myUsername = string.Empty;
@@ -162,6 +164,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
                 UpdateProfileButton();
             }
 
+            await LoadAiConfigAsync();
             await LoadContactsAsync();
             _rawUsers = await _chat.GetUsersAsync();
             RebuildUsers();
@@ -597,6 +600,20 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
 
         var peerId = OtherIdFromRoom(_room) ?? 0;
         var user = _rawUsers.FirstOrDefault(u => u.Id == peerId);
+        if (user is null && peerId > 0 && peerId == _aiId)
+        {
+            // 小火人可能不在 /api/users 返回里，用配置兜一条，会话头才显示名字与头像。
+            user = new ChatUserDto
+            {
+                Id = _aiId,
+                Username = _aiName,
+                Nickname = _aiName,
+                DisplayName = _aiName,
+                Avatar = _aiAvatar,
+                Online = true,
+                IsAi = true
+            };
+        }
         var name = user is null ? Loc.T("Chat_Private") : ContactNameOf(user);
         RoomTitle.Text = name;
         RoomAvatarText.Text = string.IsNullOrEmpty(name) ? "?" : name[..1].ToUpperInvariant();
@@ -684,12 +701,47 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             || ContactNameOf(u).ToLowerInvariant().Contains(kw)
             || u.Username.ToLowerInvariant().Contains(kw);
 
-        var others = _rawUsers.Where(u => u.Id != _myId && u.Id != _aiId).ToArray();
-        var pinnedUsers = others.Where(u => _pinned.Contains(u.Id)).ToArray();
-        if (pinnedUsers.Length > 0)
+        // 小火人：优先用 /api/users 里的那条；接口没带上时用 /api/ai/config 兜一条，
+        // 保证它始终出现在侧栏（与网页端行为一致）。
+        var aiUser = _rawUsers.FirstOrDefault(u => u.Id == _aiId || u.IsAi);
+        if (aiUser is null && _aiId > 0)
+        {
+            aiUser = new ChatUserDto
+            {
+                Id = _aiId,
+                Username = _aiName,
+                Nickname = _aiName,
+                DisplayName = _aiName,
+                Avatar = _aiAvatar,
+                Online = true,
+                IsAi = true
+            };
+        }
+
+        var others = _rawUsers.Where(u => u.Id != _myId && u.Id != _aiId && !u.IsAi).ToArray();
+
+        // 置顶：小火人排最前，其余按用户置顶顺序。
+        var pinnedRows = new List<ChatUserDto>();
+        if (aiUser is not null && _pinned.Contains(aiUser.Id))
+        {
+            pinnedRows.Add(aiUser);
+        }
+        foreach (var id in _pinned)
+        {
+            if (aiUser is not null && id == aiUser.Id)
+            {
+                continue;
+            }
+            var pinnedUser = _rawUsers.FirstOrDefault(x => x.Id == id && x.Id != _myId);
+            if (pinnedUser is not null && pinnedRows.All(r => r.Id != pinnedUser.Id))
+            {
+                pinnedRows.Add(pinnedUser);
+            }
+        }
+        if (pinnedRows.Count > 0)
         {
             _users.Add(SidebarItemVm.Header(Loc.T("Chat_Sidebar_Pinned")));
-            foreach (var u in pinnedUsers)
+            foreach (var u in pinnedRows)
             {
                 _users.Add(BuildUserRow(u, keywordsFiltered: false));
             }
@@ -701,7 +753,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             Title = string.Empty,
             DisplayName = Loc.T("Chat_Group_Title"),
             SubText = Loc.T("Chat_Group_Sub"),
-            TailText = _rawUsers.Count(u => u.Online).ToString(),
+            TailText = others.Count(u => u.Online).ToString(),
             UnreadText = groupUnread > 99 ? "99+" : groupUnread.ToString(),
             UnreadVisibility = groupUnread > 0 ? Visibility.Visible : Visibility.Collapsed,
             AvatarText = "群",
@@ -716,10 +768,9 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             IsHeader = false
         });
 
-        var ai = _rawUsers.FirstOrDefault(u => u.Id == _aiId || u.IsAi);
-        if (ai is not null && !_pinned.Contains(ai.Id) && Matches(ai))
+        if (aiUser is not null && !_pinned.Contains(aiUser.Id) && Matches(aiUser))
         {
-            _users.Add(BuildUserRow(ai, forceAi: true, keywordsFiltered: false));
+            _users.Add(BuildUserRow(aiUser, forceAi: true, keywordsFiltered: false));
         }
 
         var online = others.Where(u => u.Online).OrderBy(DisplayNameOf).ToArray();
@@ -886,6 +937,29 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         catch (Exception ex)
         {
             AppLog.Error("切换联系人置顶失败。", ex);
+        }
+    }
+
+    /// <summary>取小火人公开配置：拿到账号 id / 名字 / 头像，侧栏才能始终把它列出来。</summary>
+    private async Task LoadAiConfigAsync()
+    {
+        try
+        {
+            var cfg = await _chat.GetAiConfigAsync();
+            if (cfg is not { UserId: > 0 })
+            {
+                return;
+            }
+            _aiId = cfg.UserId;
+            if (!string.IsNullOrWhiteSpace(cfg.Name))
+            {
+                _aiName = cfg.Name;
+            }
+            _aiAvatar = cfg.Avatar ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Debug($"读取小火人配置失败：{ex.Message}");
         }
     }
 

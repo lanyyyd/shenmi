@@ -346,6 +346,17 @@ internal sealed class ChatContactsResponse
     public int AiId { get; set; }
 }
 
+// ---------------- 小火人公开配置（GET /api/ai/config） ----------------
+
+internal sealed class ChatAiConfigDto
+{
+    public bool Ok { get; set; }
+    public bool Enabled { get; set; }
+    public string? Name { get; set; }
+    public int UserId { get; set; }
+    public string? Avatar { get; set; }
+}
+
 internal sealed class ChatContactsNoteRequest
 {
     public int PeerId { get; set; }
@@ -385,6 +396,7 @@ internal sealed class ChatSimpleResponse
 [JsonSerializable(typeof(ChatProfileRequest))]
 [JsonSerializable(typeof(ChatProfileResponse))]
 [JsonSerializable(typeof(ChatContactsResponse))]
+[JsonSerializable(typeof(ChatAiConfigDto))]
 [JsonSerializable(typeof(ChatContactsNoteRequest))]
 [JsonSerializable(typeof(ChatContactsPinRequest))]
 [JsonSerializable(typeof(ChatSimpleResponse))]
