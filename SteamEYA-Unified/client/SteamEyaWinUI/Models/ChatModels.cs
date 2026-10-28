@@ -15,6 +15,18 @@ internal sealed class ChatUserDto
 
     /// <summary>最后活跃时间（毫秒）：登录 / 在线 / 发言三者取最大；0 表示从未登录过。</summary>
     public long LastSeen { get; set; }
+
+    /// <summary>等级（0–6），侧栏与消息发送人旁的徽章。</summary>
+    public int Level { get; set; }
+
+    /// <summary>经验值（用于个人资料里的等级卡）。</summary>
+    public long Exp { get; set; }
+
+    /// <summary>是否是小火人（AI）账号。</summary>
+    public bool IsAi { get; set; }
+
+    /// <summary>当前账号是否是管理员（决定撤回样式与表情删除按钮）。</summary>
+    public bool IsAdmin { get; set; }
 }
 
 internal sealed class ChatUsersResponse
@@ -45,6 +57,12 @@ internal sealed class ChatMessageDto
     public long? FileSize { get; set; }
     public bool Recalled { get; set; }
     public long CreatedAt { get; set; }
+
+    /// <summary>发送人等级（群聊消息名称旁显示）。</summary>
+    public int FromLevel { get; set; }
+
+    /// <summary>所属会话的显示名（搜索结果里展示，群聊为「群聊大厅」）。</summary>
+    public string? RoomName { get; set; }
 
     /// <summary>归一化后的消息类型（text/image/video/file/sticker）。</summary>
     public string EffectiveKind
@@ -270,6 +288,83 @@ internal sealed class ChatReadRequest
     public string Room { get; set; } = "group";
 }
 
+// ---------------- 已读回执（GET /api/read-state） ----------------
+
+internal sealed class ChatReadStateDto
+{
+    public int UserId { get; set; }
+    public string Username { get; set; } = string.Empty;
+    public long LastReadId { get; set; }
+    public long UpdatedAt { get; set; }
+}
+
+internal sealed class ChatReadStateResponse
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public ChatReadStateDto[]? States { get; set; }
+}
+
+// ---------------- 聊天记录搜索（GET /api/search） ----------------
+
+internal sealed class ChatSearchResponse
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public ChatMessageDto[]? Messages { get; set; }
+    public int Count { get; set; }
+    public bool HasMore { get; set; }
+    public int NextOffset { get; set; }
+}
+
+// ---------------- 个人资料（POST /api/profile、/api/profile/avatar） ----------------
+
+internal sealed class ChatProfileRequest
+{
+    public string? Nickname { get; set; }
+    public string? OldPassword { get; set; }
+    public string? NewPassword { get; set; }
+}
+
+internal sealed class ChatProfileResponse
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public string? Avatar { get; set; }
+    public string? Nickname { get; set; }
+    public ChatUserDto? User { get; set; }
+}
+
+// ---------------- 联系人备注 / 置顶（GET|POST /api/contacts） ----------------
+
+internal sealed class ChatContactsResponse
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public Dictionary<string, string>? Notes { get; set; }
+    public int[]? Pinned { get; set; }
+    public int AiId { get; set; }
+}
+
+internal sealed class ChatContactsNoteRequest
+{
+    public int PeerId { get; set; }
+    public string Note { get; set; } = string.Empty;
+}
+
+internal sealed class ChatContactsPinRequest
+{
+    public int PeerId { get; set; }
+    public bool Pinned { get; set; }
+}
+
+/// <summary>通用 {ok,error} 返回（删除表情、备注、置顶等）。</summary>
+internal sealed class ChatSimpleResponse
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+}
+
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
 [JsonSerializable(typeof(ChatReadRequest))]
 [JsonSerializable(typeof(ChatSendDto))]
@@ -284,6 +379,15 @@ internal sealed class ChatReadRequest
 [JsonSerializable(typeof(ChatMeResponse))]
 [JsonSerializable(typeof(ChatStickersResponse))]
 [JsonSerializable(typeof(ChatStickerUploadResponse))]
+[JsonSerializable(typeof(ChatReadStateResponse))]
+[JsonSerializable(typeof(ChatReadStateDto))]
+[JsonSerializable(typeof(ChatSearchResponse))]
+[JsonSerializable(typeof(ChatProfileRequest))]
+[JsonSerializable(typeof(ChatProfileResponse))]
+[JsonSerializable(typeof(ChatContactsResponse))]
+[JsonSerializable(typeof(ChatContactsNoteRequest))]
+[JsonSerializable(typeof(ChatContactsPinRequest))]
+[JsonSerializable(typeof(ChatSimpleResponse))]
 [JsonSerializable(typeof(LanInfoDto))]
 [JsonSerializable(typeof(LanPeersResponse))]
 [JsonSerializable(typeof(LanAddPeerResponse))]

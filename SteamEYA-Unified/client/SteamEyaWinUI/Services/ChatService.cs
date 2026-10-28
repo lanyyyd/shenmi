@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.WebSockets;
@@ -32,6 +33,9 @@ internal sealed class ChatService : IAsyncDisposable
 
     /// <summary>收到撤回事件（消息 id）。</summary>
     public event Action<long>? MessageRecalled;
+
+    /// <summary>收到「已读」广播：房间、用户 id、用户名、最后已读消息 id。</summary>
+    public event Action<string, int, string, long>? ReadStateChanged;
 
     /// <summary>连接状态变化。</summary>
     public event Action<bool>? ConnectionChanged;
@@ -97,12 +101,13 @@ internal sealed class ChatService : IAsyncDisposable
                ?? new ChatHistoryResponse();
     }
 
-    public async Task<ChatUploadResultDto> UploadAsync(string filePath, CancellationToken ct = default)
+    /// <summary>上传聊天附件。<paramref name="progress"/> 回调 0–1 的发送进度（用于输入区进度条）。</summary>
+    public async Task<ChatUploadResultDto> UploadAsync(string filePath, IProgress<double>? progress = null, CancellationToken ct = default)
     {
         using var req = NewRequest(HttpMethod.Post, "/api/upload");
         using var form = new MultipartFormDataContent();
         var bytes = await File.ReadAllBytesAsync(filePath, ct);
-        var content = new ByteArrayContent(bytes);
+        var content = new ProgressByteArrayContent(bytes, progress);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         form.Add(content, "file", Path.GetFileName(filePath));
         req.Content = form;
@@ -127,6 +132,124 @@ internal sealed class ChatService : IAsyncDisposable
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         return await JsonSerializer.DeserializeAsync(stream, ChatJsonContext.Default.ChatUnreadResponse, ct)
                ?? new ChatUnreadResponse();
+    }
+
+    // ---------------- 已读回执 / 搜索 / 资料 / 联系人 ----------------
+    /// <summary>当前房间各成员的已读位置（GET /api/read-state）。</summary>
+    public async Task<ChatReadStateResponse> GetReadStateAsync(string room, CancellationToken ct = default)
+    {
+        using var req = NewRequest(HttpMethod.Get, "/api/read-state?room=" + Uri.EscapeDataString(room));
+        using var resp = await _http.SendAsync(req, ct);
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        return await JsonSerializer.DeserializeAsync(stream, ChatJsonContext.Default.ChatReadStateResponse, ct)
+               ?? new ChatReadStateResponse();
+    }
+
+    /// <summary>搜索聊天记录（GET /api/search）。type 取 text/file/image/video/media。</summary>
+    public async Task<ChatSearchResponse> SearchAsync(string? q, string? type, string? sender, string room,
+        long from, long to, int limit = 50, int offset = 0, CancellationToken ct = default)
+    {
+        var parts = new List<string> { "room=" + Uri.EscapeDataString(room), "limit=" + limit, "offset=" + offset };
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            parts.Add("q=" + Uri.EscapeDataString(q));
+        }
+        if (!string.IsNullOrWhiteSpace(type))
+        {
+            parts.Add("type=" + Uri.EscapeDataString(type));
+        }
+        if (!string.IsNullOrWhiteSpace(sender))
+        {
+            parts.Add("sender=" + Uri.EscapeDataString(sender));
+        }
+        if (from > 0)
+        {
+            parts.Add("frm=" + from);   // 服务端参数名为 frm（起始时间，毫秒）
+        }
+        if (to > 0)
+        {
+            parts.Add("to=" + to);
+        }
+        using var req = NewRequest(HttpMethod.Get, "/api/search?" + string.Join("&", parts));
+        using var resp = await _http.SendAsync(req, ct);
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        return await JsonSerializer.DeserializeAsync(stream, ChatJsonContext.Default.ChatSearchResponse, ct)
+               ?? new ChatSearchResponse();
+    }
+
+    /// <summary>修改昵称（POST /api/profile）。</summary>
+    public Task<ChatProfileResponse> UpdateNicknameAsync(string nickname, CancellationToken ct = default)
+        => PostProfileAsync(new ChatProfileRequest { Nickname = nickname }, ct);
+
+    /// <summary>修改密码（POST /api/profile）。</summary>
+    public Task<ChatProfileResponse> ChangePasswordAsync(string oldPassword, string newPassword, CancellationToken ct = default)
+        => PostProfileAsync(new ChatProfileRequest { OldPassword = oldPassword, NewPassword = newPassword }, ct);
+
+    private async Task<ChatProfileResponse> PostProfileAsync(ChatProfileRequest dto, CancellationToken ct)
+    {
+        using var req = NewRequest(HttpMethod.Post, "/api/profile");
+        var body = JsonSerializer.Serialize(dto, ChatJsonContext.Default.ChatProfileRequest);
+        req.Content = new StringContent(body, Encoding.UTF8, "application/json");
+        using var resp = await _http.SendAsync(req, ct);
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        return await JsonSerializer.DeserializeAsync(stream, ChatJsonContext.Default.ChatProfileResponse, ct)
+               ?? new ChatProfileResponse();
+    }
+
+    /// <summary>上传头像（POST /api/profile/avatar，multipart）。</summary>
+    public async Task<ChatProfileResponse> UploadAvatarAsync(string filePath, CancellationToken ct = default)
+    {
+        using var req = NewRequest(HttpMethod.Post, "/api/profile/avatar");
+        using var form = new MultipartFormDataContent();
+        var bytes = await File.ReadAllBytesAsync(filePath, ct);
+        var content = new ByteArrayContent(bytes);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        form.Add(content, "file", Path.GetFileName(filePath));
+        req.Content = form;
+        using var resp = await _http.SendAsync(req, ct);
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        return await JsonSerializer.DeserializeAsync(stream, ChatJsonContext.Default.ChatProfileResponse, ct)
+               ?? new ChatProfileResponse();
+    }
+
+    /// <summary>联系人备注与置顶列表（GET /api/contacts）。</summary>
+    public async Task<ChatContactsResponse> GetContactsAsync(CancellationToken ct = default)
+    {
+        using var req = NewRequest(HttpMethod.Get, "/api/contacts");
+        using var resp = await _http.SendAsync(req, ct);
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        return await JsonSerializer.DeserializeAsync(stream, ChatJsonContext.Default.ChatContactsResponse, ct)
+               ?? new ChatContactsResponse();
+    }
+
+    /// <summary>保存联系人备注（空字符串即清除备注）。</summary>
+    public Task<ChatSimpleResponse> SaveNoteAsync(int peerId, string note, CancellationToken ct = default)
+        => PostJsonAsync("/api/contacts/note",
+            JsonSerializer.Serialize(new ChatContactsNoteRequest { PeerId = peerId, Note = note }, ChatJsonContext.Default.ChatContactsNoteRequest), ct);
+
+    /// <summary>置顶 / 取消置顶联系人。</summary>
+    public Task<ChatSimpleResponse> TogglePinAsync(int peerId, bool pinned, CancellationToken ct = default)
+        => PostJsonAsync("/api/contacts/pin",
+            JsonSerializer.Serialize(new ChatContactsPinRequest { PeerId = peerId, Pinned = pinned }, ChatJsonContext.Default.ChatContactsPinRequest), ct);
+
+    /// <summary>删除表情（仅管理员，DELETE /api/stickers/{id}）。</summary>
+    public async Task<ChatSimpleResponse> DeleteStickerAsync(long id, CancellationToken ct = default)
+    {
+        using var req = NewRequest(HttpMethod.Delete, $"/api/stickers/{id}");
+        using var resp = await _http.SendAsync(req, ct);
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        return await JsonSerializer.DeserializeAsync(stream, ChatJsonContext.Default.ChatSimpleResponse, ct)
+               ?? new ChatSimpleResponse();
+    }
+
+    private async Task<ChatSimpleResponse> PostJsonAsync(string path, string body, CancellationToken ct)
+    {
+        using var req = NewRequest(HttpMethod.Post, path);
+        req.Content = new StringContent(body, Encoding.UTF8, "application/json");
+        using var resp = await _http.SendAsync(req, ct);
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        return await JsonSerializer.DeserializeAsync(stream, ChatJsonContext.Default.ChatSimpleResponse, ct)
+               ?? new ChatSimpleResponse();
     }
 
     // ---------------- WebSocket ----------------
@@ -289,6 +412,16 @@ internal sealed class ChatService : IAsyncDisposable
                         MessageRecalled?.Invoke(id);
                     }
                     break;
+                case "read":
+                    var uid = doc.RootElement.TryGetProperty("userId", out var ue) && ue.TryGetInt32(out var u) ? u : 0;
+                    var uname = doc.RootElement.TryGetProperty("username", out var ne) ? ne.GetString() ?? string.Empty : string.Empty;
+                    var lastId = doc.RootElement.TryGetProperty("lastReadId", out var le) && le.TryGetInt64(out var l) ? l : 0;
+                    var readRoom = doc.RootElement.TryGetProperty("room", out var re) ? re.GetString() ?? string.Empty : string.Empty;
+                    if (uid > 0)
+                    {
+                        ReadStateChanged?.Invoke(readRoom, uid, uname, lastId);
+                    }
+                    break;
             }
         }
         catch
@@ -436,5 +569,38 @@ internal sealed class ChatService : IAsyncDisposable
         await StopAsync();
         _http.Dispose();
         _sendLock.Dispose();
+    }
+
+    /// <summary>带进度的字节内容（分块写入请求流，供上传进度条使用）。</summary>
+    private sealed class ProgressByteArrayContent : ByteArrayContent
+    {
+        private const int ChunkSize = 64 * 1024;
+
+        private readonly byte[] _bytes;
+        private readonly IProgress<double>? _progress;
+
+        public ProgressByteArrayContent(byte[] bytes, IProgress<double>? progress) : base(bytes)
+        {
+            _bytes = bytes;
+            _progress = progress;
+        }
+
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            var total = _bytes.Length;
+            if (total == 0)
+            {
+                _progress?.Report(1);
+                return;
+            }
+            var sent = 0;
+            while (sent < total)
+            {
+                var count = Math.Min(ChunkSize, total - sent);
+                await stream.WriteAsync(_bytes.AsMemory(sent, count));
+                sent += count;
+                _progress?.Report((double)sent / total);
+            }
+        }
     }
 }

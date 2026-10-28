@@ -5,7 +5,47 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:SteamEyaWinUI.Pages">
 
-    <Grid>
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="ChatBgBrush" Color="#F0F2F5" />
+                    <SolidColorBrush x:Key="ChatPanelBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="ChatLineBrush" Color="#E9ECEF" />
+                    <SolidColorBrush x:Key="ChatTextBrush" Color="#111827" />
+                    <SolidColorBrush x:Key="ChatSubTextBrush" Color="#6B7280" />
+                    <SolidColorBrush x:Key="ChatAccentBrush" Color="#10B981" />
+                    <SolidColorBrush x:Key="ChatInputBrush" Color="#F8F9FA" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="ChatBgBrush" Color="#080B14" />
+                    <SolidColorBrush x:Key="ChatPanelBrush" Color="#151926" />
+                    <SolidColorBrush x:Key="ChatLineBrush" Color="#242938" />
+                    <SolidColorBrush x:Key="ChatTextBrush" Color="#E8EAF0" />
+                    <SolidColorBrush x:Key="ChatSubTextBrush" Color="#8B93A7" />
+                    <SolidColorBrush x:Key="ChatAccentBrush" Color="#8B5CF6" />
+                    <SolidColorBrush x:Key="ChatInputBrush" Color="#121622" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+            <Style x:Key="ChatIconButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="8,6" />
+                <Setter Property="CornerRadius" Value="8" />
+            </Style>
+
+            <Style x:Key="ChatSlimListItemStyle" TargetType="ListViewItem">
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="Background" Value="Transparent" />
+            </Style>
+        </ResourceDictionary>
+    </Page.Resources>
+
+    <Grid Background="{ThemeResource ChatBgBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -14,13 +54,14 @@
         <!-- ================= 顶部命令条（网页版 / 原生版共用） ================= -->
         <Grid
             Grid.Row="0"
-            Padding="16,10"
+            Padding="16,9"
             ColumnSpacing="10"
-            Background="{ThemeResource LayerFillColorDefaultBrush}">
+            Background="{ThemeResource ChatPanelBrush}"
+            BorderThickness="0,0,0,1"
+            BorderBrush="{ThemeResource ChatLineBrush}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
@@ -28,38 +69,42 @@
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <TextBlock
                     x:Name="HeaderText"
-                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                    FontSize="15"
+                    FontWeight="SemiBold"
+                    Foreground="{ThemeResource ChatTextBrush}"
                     VerticalAlignment="Center" />
                 <Ellipse
                     x:Name="ConnDot"
                     Width="8"
                     Height="8"
                     VerticalAlignment="Center"
-                    Fill="{ThemeResource SystemFillColorCautionBrush}" />
+                    Fill="#F59E0B" />
                 <TextBlock
                     x:Name="ConnText"
-                    Style="{StaticResource CaptionTextBlockStyle}"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    FontSize="11.5"
+                    Foreground="{ThemeResource ChatSubTextBrush}"
                     VerticalAlignment="Center" />
             </StackPanel>
 
             <!-- 兜底：内嵌界面打不开时，用默认浏览器打开网页版聊天室（用户自行登录） -->
             <Button
                 x:Name="BrowserButton"
-                Grid.Column="3"
+                Grid.Column="2"
+                Style="{StaticResource ChatIconButtonStyle}"
                 Click="Browser_Click"
                 VerticalAlignment="Center"
                 ToolTipService.ToolTip="{x:Bind Strings.Get('Chat_Browser_Open_Tip'), Mode=OneWay}">
                 <StackPanel Orientation="Horizontal" Spacing="6">
                     <FontIcon FontSize="14" Glyph="&#xE774;" />
-                    <TextBlock Text="{x:Bind Strings.Get('Chat_Browser_Open'), Mode=OneWay}" />
+                    <TextBlock Text="{x:Bind Strings.Get('Chat_Browser_Open'), Mode=OneWay}" FontSize="12" />
                 </StackPanel>
             </Button>
 
             <!-- 网页版 / 原生版 切换 -->
             <Button
                 x:Name="ModeButton"
-                Grid.Column="4"
+                Grid.Column="3"
+                Style="{StaticResource ChatIconButtonStyle}"
                 Click="Mode_Click"
                 VerticalAlignment="Center" />
         </Grid>
@@ -67,98 +112,142 @@
         <!-- ================= 原生界面（网页版不可用时的兜底） ================= -->
         <Grid x:Name="NativeRoot" Grid.Row="1" Visibility="Collapsed">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="280" />
+                <ColumnDefinition Width="290" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <!-- 左栏：群聊入口 + 用户列表 -->
-            <Grid Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}">
+            <!-- 左栏：联系人搜索 + 置顶 / 群聊 / 在线 / 离线 -->
+            <Grid
+                Grid.Column="0"
+                Background="{ThemeResource ChatPanelBrush}"
+                BorderThickness="0,0,1,0"
+                BorderBrush="{ThemeResource ChatLineBrush}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <Button
-                    x:Name="GroupButton"
+                <TextBox
+                    x:Name="UserSearchBox"
                     Grid.Row="0"
-                    Margin="12,12,12,6"
-                    HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Left"
-                    Click="Group_Click">
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <FontIcon FontSize="16" Glyph="&#xE8BD;" />
-                        <TextBlock x:Name="GroupText" />
-                        <Border
-                            x:Name="GroupBadge"
-                            MinWidth="18"
-                            Background="{ThemeResource SystemFillColorCriticalBrush}"
-                            CornerRadius="9"
-                            Padding="5,1"
-                            Visibility="Collapsed">
-                            <TextBlock
-                                x:Name="GroupBadgeText"
-                                Foreground="White"
-                                FontSize="11"
-                                HorizontalAlignment="Center" />
-                        </Border>
-                    </StackPanel>
-                </Button>
+                    Margin="12,10,12,6"
+                    PlaceholderText="{x:Bind Strings.Get('Chat_Search_User'), Mode=OneWay}"
+                    TextChanged="UserSearchBox_TextChanged" />
 
                 <ListView
                     x:Name="UsersList"
                     Grid.Row="1"
-                    SelectionMode="Single"
-                    SelectionChanged="UsersList_SelectionChanged">
+                    Padding="4,0,4,10"
+                    SelectionMode="None"
+                    IsItemClickEnabled="True"
+                    ItemClick="UsersList_ItemClick"
+                    RightTapped="UsersList_RightTapped"
+                    ItemContainerStyle="{StaticResource ChatSlimListItemStyle}">
                     <ListView.ItemTemplate>
-                        <DataTemplate x:DataType="local:ChatUserVm">
-                            <Grid Padding="0,6" ColumnSpacing="10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <Grid Grid.Column="0" Width="34" Height="34">
-                                    <Border
-                                        Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                        CornerRadius="17">
+                        <DataTemplate x:DataType="local:SidebarItemVm">
+                            <Grid>
+                                <!-- 分组标题 -->
+                                <TextBlock
+                                    Margin="12,12,12,4"
+                                    FontSize="10.5"
+                                    FontWeight="SemiBold"
+                                    Foreground="{ThemeResource ChatSubTextBrush}"
+                                    Text="{x:Bind Title}"
+                                    Visibility="{x:Bind HeaderVisibility}" />
+
+                                <!-- 联系人条目 -->
+                                <Grid
+                                    Padding="10,7"
+                                    ColumnSpacing="10"
+                                    Background="{x:Bind RowBackground}"
+                                    Visibility="{x:Bind RowVisibility}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Grid Grid.Column="0" Width="36" Height="36">
+                                        <Border Background="{x:Bind AvatarBrush}" CornerRadius="{x:Bind AvatarCorner}">
+                                            <TextBlock
+                                                Text="{x:Bind AvatarText}"
+                                                Foreground="White"
+                                                FontSize="13"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center" />
+                                        </Border>
+                                        <Image
+                                            Source="{x:Bind AvatarImage}"
+                                            Stretch="UniformToFill"
+                                            Width="36"
+                                            Height="36" />
+                                        <Ellipse
+                                            Width="9"
+                                            Height="9"
+                                            Fill="#22C55E"
+                                            Stroke="{ThemeResource ChatPanelBrush}"
+                                            StrokeThickness="2"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Bottom"
+                                            Visibility="{x:Bind OnlineDotVisibility}" />
+                                    </Grid>
+
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                            <Border
+                                                Background="#7C3AED"
+                                                CornerRadius="4"
+                                                Padding="4,0"
+                                                VerticalAlignment="Center"
+                                                Visibility="{x:Bind AiVisibility}">
+                                                <TextBlock Text="AI" Foreground="White" FontSize="9" FontWeight="Bold" />
+                                            </Border>
+                                            <TextBlock
+                                                Text="{x:Bind DisplayName}"
+                                                FontSize="13.5"
+                                                Foreground="{ThemeResource ChatTextBrush}"
+                                                TextTrimming="CharacterEllipsis" />
+                                            <Border
+                                                Background="{x:Bind LevelBrush}"
+                                                CornerRadius="4"
+                                                Padding="4,0"
+                                                VerticalAlignment="Center"
+                                                Visibility="{x:Bind LevelVisibility}">
+                                                <TextBlock
+                                                    Text="{x:Bind LevelText}"
+                                                    Foreground="White"
+                                                    FontSize="9.5"
+                                                    FontWeight="SemiBold" />
+                                            </Border>
+                                        </StackPanel>
                                         <TextBlock
-                                            Text="{x:Bind AvatarText}"
-                                            Foreground="White"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center" />
-                                    </Border>
-                                    <Image
-                                        Source="{x:Bind Avatar}"
-                                        Stretch="UniformToFill"
-                                        Width="34"
-                                        Height="34" />
-                                </Grid>
-                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock Text="{x:Bind DisplayName}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock
-                                        Text="{x:Bind LastSeenText}"
-                                        Style="{StaticResource CaptionTextBlockStyle}"
-                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                                    <Border
-                                        MinWidth="18"
-                                        Background="{ThemeResource SystemFillColorCriticalBrush}"
-                                        CornerRadius="9"
-                                        Padding="5,1"
-                                        Visibility="{x:Bind BadgeVisibility}">
-                                        <TextBlock
-                                            Text="{x:Bind BadgeText}"
-                                            Foreground="White"
+                                            Text="{x:Bind SubText}"
                                             FontSize="11"
-                                            HorizontalAlignment="Center" />
-                                    </Border>
-                                    <TextBlock
-                                        Text="{x:Bind OnlineText}"
-                                        Style="{StaticResource CaptionTextBlockStyle}"
-                                        Foreground="{ThemeResource SystemFillColorSuccessBrush}"
-                                        HorizontalAlignment="Right" />
-                                </StackPanel>
+                                            Foreground="{ThemeResource ChatSubTextBrush}"
+                                            TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="3">
+                                        <Border
+                                            MinWidth="18"
+                                            Background="#EF4444"
+                                            CornerRadius="9"
+                                            Padding="5,1"
+                                            HorizontalAlignment="Right"
+                                            Visibility="{x:Bind UnreadVisibility}">
+                                            <TextBlock
+                                                Text="{x:Bind UnreadText}"
+                                                Foreground="White"
+                                                FontSize="10.5"
+                                                HorizontalAlignment="Center" />
+                                        </Border>
+                                        <TextBlock
+                                            Text="{x:Bind TailText}"
+                                            FontSize="10"
+                                            Foreground="{ThemeResource ChatSubTextBrush}"
+                                            HorizontalAlignment="Right" />
+                                    </StackPanel>
+                                </Grid>
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>
@@ -168,215 +257,495 @@
             <!-- 右栏：会话 -->
             <Grid Grid.Column="1">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="68" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <Border
-                    Grid.Row="0"
-                    BorderThickness="0,0,0,1"
-                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                    Padding="20,14">
-                    <TextBlock x:Name="RoomTitle" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                </Border>
-
-                <!-- 消息列表 -->
-                <ListView
-                    x:Name="MessagesList"
-                    Grid.Row="1"
-                    Padding="12,8"
-                    SelectionMode="None">
-                    <ListView.ItemTemplate>
-                        <DataTemplate x:DataType="local:ChatMessageVm">
-                            <Grid Margin="0,6" ColumnSpacing="8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-
-                                <!-- 对方头像（左侧） -->
-                                <Grid
-                                    Grid.Column="0"
-                                    Width="34"
-                                    Height="34"
-                                    VerticalAlignment="Top"
-                                    Visibility="{x:Bind AvatarLeftVisibility}">
-                                    <Border Background="{x:Bind AvatarBrush}" CornerRadius="17">
-                                        <TextBlock
-                                            Text="{x:Bind AvatarText}"
-                                            Foreground="White"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center" />
-                                    </Border>
-                                    <Image
-                                        Source="{x:Bind AvatarImage}"
-                                        Width="34"
-                                        Height="34"
-                                        Stretch="UniformToFill" />
-                                </Grid>
-
-                                <!-- 消息体 -->
-                                <StackPanel
-                                    Grid.Column="1"
-                                    MaxWidth="600"
-                                    Spacing="2"
-                                    HorizontalAlignment="{x:Bind RowAlign}">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock
-                                            Text="{x:Bind MetaText}"
-                                            Style="{StaticResource CaptionTextBlockStyle}"
-                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                                        <Button
-                                            Padding="0"
-                                            Background="Transparent"
-                                            BorderThickness="0"
-                                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                            FontSize="12"
-                                            Visibility="{x:Bind RecallVisibility}"
-                                            Click="Recall_Click"
-                                            Content="{x:Bind RecallLabel}" />
-                                    </StackPanel>
-                                    <Border
-                                        Background="{x:Bind BubbleBrush}"
-                                        CornerRadius="8"
-                                        Padding="10,8">
-                                        <StackPanel Spacing="4">
-                                            <TextBlock
-                                                Text="{x:Bind DisplayContent}"
-                                                Foreground="{x:Bind ContentForeground}"
-                                                TextWrapping="Wrap"
-                                                Visibility="{x:Bind TextVisibility}" />
-                                            <Image
-                                                Source="{x:Bind Image}"
-                                                MaxWidth="{x:Bind ImageMaxSize}"
-                                                MaxHeight="{x:Bind ImageMaxSize}"
-                                                Stretch="Uniform"
-                                                Visibility="{x:Bind ImageVisibility}" />
-                                            <Button
-                                                Visibility="{x:Bind FileVisibility}"
-                                                HorizontalAlignment="Left"
-                                                Click="Attachment_Click"
-                                                Content="{x:Bind FileLabel}" />
-                                        </StackPanel>
-                                    </Border>
-                                </StackPanel>
-
-                                <!-- 自己头像（右侧） -->
-                                <Grid
-                                    Grid.Column="2"
-                                    Width="34"
-                                    Height="34"
-                                    VerticalAlignment="Top"
-                                    Visibility="{x:Bind AvatarRightVisibility}">
-                                    <Border Background="{x:Bind AvatarBrush}" CornerRadius="17">
-                                        <TextBlock
-                                            Text="{x:Bind AvatarText}"
-                                            Foreground="White"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center" />
-                                    </Border>
-                                    <Image
-                                        Source="{x:Bind AvatarImage}"
-                                        Width="34"
-                                        Height="34"
-                                        Stretch="UniformToFill" />
-                                </Grid>
-                            </Grid>
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
-                </ListView>
-
-                <!-- 输入区 -->
+                <!-- 会话头 -->
                 <Grid
-                    Grid.Row="2"
-                    BorderThickness="0,1,0,0"
-                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                    Padding="16,12"
-                    ColumnSpacing="8">
+                    Grid.Row="0"
+                    Padding="20,0"
+                    ColumnSpacing="12"
+                    BorderThickness="0,0,0,1"
+                    BorderBrush="{ThemeResource ChatLineBrush}">
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <TextBox
-                        x:Name="InputBox"
-                        Grid.Column="0"
-                        MaxHeight="120"
-                        AcceptsReturn="True"
-                        TextWrapping="Wrap"
-                        PreviewKeyDown="InputBox_PreviewKeyDown"
-                        TextChanged="InputBox_TextChanged" />
+                    <Grid Grid.Column="0" Width="38" Height="38" VerticalAlignment="Center">
+                        <Border x:Name="RoomAvatarBorder" Background="{ThemeResource ChatAccentBrush}" CornerRadius="19">
+                            <TextBlock
+                                x:Name="RoomAvatarText"
+                                Text="群"
+                                Foreground="White"
+                                FontSize="14"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        </Border>
+                        <Image
+                            x:Name="RoomAvatarImage"
+                            Width="38"
+                            Height="38"
+                            Stretch="UniformToFill"
+                            Visibility="Collapsed" />
+                    </Grid>
 
-                    <Button x:Name="StickerButton" Grid.Column="1" VerticalAlignment="Bottom">
-                        <Button.Flyout>
-                            <Flyout Placement="Top" Opening="StickerFlyout_Opening">
-                                <StackPanel Width="380" Spacing="8">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock
-                                            Text="{x:Bind Strings.Get('Chat_Stickers'), Mode=OneWay}"
-                                            Style="{StaticResource BodyStrongTextBlockStyle}"
-                                            VerticalAlignment="Center" />
-                                        <Button x:Name="UploadStickerButton" Click="UploadSticker_Click">
-                                            <StackPanel Orientation="Horizontal" Spacing="4">
-                                                <FontIcon FontSize="12" Glyph="&#xE710;" />
-                                                <TextBlock Text="{x:Bind Strings.Get('Chat_Sticker_Upload'), Mode=OneWay}" />
-                                            </StackPanel>
-                                        </Button>
-                                    </StackPanel>
-                                    <TextBlock
-                                        x:Name="StickerEmptyText"
-                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                        Visibility="Collapsed" />
-                                    <GridView
-                                        x:Name="StickerGrid"
-                                        MaxHeight="300"
-                                        SelectionMode="None"
-                                        IsItemClickEnabled="True"
-                                        ItemClick="StickerGrid_ItemClick">
-                                        <GridView.ItemTemplate>
-                                            <DataTemplate x:DataType="local:StickerVm">
-                                                <Image
-                                                    Source="{x:Bind Image}"
-                                                    Width="44"
-                                                    Height="44"
-                                                    Margin="3"
-                                                    Stretch="UniformToFill" />
-                                            </DataTemplate>
-                                        </GridView.ItemTemplate>
-                                    </GridView>
-                                </StackPanel>
-                            </Flyout>
-                        </Button.Flyout>
-                        <FontIcon FontSize="16" Glyph="&#xE76E;" />
-                    </Button>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock
+                                x:Name="RoomTitle"
+                                FontSize="15"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource ChatTextBrush}"
+                                VerticalAlignment="Center" />
+                            <Border
+                                x:Name="RoomLevelBadge"
+                                CornerRadius="4"
+                                Padding="4,0"
+                                VerticalAlignment="Center"
+                                Visibility="Collapsed">
+                                <TextBlock
+                                    x:Name="RoomLevelText"
+                                    Foreground="White"
+                                    FontSize="9.5"
+                                    FontWeight="SemiBold" />
+                            </Border>
+                        </StackPanel>
+                        <TextBlock
+                            x:Name="RoomStatusText"
+                            FontSize="11.5"
+                            Foreground="{ThemeResource ChatSubTextBrush}" />
+                    </StackPanel>
 
-                    <Button
-                        x:Name="ImageButton"
+                    <StackPanel
                         Grid.Column="2"
-                        Click="Image_Click"
-                        VerticalAlignment="Bottom">
-                        <FontIcon FontSize="16" Glyph="&#xEB9F;" />
-                    </Button>
-                    <Button
-                        x:Name="FileButton"
-                        Grid.Column="3"
-                        Click="File_Click"
-                        VerticalAlignment="Bottom">
-                        <FontIcon FontSize="16" Glyph="&#xE8B7;" />
-                    </Button>
-                    <Button
-                        x:Name="SendButton"
-                        Grid.Column="4"
-                        Style="{StaticResource AccentButtonStyle}"
-                        Click="Send_Click"
-                        VerticalAlignment="Bottom">
-                        <FontIcon FontSize="16" Glyph="&#xE724;" />
-                    </Button>
+                        Orientation="Horizontal"
+                        Spacing="4"
+                        VerticalAlignment="Center">
+                        <Button
+                            x:Name="SearchButton"
+                            Style="{StaticResource ChatIconButtonStyle}"
+                            Click="Search_Click"
+                            ToolTipService.ToolTip="{x:Bind Strings.Get('Chat_Search'), Mode=OneWay}">
+                            <FontIcon FontSize="16" Glyph="&#xE721;" />
+                        </Button>
+                        <Button
+                            x:Name="EatButton"
+                            Style="{StaticResource ChatIconButtonStyle}"
+                            Click="Eat_Click"
+                            Visibility="Collapsed"
+                            ToolTipService.ToolTip="{x:Bind Strings.Get('Chat_Eat'), Mode=OneWay}">
+                            <FontIcon FontSize="16" Glyph="&#xE7C9;" />
+                        </Button>
+                        <Button
+                            x:Name="ProfileButton"
+                            Style="{StaticResource ChatIconButtonStyle}"
+                            Click="Profile_Click"
+                            ToolTipService.ToolTip="{x:Bind Strings.Get('Chat_Profile'), Mode=OneWay}">
+                            <Grid Width="26" Height="26">
+                                <Border Background="{ThemeResource ChatAccentBrush}" CornerRadius="13">
+                                    <TextBlock
+                                        x:Name="ProfileButtonText"
+                                        Text="我"
+                                        Foreground="White"
+                                        FontSize="11"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center" />
+                                </Border>
+                                <Image
+                                    x:Name="ProfileButtonImage"
+                                    Width="26"
+                                    Height="26"
+                                    Stretch="UniformToFill"
+                                    Visibility="Collapsed" />
+                            </Grid>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+
+                <!-- 断线提示 -->
+                <Border
+                    x:Name="ConnBanner"
+                    Grid.Row="1"
+                    Background="#FEF3C7"
+                    Padding="14,7"
+                    Visibility="Collapsed">
+                    <TextBlock
+                        x:Name="ConnBannerText"
+                        FontSize="12"
+                        Foreground="#92400E"
+                        Text="{x:Bind Strings.Get('Chat_Conn_Banner'), Mode=OneWay}" />
+                </Border>
+
+                <!-- 消息区 -->
+                <Grid Grid.Row="2">
+                    <TextBlock
+                        x:Name="EmptyText"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        FontSize="12.5"
+                        Foreground="{ThemeResource ChatSubTextBrush}"
+                        Visibility="Collapsed" />
+
+                    <ListView
+                        x:Name="MessagesList"
+                        Padding="18,10"
+                        Loaded="MessagesList_Loaded"
+                        SelectionMode="None"
+                        ItemContainerStyle="{StaticResource ChatSlimListItemStyle}">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="local:ChatMessageVm">
+                                <Grid>
+                                    <!-- 日期分隔 -->
+                                    <Grid Margin="0,12" Visibility="{x:Bind DividerVisibility}">
+                                        <Rectangle Height="1" Fill="{ThemeResource ChatLineBrush}" VerticalAlignment="Center" />
+                                        <Border
+                                            Background="{ThemeResource ChatPanelBrush}"
+                                            CornerRadius="9"
+                                            Padding="10,2"
+                                            HorizontalAlignment="Center">
+                                            <TextBlock
+                                                Text="{x:Bind DividerText}"
+                                                FontSize="10.5"
+                                                Foreground="{ThemeResource ChatSubTextBrush}" />
+                                        </Border>
+                                    </Grid>
+
+                                    <!-- 消息行 -->
+                                    <Border
+                                        Background="{x:Bind FlashBackground, Mode=OneWay}"
+                                        CornerRadius="8"
+                                        Padding="3"
+                                        Visibility="{x:Bind MessageVisibility}">
+                                        <Grid Margin="0,3" ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <!-- 对方头像 -->
+                                            <Grid
+                                                Grid.Column="0"
+                                                Width="36"
+                                                Height="36"
+                                                VerticalAlignment="Top"
+                                                Visibility="{x:Bind AvatarLeftVisibility}">
+                                                <Border Background="{x:Bind AvatarBrush}" CornerRadius="18">
+                                                    <TextBlock
+                                                        Text="{x:Bind AvatarText}"
+                                                        Foreground="White"
+                                                        FontSize="13"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center" />
+                                                </Border>
+                                                <Image
+                                                    Source="{x:Bind AvatarImage}"
+                                                    Width="36"
+                                                    Height="36"
+                                                    Stretch="UniformToFill" />
+                                            </Grid>
+
+                                            <!-- 消息体 -->
+                                            <StackPanel
+                                                Grid.Column="1"
+                                                MaxWidth="560"
+                                                Spacing="3"
+                                                HorizontalAlignment="{x:Bind RowAlign}">
+                                                <StackPanel
+                                                    Orientation="Horizontal"
+                                                    Spacing="6"
+                                                    Visibility="{x:Bind SenderVisibility}">
+                                                    <TextBlock
+                                                        Text="{x:Bind SenderText}"
+                                                        FontSize="11.5"
+                                                        Foreground="{ThemeResource ChatSubTextBrush}" />
+                                                    <Border
+                                                        Background="{x:Bind SenderLevelBrush}"
+                                                        CornerRadius="4"
+                                                        Padding="4,0"
+                                                        VerticalAlignment="Center"
+                                                        Visibility="{x:Bind SenderLevelVisibility}">
+                                                        <TextBlock
+                                                            Text="{x:Bind SenderLevelText}"
+                                                            Foreground="White"
+                                                            FontSize="9"
+                                                            FontWeight="SemiBold" />
+                                                    </Border>
+                                                </StackPanel>
+
+                                                <Grid HorizontalAlignment="{x:Bind RowAlign}">
+                                                    <Border
+                                                        Background="{x:Bind BubbleBrush}"
+                                                        CornerRadius="{x:Bind BubbleCorner}"
+                                                        Padding="12,9"
+                                                        Visibility="{x:Bind BubbleVisibility}">
+                                                        <StackPanel Spacing="4">
+                                                            <TextBlock
+                                                                Loaded="MessageText_Loaded"
+                                                                DataContextChanged="MessageText_DataContextChanged"
+                                                                FontSize="14.5"
+                                                                TextWrapping="Wrap"
+                                                                Foreground="{x:Bind ContentForeground}"
+                                                                Visibility="{x:Bind TextVisibility}" />
+                                                            <Image
+                                                                Source="{x:Bind Image}"
+                                                                MaxWidth="{x:Bind ImageMaxSize}"
+                                                                MaxHeight="{x:Bind ImageMaxSize}"
+                                                                Stretch="Uniform"
+                                                                Tapped="MessageImage_Tapped"
+                                                                Visibility="{x:Bind ImageVisibility}" />
+                                                            <Button
+                                                                Padding="2"
+                                                                Background="Transparent"
+                                                                BorderThickness="0"
+                                                                Foreground="{x:Bind ContentForeground}"
+                                                                Click="Attachment_Click"
+                                                                Visibility="{x:Bind FileVisibility}">
+                                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                    <FontIcon FontSize="14" Glyph="{x:Bind FileGlyph}" />
+                                                                    <TextBlock Text="{x:Bind FileLabel}" FontSize="12.5" />
+                                                                </StackPanel>
+                                                            </Button>
+                                                        </StackPanel>
+                                                    </Border>
+
+                                                    <!-- 撤回占位（自己 / 对方） -->
+                                                    <StackPanel
+                                                        Orientation="Horizontal"
+                                                        Spacing="8"
+                                                        Padding="10,6"
+                                                        VerticalAlignment="Center"
+                                                        Visibility="{x:Bind RecallVisibility}">
+                                                        <TextBlock
+                                                            Text="{x:Bind RecallText}"
+                                                            FontSize="12.5"
+                                                            Foreground="{ThemeResource ChatSubTextBrush}" />
+                                                        <Button
+                                                            Padding="0"
+                                                            Background="Transparent"
+                                                            BorderThickness="0"
+                                                            Foreground="{ThemeResource ChatAccentBrush}"
+                                                            FontSize="12"
+                                                            Click="ReEdit_Click"
+                                                            Content="{x:Bind Strings.Get('Chat_ReEdit'), Mode=OneWay}"
+                                                            Visibility="{x:Bind EditVisibility}" />
+                                                    </StackPanel>
+                                                </Grid>
+
+                                                <!-- 管理员看到的撤回灰字（保留原文） -->
+                                                <TextBlock
+                                                    Text="{x:Bind AdminNoteText}"
+                                                    FontSize="11.5"
+                                                    Foreground="{ThemeResource ChatSubTextBrush}"
+                                                    Visibility="{x:Bind AdminNoteVisibility}" />
+
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <TextBlock
+                                                        Text="{x:Bind TimeText}"
+                                                        FontSize="10.5"
+                                                        Foreground="{ThemeResource ChatSubTextBrush}" />
+                                                    <TextBlock
+                                                        FontSize="10.5"
+                                                        Foreground="{ThemeResource ChatAccentBrush}"
+                                                        Text="{x:Bind ReadText, Mode=OneWay}"
+                                                        Visibility="{x:Bind ReadVisibility, Mode=OneWay}" />
+                                                    <Button
+                                                        Padding="0"
+                                                        Background="Transparent"
+                                                        BorderThickness="0"
+                                                        Foreground="{ThemeResource ChatSubTextBrush}"
+                                                        FontSize="10.5"
+                                                        Click="Recall_Click"
+                                                        Content="{x:Bind Strings.Get('Chat_Recall'), Mode=OneWay}"
+                                                        Visibility="{x:Bind RecallButtonVisibility}" />
+                                                </StackPanel>
+                                            </StackPanel>
+
+                                            <!-- 自己头像 -->
+                                            <Grid
+                                                Grid.Column="2"
+                                                Width="36"
+                                                Height="36"
+                                                VerticalAlignment="Top"
+                                                Visibility="{x:Bind AvatarRightVisibility}">
+                                                <Border Background="{x:Bind AvatarBrush}" CornerRadius="18">
+                                                    <TextBlock
+                                                        Text="{x:Bind AvatarText}"
+                                                        Foreground="White"
+                                                        FontSize="13"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center" />
+                                                </Border>
+                                                <Image
+                                                    Source="{x:Bind AvatarImage}"
+                                                    Width="36"
+                                                    Height="36"
+                                                    Stretch="UniformToFill" />
+                                            </Grid>
+                                        </Grid>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+
+                <!-- 输入区 -->
+                <Grid
+                    Grid.Row="3"
+                    Padding="16,10"
+                    BorderThickness="0,1,0,0"
+                    BorderBrush="{ThemeResource ChatLineBrush}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!-- 上传进度 -->
+                    <StackPanel
+                        x:Name="UploadProgressPanel"
+                        Grid.Row="0"
+                        Orientation="Horizontal"
+                        Spacing="8"
+                        Margin="0,0,0,6"
+                        Visibility="Collapsed">
+                        <ProgressBar
+                            x:Name="UploadProgressBar"
+                            Width="220"
+                            Height="4"
+                            Minimum="0"
+                            Maximum="1"
+                            VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="UploadProgressText"
+                            FontSize="11"
+                            Foreground="{ThemeResource ChatSubTextBrush}"
+                            VerticalAlignment="Center" />
+                    </StackPanel>
+
+                    <Grid Grid.Row="1" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBox
+                            x:Name="InputBox"
+                            Grid.Column="0"
+                            MaxHeight="120"
+                            AcceptsReturn="True"
+                            TextWrapping="Wrap"
+                            Background="{ThemeResource ChatInputBrush}"
+                            PlaceholderText="{x:Bind Strings.Get('Chat_Input_Hint'), Mode=OneWay}"
+                            PreviewKeyDown="InputBox_PreviewKeyDown"
+                            TextChanged="InputBox_TextChanged"
+                            Paste="InputBox_Paste" />
+
+                        <Button
+                            x:Name="StickerButton"
+                            Grid.Column="1"
+                            Style="{StaticResource ChatIconButtonStyle}"
+                            VerticalAlignment="Bottom">
+                            <Button.Flyout>
+                                <Flyout Placement="Top" Opening="StickerFlyout_Opening">
+                                    <StackPanel Width="400" Spacing="8">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <TextBlock
+                                                Text="{x:Bind Strings.Get('Chat_Stickers'), Mode=OneWay}"
+                                                FontSize="13"
+                                                FontWeight="SemiBold"
+                                                VerticalAlignment="Center" />
+                                            <Button
+                                                x:Name="StkHotButton"
+                                                FontSize="11"
+                                                Padding="8,3"
+                                                Click="StickerSort_Click"
+                                                Content="{x:Bind Strings.Get('Chat_Sticker_Hot'), Mode=OneWay}" />
+                                            <Button
+                                                x:Name="StkNewButton"
+                                                FontSize="11"
+                                                Padding="8,3"
+                                                Click="StickerSort_Click"
+                                                Content="{x:Bind Strings.Get('Chat_Sticker_New'), Mode=OneWay}" />
+                                            <Button x:Name="UploadStickerButton" FontSize="11" Padding="8,3" Click="UploadSticker_Click">
+                                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                                    <FontIcon FontSize="11" Glyph="&#xE710;" />
+                                                    <TextBlock Text="{x:Bind Strings.Get('Chat_Sticker_Upload'), Mode=OneWay}" />
+                                                </StackPanel>
+                                            </Button>
+                                        </StackPanel>
+                                        <TextBlock
+                                            x:Name="StickerEmptyText"
+                                            FontSize="12"
+                                            Foreground="{ThemeResource ChatSubTextBrush}"
+                                            Visibility="Collapsed" />
+                                        <GridView
+                                            x:Name="StickerGrid"
+                                            MaxHeight="300"
+                                            SelectionMode="None"
+                                            IsItemClickEnabled="True"
+                                            ItemClick="StickerGrid_ItemClick">
+                                            <GridView.ItemTemplate>
+                                                <DataTemplate x:DataType="local:StickerVm">
+                                                    <Grid Width="52" Height="52" Margin="3">
+                                                        <Image Source="{x:Bind Image}" Stretch="UniformToFill" />
+                                                        <Button
+                                                            Content="×"
+                                                            Width="18"
+                                                            Height="18"
+                                                            Padding="0"
+                                                            FontSize="10"
+                                                            Background="#CC000000"
+                                                            Foreground="White"
+                                                            BorderThickness="0"
+                                                            CornerRadius="9"
+                                                            HorizontalAlignment="Right"
+                                                            VerticalAlignment="Top"
+                                                            Click="DeleteSticker_Click"
+                                                            Visibility="{x:Bind DeleteVisibility}" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </GridView.ItemTemplate>
+                                        </GridView>
+                                    </StackPanel>
+                                </Flyout>
+                            </Button.Flyout>
+                            <FontIcon FontSize="17" Glyph="&#xE76E;" />
+                        </Button>
+
+                        <Button
+                            x:Name="ImageButton"
+                            Grid.Column="2"
+                            Style="{StaticResource ChatIconButtonStyle}"
+                            Click="Image_Click"
+                            VerticalAlignment="Bottom">
+                            <FontIcon FontSize="17" Glyph="&#xEB9F;" />
+                        </Button>
+                        <Button
+                            x:Name="FileButton"
+                            Grid.Column="3"
+                            Style="{StaticResource ChatIconButtonStyle}"
+                            Click="File_Click"
+                            VerticalAlignment="Bottom">
+                            <FontIcon FontSize="17" Glyph="&#xE8B7;" />
+                        </Button>
+                        <Button
+                            x:Name="SendButton"
+                            Grid.Column="4"
+                            Style="{StaticResource AccentButtonStyle}"
+                            Click="Send_Click"
+                            VerticalAlignment="Bottom">
+                            <FontIcon FontSize="16" Glyph="&#xE724;" />
+                        </Button>
+                    </Grid>
                 </Grid>
             </Grid>
         </Grid>
@@ -389,6 +758,314 @@
                 Width="48"
                 Height="48"
                 IsActive="False" />
+        </Grid>
+
+        <!-- ================= 个人资料浮层 ================= -->
+        <Grid
+            x:Name="ProfileOverlay"
+            Grid.RowSpan="2"
+            Background="#99000000"
+            Visibility="Collapsed">
+            <Border
+                Width="430"
+                MaxHeight="640"
+                Background="{ThemeResource ChatPanelBrush}"
+                CornerRadius="16"
+                Padding="22"
+                BorderThickness="1"
+                BorderBrush="{ThemeResource ChatLineBrush}"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="14">
+                        <Grid>
+                            <TextBlock
+                                Text="{x:Bind Strings.Get('Chat_Profile'), Mode=OneWay}"
+                                FontSize="17"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource ChatTextBrush}"
+                                VerticalAlignment="Center" />
+                            <Button
+                                Content="✕"
+                                Style="{StaticResource ChatIconButtonStyle}"
+                                HorizontalAlignment="Right"
+                                Click="CloseProfile_Click" />
+                        </Grid>
+
+                        <Grid ColumnSpacing="14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid Grid.Column="0" Width="64" Height="64">
+                                <Border Background="{ThemeResource ChatAccentBrush}" CornerRadius="32">
+                                    <TextBlock
+                                        x:Name="ProfileAvatarText"
+                                        Text="我"
+                                        Foreground="White"
+                                        FontSize="20"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center" />
+                                </Border>
+                                <Image
+                                    x:Name="ProfileAvatarImage"
+                                    Width="64"
+                                    Height="64"
+                                    Stretch="UniformToFill"
+                                    Visibility="Collapsed" />
+                                <Button
+                                    Content="+"
+                                    Width="22"
+                                    Height="22"
+                                    Padding="0"
+                                    FontSize="12"
+                                    CornerRadius="11"
+                                    Background="{ThemeResource ChatAccentBrush}"
+                                    Foreground="White"
+                                    BorderThickness="0"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Bottom"
+                                    Click="UploadAvatar_Click"
+                                    ToolTipService.ToolTip="{x:Bind Strings.Get('Chat_Profile_Avatar'), Mode=OneWay}" />
+                            </Grid>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                                <TextBlock
+                                    x:Name="ProfileNameText"
+                                    FontSize="16"
+                                    FontWeight="SemiBold"
+                                    Foreground="{ThemeResource ChatTextBrush}" />
+                                <TextBlock
+                                    x:Name="ProfileUsernameText"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource ChatSubTextBrush}" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Border
+                                        x:Name="ProfileLevelBadge"
+                                        Background="{ThemeResource ChatAccentBrush}"
+                                        CornerRadius="4"
+                                        Padding="5,1"
+                                        VerticalAlignment="Center">
+                                        <TextBlock
+                                            x:Name="ProfileLevelText"
+                                            Text="Lv0"
+                                            Foreground="White"
+                                            FontSize="10"
+                                            FontWeight="SemiBold" />
+                                    </Border>
+                                    <TextBlock
+                                        x:Name="ProfileExpText"
+                                        FontSize="11.5"
+                                        Foreground="{ThemeResource ChatSubTextBrush}"
+                                        VerticalAlignment="Center" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBox x:Name="ProfileNickBox" Header="{x:Bind Strings.Get('Chat_Profile_Nick'), Mode=OneWay}" />
+                        <Button
+                            Content="{x:Bind Strings.Get('Chat_Profile_SaveNick'), Mode=OneWay}"
+                            HorizontalAlignment="Right"
+                            Click="SaveNickname_Click" />
+
+                        <PasswordBox x:Name="ProfileOldPwdBox" Header="{x:Bind Strings.Get('Chat_Profile_OldPwd'), Mode=OneWay}" />
+                        <PasswordBox x:Name="ProfileNewPwdBox" Header="{x:Bind Strings.Get('Chat_Profile_NewPwd'), Mode=OneWay}" />
+                        <Button
+                            Content="{x:Bind Strings.Get('Chat_Profile_SavePwd'), Mode=OneWay}"
+                            HorizontalAlignment="Right"
+                            Click="ChangePassword_Click" />
+
+                        <Border
+                            BorderThickness="0,1,0,0"
+                            BorderBrush="{ThemeResource ChatLineBrush}"
+                            Padding="0,12,0,0">
+                            <StackPanel Spacing="10">
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        Text="{x:Bind Strings.Get('Chat_Profile_Notify'), Mode=OneWay}"
+                                        FontSize="13"
+                                        VerticalAlignment="Center"
+                                        Foreground="{ThemeResource ChatTextBrush}" />
+                                    <ToggleSwitch
+                                        x:Name="NotifyToggle"
+                                        Grid.Column="1"
+                                        OnContent=""
+                                        OffContent=""
+                                        Toggled="NotifyToggle_Toggled" />
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <RadioButton
+                                        x:Name="NotifyDetailRadio"
+                                        GroupName="ChatNotifyMode"
+                                        Content="{x:Bind Strings.Get('Chat_Profile_Notify_Detail'), Mode=OneWay}"
+                                        Checked="NotifyMode_Checked" />
+                                    <RadioButton
+                                        x:Name="NotifySummaryRadio"
+                                        GroupName="ChatNotifyMode"
+                                        Content="{x:Bind Strings.Get('Chat_Profile_Notify_Summary'), Mode=OneWay}"
+                                        Checked="NotifyMode_Checked" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Button
+                            Content="{x:Bind Strings.Get('Chat_Close'), Mode=OneWay}"
+                            HorizontalAlignment="Stretch"
+                            Click="CloseProfile_Click" />
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <!-- ================= 聊天记录搜索浮层 ================= -->
+        <Grid
+            x:Name="SearchOverlay"
+            Grid.RowSpan="2"
+            Background="#99000000"
+            Visibility="Collapsed">
+            <Border
+                Width="640"
+                MaxHeight="660"
+                Background="{ThemeResource ChatPanelBrush}"
+                CornerRadius="16"
+                Padding="20"
+                BorderThickness="1"
+                BorderBrush="{ThemeResource ChatLineBrush}"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+                <Grid RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0">
+                        <TextBlock
+                            Text="{x:Bind Strings.Get('Chat_Search_Title'), Mode=OneWay}"
+                            FontSize="17"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource ChatTextBrush}"
+                            VerticalAlignment="Center" />
+                        <Button
+                            Content="✕"
+                            Style="{StaticResource ChatIconButtonStyle}"
+                            HorizontalAlignment="Right"
+                            Click="CloseSearch_Click" />
+                    </Grid>
+
+                    <TextBox
+                        x:Name="SearchKwBox"
+                        Grid.Row="1"
+                        PlaceholderText="{x:Bind Strings.Get('Chat_Search_Hint'), Mode=OneWay}"
+                        TextChanged="SearchKw_Changed" />
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
+                        <ComboBox x:Name="SearchTypeBox" MinWidth="120" SelectionChanged="SearchType_Changed" />
+                        <ComboBox x:Name="SearchSenderBox" MinWidth="150" SelectionChanged="SearchType_Changed" />
+                        <CalendarDatePicker x:Name="SearchFromPicker" MinWidth="150" DateChanged="SearchDate_Changed" />
+                        <CalendarDatePicker x:Name="SearchToPicker" MinWidth="150" DateChanged="SearchDate_Changed" />
+                    </StackPanel>
+
+                    <ListView
+                        x:Name="SearchResultsList"
+                        Grid.Row="3"
+                        SelectionMode="None"
+                        IsItemClickEnabled="True"
+                        ItemClick="SearchResults_ItemClick"
+                        ItemContainerStyle="{StaticResource ChatSlimListItemStyle}">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="local:SearchResultVm">
+                                <Grid Padding="8,7" CornerRadius="8" RowSpacing="3">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
+                                        <TextBlock
+                                            Text="{x:Bind Name}"
+                                            FontSize="12.5"
+                                            FontWeight="SemiBold"
+                                            Foreground="{ThemeResource ChatTextBrush}" />
+                                        <TextBlock
+                                            Text="{x:Bind RoomName}"
+                                            FontSize="11"
+                                            Foreground="{ThemeResource ChatSubTextBrush}" />
+                                        <TextBlock
+                                            Text="{x:Bind TimeText}"
+                                            FontSize="11"
+                                            Foreground="{ThemeResource ChatSubTextBrush}"
+                                            HorizontalAlignment="Right" />
+                                    </StackPanel>
+                                    <TextBlock
+                                        Grid.Row="1"
+                                        Text="{x:Bind Preview}"
+                                        FontSize="12.5"
+                                        Foreground="{ThemeResource ChatSubTextBrush}"
+                                        TextTrimming="CharacterEllipsis" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <TextBlock
+                        x:Name="SearchStatusText"
+                        Grid.Row="4"
+                        FontSize="11.5"
+                        Foreground="{ThemeResource ChatSubTextBrush}" />
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ================= 图片灯箱 ================= -->
+        <Grid
+            x:Name="ImageViewer"
+            Grid.RowSpan="2"
+            Background="#F2000000"
+            Visibility="Collapsed">
+            <Grid.KeyboardAccelerators>
+                <KeyboardAccelerator Key="Escape" Invoked="ViewerEsc_Invoked" />
+            </Grid.KeyboardAccelerators>
+
+            <ScrollViewer
+                x:Name="ViewerScroll"
+                ZoomMode="Enabled"
+                MinZoomFactor="0.5"
+                MaxZoomFactor="6"
+                HorizontalScrollBarVisibility="Auto"
+                VerticalScrollBarVisibility="Auto"
+                Padding="60">
+                <Image
+                    x:Name="ViewerImage"
+                    Stretch="Uniform" />
+            </ScrollViewer>
+
+            <StackPanel
+                Orientation="Horizontal"
+                Spacing="8"
+                Margin="16"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top">
+                <Button Content="－" FontSize="15" Click="ZoomOut_Click" />
+                <Button Content="＋" FontSize="15" Click="ZoomIn_Click" />
+                <Button Content="{x:Bind Strings.Get('Chat_SaveAs'), Mode=OneWay}" Click="ViewerSaveAs_Click" />
+                <Button Content="{x:Bind Strings.Get('Chat_Close'), Mode=OneWay}" Click="CloseViewer_Click" />
+            </StackPanel>
+
+            <TextBlock
+                x:Name="ViewerTitle"
+                Margin="20"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Bottom"
+                FontSize="12"
+                Foreground="#E5E7EB"
+                TextTrimming="CharacterEllipsis" />
         </Grid>
     </Grid>
 </Page>

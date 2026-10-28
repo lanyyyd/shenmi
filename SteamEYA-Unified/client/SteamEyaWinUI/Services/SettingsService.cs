@@ -269,6 +269,12 @@ internal sealed class AppSettings
     /// </summary>
     public string NotificationMode { get; set; } = "system";
 
+    /// <summary>聊天室新消息是否弹系统通知（个人中心可关闭；与全局 <see cref="NotificationMode"/> 叠加生效）。</summary>
+    public bool ChatNotifyEnabled { get; set; } = true;
+
+    /// <summary>聊天通知内容：detail（发送人 + 消息内容，默认）/ summary（你有 N 条新消息）。</summary>
+    public string ChatNotifyMode { get; set; } = "detail";
+
     /// <summary>调试模式：开启后额外写入 DEBUG 级别过程日志（通知/下载/聊天链路）。</summary>
     public bool DebugMode { get; set; }
 

@@ -169,8 +169,28 @@ internal static class ChatHub
         }
     }
 
+    private static int _pendingCount;
+
+    /// <summary>用户回到聊天室页 / 正在查看时清零「你有 N 条新消息」计数。</summary>
+    public static void ResetPendingNotifications() => _pendingCount = 0;
+
     private static void Notify(ChatMessageDto dto)
     {
+        // 个人中心里的通知偏好在每次弹窗前读取，改动即时生效。
+        var settings = AppState.SettingsService.Load();
+        if (!settings.ChatNotifyEnabled)
+        {
+            return;
+        }
+
+        _pendingCount++;
+        if (string.Equals(settings.ChatNotifyMode, "summary", StringComparison.OrdinalIgnoreCase))
+        {
+            var summary = Loc.Tf("Chat_Notify_Summary", _pendingCount);
+            NotificationService.NotifyChat(Loc.T("Chat_Notify_Title"), summary, dto.Room);
+            return;
+        }
+
         var preview = dto.EffectiveKind switch
         {
             "image" => "[图片]",
