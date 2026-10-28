@@ -253,7 +253,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         _selfText = BrushOf("#FFFFFF");
         _otherText = BrushOf(dark ? "#E8EAF0" : "#111827");
         _accent = BrushOf(dark ? "#8B5CF6" : "#10B981");
-        _transparent = new SolidColorBrush(Windows.UI.Colors.Transparent);
+        _transparent = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         _flash = new SolidColorBrush(dark
             ? Windows.UI.Color.FromArgb(0x3A, 0x8B, 0x5C, 0xF6)
             : Windows.UI.Color.FromArgb(0x2E, 0x10, 0xB9, 0x81));
@@ -1498,7 +1498,6 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             AdminNoteVisibility = adminNote ? Visibility.Visible : Visibility.Collapsed,
             TimeText = FormatTime(dto.CreatedAt),
             ReadText = read,
-            ReadVisibility = read.Length > 0 ? Visibility.Visible : Visibility.Collapsed,
             RecallButtonVisibility = canRecall ? Visibility.Visible : Visibility.Collapsed,
             AvatarText = name[..1].ToUpperInvariant(),
             AvatarImage = string.IsNullOrWhiteSpace(dto.FromAvatar) ? null : SafeBitmap(dto.FromAvatar),
@@ -2413,7 +2412,7 @@ public sealed class ChatMessageVm : INotifyPropertyChanged
         DividerText = label,
         DividerVisibility = Visibility.Visible,
         MessageVisibility = Visibility.Collapsed,
-        FlashBackground = new SolidColorBrush(Windows.UI.Colors.Transparent)
+        FlashBackground = new SolidColorBrush(Microsoft.UI.Colors.Transparent)
     };
 }
 
