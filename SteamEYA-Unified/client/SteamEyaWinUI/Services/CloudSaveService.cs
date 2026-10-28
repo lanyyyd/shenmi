@@ -9,8 +9,8 @@ namespace SteamEyaWinUI.Services;
 /// <summary>统一网关的连接信息（登录成功后由登录流程写入 Token）。</summary>
 internal static class CloudApi
 {
-    /// <summary>统一网关地址。生产环境可改为 https 域名；开发时指向本机。</summary>
-    public static string BaseUrl { get; set; } = "http://47.104.210.199:8897";
+    /// <summary>统一网关地址。生产走 chat.teatt.top（HTTPS + WebSocket 已验证可用）；离线模式指向本机。</summary>
+    public static string BaseUrl { get; set; } = "https://chat.teatt.top";
 
     /// <summary>统一账号 JWT。未登录时为 null，仅离线/局域网功能可用。</summary>
     public static string? Token { get; set; }

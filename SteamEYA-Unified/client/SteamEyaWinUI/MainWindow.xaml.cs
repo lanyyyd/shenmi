@@ -422,6 +422,23 @@ public sealed partial class MainWindow : Window
         AppWindow.Hide();
     }
 
+    /// <summary>
+    /// 老板键的完整动作：把当前广播窗口拉成全屏并激活，勾了「同时隐藏茶π」就把本窗口收进托盘。
+    /// 热键与「小工具」页的测试按钮共用同一条路径。
+    /// </summary>
+    internal static bool PerformBossKey()
+    {
+        if (!JiYuService.TriggerBossKey())
+        {
+            return false;
+        }
+        if (AppState.SettingsService.Load().JiYuBossKeyHideWindows)
+        {
+            Instance?.HideToTray();
+        }
+        return true;
+    }
+
     internal void RestoreFromTray()
     {
         try
@@ -890,11 +907,7 @@ public sealed partial class MainWindow : Window
                 try
                 {
                     // 老板键：把当前广播窗口拉成全屏并激活；按设置可连茶π窗口一起藏到托盘。
-                    JiYuService.TriggerBossKey();
-                    if (AppState.SettingsService.Load().JiYuBossKeyHideWindows)
-                    {
-                        Instance?.HideToTray();
-                    }
+                    PerformBossKey();
                 }
                 catch (Exception ex)
                 {

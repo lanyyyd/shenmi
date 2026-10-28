@@ -171,7 +171,7 @@ public sealed partial class CloudSavePage : Page
         // 本地清单优先：自己填的路径能改，服务端那份是别人填的。
         if (CustomSaveStore.Find(game) is { } custom)
         {
-            return string.IsNullOrWhiteSpace(custom.SaveDir) ? null : custom.SaveDir;
+            return NormalizeSaveDir(custom.SaveDir);
         }
 
         // 别人共享的游戏：用服务端下发的路径，这样还原到约定位置。
@@ -179,7 +179,7 @@ public sealed partial class CloudSavePage : Page
             !g.Builtin && string.Equals(g.Key, game, StringComparison.Ordinal));
         if (remote is not null)
         {
-            return string.IsNullOrWhiteSpace(remote.SaveDir) ? null : remote.SaveDir;
+            return NormalizeSaveDir(remote.SaveDir);
         }
 
         return game switch
@@ -188,6 +188,54 @@ public sealed partial class CloudSavePage : Page
             "pvzhybrid" => PvzHybridSaveDir,
             _ => null
         };
+    }
+
+    /// <summary>用户目录下这些名字不是「某个人」，替换用户名时不能动。</summary>
+    private static readonly HashSet<string> SpecialProfileNames =
+        new(StringComparer.OrdinalIgnoreCase) { "Public", "Default", "Default User", "All Users" };
+
+    /// <summary>本机用户目录名（C:\Users\ 下的那一段）。</summary>
+    private static string CurrentProfileName()
+    {
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var name = Path.GetFileName(profile.TrimEnd(
+            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return string.IsNullOrEmpty(name) ? Environment.UserName : name;
+    }
+
+    /// <summary>
+    /// 存档目录里的用户名要跟着本机走：别人在 Administrator 的电脑上填的
+    /// C:\Users\Administrator\...，换到 lenovo 这台机器还原会变成 C:\Users\lenovo\...
+    /// 只有路径里确实带 \Users\&lt;用户名&gt;\ 这一段时才替换，其它路径（C:\ProgramData 等）原样返回。
+    /// </summary>
+    private static string? NormalizeSaveDir(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        // 允许路径里写 %USERPROFILE% / %APPDATA% 这类占位。
+        var path = Environment.ExpandEnvironmentVariables(raw.Trim());
+        var parts = path.Split(['\\', '/'], StringSplitOptions.None);
+
+        // 结构必须是：盘符 + Users + 用户名 + ...
+        if (parts.Length < 3 || parts[0].Length != 2 || parts[0][1] != ':' ||
+            !string.Equals(parts[1], "Users", StringComparison.OrdinalIgnoreCase))
+        {
+            return path;
+        }
+
+        var name = parts[2];
+        var current = CurrentProfileName();
+        if (name.Length == 0 || SpecialProfileNames.Contains(name) ||
+            string.Equals(name, current, StringComparison.OrdinalIgnoreCase))
+        {
+            return path;
+        }
+
+        parts[2] = current;
+        return string.Join('\\', parts);
     }
 
     // ---------------- 数据加载 ----------------

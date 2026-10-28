@@ -456,8 +456,13 @@ void VStripTopMost(HWND hWnd, bool applyZOrder)
 
 	//WS_EX_TOPMOST 位不一定能靠 SetWindowLong 真正改掉（文档明确说该样式要用 SetWindowPos 改），
 	//所以需要时总是再压一次 HWND_NOTOPMOST；对本来就非置顶的窗口这一步没有任何副作用。
-	if (applyZOrder)
-		SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	if (applyZOrder) {
+		//必须用钩子保存的真函数指针：hkSetWindowPos 会把已登记极域窗口的调用直接吞掉。
+		if (raSetWindowPos)
+			raSetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		else
+			SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	}
 
 	gbCurrentIsTop = false;
 }
@@ -488,7 +493,7 @@ static BOOL CALLBACK VBossFindGbProc(HWND hWnd, LPARAM)
 }
 
 // 老板键：任意页面按下快捷键后，直接把当前广播窗口拉成全屏并激活。
-// 按置顶策略这里不再主动置顶——置顶只允许由用户右键「广播窗口置顶」触发。
+// 只做全屏，不主动置顶——置顶只允许由用户右键「广播窗口置顶」触发。
 void VBossKey()
 {
 	HWND w = gbWindow;
@@ -505,8 +510,12 @@ void VBossKey()
 	if (faShowWindow) faShowWindow(w, SW_RESTORE);
 	else ShowWindow(w, SW_RESTORE);
 
-	SetWindowPos(w, HWND_NOTOPMOST, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
-	SendMessage(w, WM_SIZE, 0, MAKEWPARAM(screenWidth, screenHeight));
+	//必须走钩子里保存的真函数指针：本 DLL 自己 Hook 的 SetWindowPos 会把
+	//「左上角 + 满屏尺寸」的调用当成极域全屏直接吞掉，窗口一点都不会变大。
+	if (raSetWindowPos)
+		raSetWindowPos(w, HWND_NOTOPMOST, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
+	else
+		SetWindowPos(w, HWND_NOTOPMOST, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
 
 	if (faBringWindowToTop) faBringWindowToTop(w);
 	if (raSetForegroundWindow) raSetForegroundWindow(w);

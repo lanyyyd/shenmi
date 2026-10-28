@@ -26,6 +26,9 @@ internal static partial class JiYuService
     private const int SwShow = 5;
     private const uint ModNoRepeat = 0x4000;
 
+    /// <summary>AllowSetForegroundWindow 的「任意进程」ID。</summary>
+    private const uint AsfwAny = 0xFFFFFFFF;
+
     // 原版助手用全局原子作为热键 ID 注册 WM_HOTKEY；客户端按同一原子转发，即可复用它的伪装全屏。
     private const string FullscreenAtom = "HotKeySwFull";
 
@@ -204,8 +207,14 @@ internal static partial class JiYuService
         return PostMessageW(target, WmHotkey, (nint)atom, 0);
     }
 
-    /// <summary>老板键：让注入侧把当前广播窗口拉成全屏并激活（按置顶策略不置顶）。</summary>
-    public static bool TriggerBossKey() => SendHookCommand("hk:boss");
+    /// <summary>老板键：让注入侧把当前广播窗口拉成全屏并激活（只全屏，不置顶）。</summary>
+    public static bool TriggerBossKey()
+    {
+        // 按热键时茶π基本都是前台进程，把前台权限让给极域进程，
+        // 注入侧再 SetForegroundWindow 才能真正激活广播窗口，而不是只让任务栏图标闪一下。
+        AllowSetForegroundWindow(AsfwAny);
+        return SendHookCommand("hk:boss");
+    }
 
     /// <summary>停止内置助手：先让原版卸载注入（分离极域），再结束本次内置的 JiYuTrainer 进程。</summary>
     /// <param name="detach">是否先分离极域；紧急退出（如保队友）可置 false 以求最快。</param>
@@ -515,6 +524,10 @@ internal static partial class JiYuService
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SetForegroundWindow(nint hWnd);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool AllowSetForegroundWindow(uint dwProcessId);
 
     [LibraryImport("user32.dll", SetLastError = true)]
     private static partial nint SendMessageTimeoutW(

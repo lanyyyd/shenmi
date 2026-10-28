@@ -10,8 +10,8 @@ namespace SteamEyaWinUI.Services;
 /// </summary>
 internal static class SessionState
 {
-    /// <summary>在线统一网关地址。</summary>
-    public const string OnlineBaseUrl = "http://47.104.210.199:8897";
+    /// <summary>在线统一网关地址（HTTPS 域名，安卓端与聊天页也已统一走这个）。</summary>
+    public const string OnlineBaseUrl = "https://chat.teatt.top";
 
     /// <summary>离线/局域网本地网关地址（本机运行）。</summary>
     public const string LocalGatewayUrl = "http://127.0.0.1:8898";

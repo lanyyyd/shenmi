@@ -390,7 +390,8 @@ public sealed partial class ToolsPage : Page
             return;
         }
 
-        if (!JiYuService.TriggerBossKey())
+        // 测试按钮走和热键完全相同的路径（含「同时隐藏茶π」），否则测不到隐藏效果。
+        if (!MainWindow.PerformBossKey())
         {
             ShowStatus(Loc.T("Tools_Hotkey_TestFailed"), InfoBarSeverity.Warning);
             return;
