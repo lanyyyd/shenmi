@@ -99,7 +99,9 @@ public static class WindowHelper
             var appWindow = AppWindowOf(window);
             if (appWindow.Presenter is OverlappedPresenter p)
             {
-                p.IsBorderless = true;
+                // WinAppSDK 的 OverlappedPresenter 没有 IsBorderless，
+                // 去边框和标题栏要走 SetBorderAndTitleBar。
+                p.SetBorderAndTitleBar(false, false);
                 p.IsResizable = false;
                 p.IsMaximizable = false;
                 p.IsMinimizable = false;
