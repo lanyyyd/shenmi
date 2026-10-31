@@ -7,6 +7,17 @@ using QuickAnswer.Core.Models;
 
 namespace QuickAnswer.Core.Api;
 
+/// <summary>token 校验结果。</summary>
+public enum TokenState
+{
+    /// <summary>有效。</summary>
+    Valid,
+    /// <summary>服务端明确拒绝（过期 / 被封）—— 该回登录页。</summary>
+    Unauthorized,
+    /// <summary>连不上服务端 —— 保留 token，别把用户踢下线。</summary>
+    NetworkError,
+}
+
 public sealed class ApiException : Exception
 {
     public HttpStatusCode Status { get; }
@@ -79,31 +90,42 @@ public sealed class ApiClient : IDisposable
         return login.User;
     }
 
-    /// <summary>启动时用已保存的 token 换一次用户信息，顺便验证 token 是否还有效。</summary>
-    public async Task<UserDto?> TryGetMeAsync(CancellationToken ct = default)
+    /// <summary>
+    /// 启动时校验已保存的 token。
+    /// 必须区分「token 失效」和「网连不上」：后者踢用户下线，等于断网就打不开软件。
+    /// </summary>
+    public async Task<(TokenState State, UserDto? User)> VerifyTokenAsync(CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(AccessToken))
-            return null;
+            return (TokenState.Unauthorized, null);
 
         try
         {
             using var req = Request(HttpMethod.Get, "/api/auth/me");
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+
+            if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                return (TokenState.Unauthorized, null);
+
             if (!resp.IsSuccessStatusCode)
-                return null;
+                return (TokenState.NetworkError, null);
 
             var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(body);
             if (doc.RootElement.TryGetProperty("user", out var u))
             {
                 CurrentUser = JsonSerializer.Deserialize<UserDto>(u.GetRawText(), JsonOpts);
-                return CurrentUser;
+                return CurrentUser is null
+                    ? (TokenState.NetworkError, null)
+                    : (TokenState.Valid, CurrentUser);
             }
+
+            return (TokenState.NetworkError, null);
         }
         catch
         {
+            return (TokenState.NetworkError, null);
         }
-        return null;
     }
 
     // ---------------------------------------------------------------- 题库

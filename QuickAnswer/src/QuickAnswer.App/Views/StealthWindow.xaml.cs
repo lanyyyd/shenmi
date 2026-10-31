@@ -57,7 +57,15 @@ public sealed partial class StealthWindow : Window
         Layer.Children.Clear();
 
         if (result.Letter.Length == 0 && string.IsNullOrWhiteSpace(result.Text))
+        {
+            // 没东西可画就把整层藏掉。它虽然设了点击穿透，但一层全屏窗口长期压在最上面
+            // 一旦穿透失效（比如 SetWindowSubclass 没挂上），下面所有按钮都会点不动，
+            // 而且用户完全看不出是被什么挡住的。
+            Hide();
             return;
+        }
+
+        Show();
 
         var vs = ScreenCapturer.VirtualScreen();
 
@@ -202,6 +210,28 @@ public sealed partial class StealthWindow : Window
         Layer.Children.Add(bar);
 
         AddText(text, Math.Max(2, x), y, 14.5, AnswerColor, bold: true);
+    }
+
+    private void Show()
+    {
+        try
+        {
+            AppWindow.Show();
+        }
+        catch
+        {
+        }
+    }
+
+    private void Hide()
+    {
+        try
+        {
+            AppWindow.Hide();
+        }
+        catch
+        {
+        }
     }
 
     // ---------------------------------------------------------------- 绘制原语

@@ -42,6 +42,10 @@ public sealed partial class RegionSelectorWindow : Window
 
         Activated += (_, _) => Root.Focus(FocusState.Programmatic);
         Closed += (_, _) => _tcs.TrySetResult(null);
+
+        // 一定要 Activate：不显示窗口的话，调用方的 await PickAsync() 会永远挂着，
+        // 用户看到的就是「点了框选区域，什么也没发生」。
+        Activate();
     }
 
     /// <summary>等待用户框选。返回 null 表示取消。</summary>

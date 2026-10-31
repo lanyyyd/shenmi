@@ -38,16 +38,24 @@ public partial class App : Application
         // 有 token 就先验一次：7 天过期的 JWT 在本地看不出，必须问服务端。
         if (!string.IsNullOrEmpty(Config.Token))
         {
-            var me = await Api.TryGetMeAsync();
-            if (me is not null)
+            var (state, me) = await Api.VerifyTokenAsync();
+
+            if (state == TokenState.Valid && me is not null)
             {
-                Session.SignIn(me, Config.Token!);
+                // 记住登录：直接进主界面，不再要求重新输密码
+                Session.SignIn(me, Config.Token);
                 ShowMain();
                 return;
             }
 
-            Config.Token = null;
-            Config.Save();
+            if (state == TokenState.Unauthorized)
+            {
+                // 只有服务端明确说 token 失效才清掉
+                Config.Token = null;
+                Config.Save();
+            }
+
+            // NetworkError：token 原样保留，下次有网还能自动登录
         }
 
         ShowLogin();

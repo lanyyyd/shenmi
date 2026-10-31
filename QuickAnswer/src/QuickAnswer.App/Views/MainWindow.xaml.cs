@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using QuickAnswer.App.Interop;
+using QuickAnswer.App.Services;
 using QuickAnswer.Core.Capture;
 using QuickAnswer.Core.Detect;
 using QuickAnswer.Core.Match;
@@ -462,9 +463,88 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OnSettingsClick(object sender, RoutedEventArgs e)
+    private async void OnSettingsClick(object sender, RoutedEventArgs e)
     {
-        SetStatus("设置项已在主界面：模型 / 透明度 / 隐蔽模式 / 防截屏", "#FF6B7280");
+        try
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "账户与连接",
+                Content = BuildAccountPanel(),
+                PrimaryButtonText = "退出登录",
+                SecondaryButtonText = "清除框选",
+                CloseButtonText = "关闭",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = Content.XamlRoot,
+            };
+
+            var result = await dialog.ShowAsync();
+
+            if (result == ContentDialogResult.Primary)
+                DoLogout();
+            else if (result == ContentDialogResult.Secondary)
+                ClearRegion();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("MainWindow.Settings", ex);
+        }
+    }
+
+    private StackPanel BuildAccountPanel()
+    {
+        var panel = new StackPanel { Spacing = 14, MinWidth = 320 };
+
+        void Add(string label, string value)
+        {
+            var block = new StackPanel { Spacing = 3 };
+            block.Children.Add(new TextBlock
+            {
+                Text = label,
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 107, 114, 128)),
+            });
+            block.Children.Add(new TextBlock
+            {
+                Text = value,
+                FontSize = 13,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 20, 23, 28)),
+            });
+            panel.Children.Add(block);
+        }
+
+        Add("账号", App.Session.DisplayName);
+        Add("服务器", App.Config.ServerUrl);
+        Add("今日", $"{App.Config.TodayCount} 题 · 命中 {App.Config.TodayHit}");
+        Add("热键", "Alt+Q 识别 · Alt+W 循环 · Alt+D 隐蔽模式");
+
+        return panel;
+    }
+
+    private void DoLogout()
+    {
+        StopLoop();
+        HideAllOverlays();
+
+        App.Config.Token = null;
+        App.Config.Username = null;
+        App.Config.Nickname = null;
+        App.Config.Save();
+
+        App.Session.SignOut();
+        App.ShowLogin();
+    }
+
+    private void ClearRegion()
+    {
+        App.Config.Region = null;
+        App.Config.Save();
+
+        _lastHash = 0;
+        _lastStem = "";
+        UpdateRegionLabel();
+        SetStatus("已清除框选区域", "#FF6B7280");
     }
 
     private void OnAutoLoopToggled(object sender, RoutedEventArgs e)
