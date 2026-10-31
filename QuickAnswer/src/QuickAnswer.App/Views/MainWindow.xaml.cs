@@ -508,6 +508,13 @@ public sealed partial class MainWindow : Window
 
     private void OnOpacityChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
+        // XAML 解析阶段就会进来一次：Slider 的 Minimum="10" 赋值时，默认 Value=0 被强制
+        // 拉起到 10，于是 ValueChanged 提前触发 —— 那时 OpacityLabel 还没被创建出来。
+        // 不挡这一下，整个窗口会在 InitializeComponent 里抛 NRE，外面只会看到
+        // "Failed to assign to property RangeBase.Minimum" 这种完全对不上号的错误。
+        if (OpacityLabel is null)
+            return;
+
         var pct = (int)Math.Round(e.NewValue);
         OpacityLabel.Text = $"{pct}%";
 

@@ -1,7 +1,9 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Input;
 using QuickAnswer.App.Interop;
+using QuickAnswer.App.Services;
 using QuickAnswer.Core.Api;
+using QuickAnswer.Core.Models;
 using Windows.System;
 
 namespace QuickAnswer.App.Views;
@@ -60,34 +62,49 @@ public sealed partial class LoginWindow : Window
         HideError();
         StatusText.Text = "正在连接 " + server;
 
+        UserDto u;
         try
         {
             App.Api.Configure(server, null);
-            var u = await App.Api.LoginAsync(user, pass);
-
-            App.Config.ServerUrl = server;
-            App.Config.Token = App.Api.AccessToken;
-            App.Config.Username = u.Username;
-            App.Config.Nickname = u.Nickname;
-            App.Config.Save();
-
-            App.Session.SignIn(u, App.Api.AccessToken ?? "");
-            StatusText.Text = "登录成功";
-            App.ShowMain();
+            u = await App.Api.LoginAsync(user, pass);
         }
         catch (ApiException ex)
         {
+            // 服务端明确拒绝（密码错、账号禁用、地址不对…）
             ShowError(ex.Message);
             StatusText.Text = "未连接";
+            SetBusy(false);
+            return;
         }
         catch (Exception ex)
         {
-            ShowError("连接失败：" + ex.Message);
+            CrashLog.Write("LoginWindow.Network", ex);
+            ShowError("网络请求失败：" + ex.Message);
             StatusText.Text = "未连接";
-        }
-        finally
-        {
             SetBusy(false);
+            return;
+        }
+
+        App.Config.ServerUrl = server;
+        App.Config.Token = App.Api.AccessToken;
+        App.Config.Username = u.Username;
+        App.Config.Nickname = u.Nickname;
+        App.Config.Save();
+
+        App.Session.SignIn(u, App.Api.AccessToken ?? "");
+        StatusText.Text = "登录成功";
+        SetBusy(false);
+
+        // 切窗口放在 try 之外：主界面自己的 XAML 出错时，不能再被伪装成「连接失败」，
+        // 否则用户会去反复检查密码和服务器地址，而问题根本不在那里。
+        try
+        {
+            App.ShowMain();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("LoginWindow.ShowMain", ex);
+            ShowError("登录成功，但主界面加载失败：" + ex.Message);
         }
     }
 

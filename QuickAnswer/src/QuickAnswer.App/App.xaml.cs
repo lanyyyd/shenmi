@@ -18,6 +18,14 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+
+        // XAML 解析异常在 WinUI 里只会给一句 "Failed to assign to property ..."，没有行号，
+        // 不落盘就完全没法查。所有未处理异常都写进 error.log。
+        UnhandledException += (_, e) =>
+        {
+            CrashLog.Write("App.UnhandledException", e.Exception);
+            e.Handled = false;
+        };
     }
 
     protected override async void OnLaunched(LaunchActivatedEventArgs args)

@@ -32,7 +32,7 @@ public sealed partial class RegionSelectorWindow : Window
 
         WindowHelper.MakeOverlay(this);
         WindowHelper.HideFromSwitcher(this);
-        WindowHelper.MoveTo(this, _virtualScreen.X, _virtualScreen.Y,
+        WindowHelper.MoveToPhysical(this, _virtualScreen.X, _virtualScreen.Y,
             _virtualScreen.Width, _virtualScreen.Height);
 
         Root.PointerPressed += OnPointerPressed;

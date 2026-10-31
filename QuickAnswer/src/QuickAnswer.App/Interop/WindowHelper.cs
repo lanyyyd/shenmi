@@ -65,26 +65,63 @@ public static class WindowHelper
             SetWindowDisplayAffinity(hwnd, WDA_NONE);
     }
 
-    public static void Resize(Window window, int width, int height)
+    /// <summary>
+    /// 逻辑像素 → 物理像素。
+    ///
+    /// AppWindow.Resize / MoveAndResize 吃的全是物理像素。高分屏（125%/150%/200%）下
+    /// 把逻辑值直接传进去，窗口就只有应有大小的 1/1.25 ~ 1/2，
+    /// 表现就是「打开一个小窗，界面被裁掉，最大化才看得全」。
+    /// </summary>
+    public static int ToPhysical(Window window, int logical)
     {
         try
         {
-            AppWindowOf(window).Resize(new SizeInt32(width, height));
+            var hwnd = Hwnd(window);
+            uint dpi = hwnd == IntPtr.Zero ? 96 : GetDpiForWindow(hwnd);
+            if (dpi == 0)
+                dpi = 96;
+            return (int)Math.Round(logical * dpi / 96.0);
+        }
+        catch
+        {
+            return logical;
+        }
+    }
+
+    /// <summary>按逻辑像素设置窗口大小。</summary>
+    public static void Resize(Window window, int logicalWidth, int logicalHeight)
+    {
+        try
+        {
+            AppWindowOf(window).Resize(new SizeInt32(
+                ToPhysical(window, logicalWidth),
+                ToPhysical(window, logicalHeight)));
         }
         catch
         {
         }
     }
 
-    public static void CenterOnScreen(Window window, int width, int height)
+    /// <summary>按逻辑像素设置窗口大小并居中。</summary>
+    public static void CenterOnScreen(Window window, int logicalWidth, int logicalHeight)
     {
         try
         {
             var appWindow = AppWindowOf(window);
             var area = DisplayArea.GetFromWindowId(appWindow.Id, DisplayAreaFallback.Primary);
-            int x = area.WorkArea.X + (area.WorkArea.Width - width) / 2;
-            int y = area.WorkArea.Y + (area.WorkArea.Height - height) / 2;
-            appWindow.MoveAndResize(new RectInt32(x, y, width, height));
+
+            int w = ToPhysical(window, logicalWidth);
+            int h = ToPhysical(window, logicalHeight);
+
+            // 小屏幕（或高缩放）下别让窗口比工作区还高，否则底部按钮点不到
+            if (h > area.WorkArea.Height - 24)
+                h = area.WorkArea.Height - 24;
+            if (w > area.WorkArea.Width - 24)
+                w = area.WorkArea.Width - 24;
+
+            int x = area.WorkArea.X + (area.WorkArea.Width - w) / 2;
+            int y = area.WorkArea.Y + (area.WorkArea.Height - h) / 2;
+            appWindow.MoveAndResize(new RectInt32(x, y, w, h));
         }
         catch
         {
@@ -114,7 +151,24 @@ public static class WindowHelper
         }
     }
 
-    public static void MoveTo(Window window, int left, int top, int width, int height)
+    /// <summary>按逻辑像素移动并设置大小（left/top 是物理屏幕坐标，width/height 是逻辑尺寸）。</summary>
+    public static void MoveTo(Window window, int left, int top, int logicalWidth, int logicalHeight)
+    {
+        try
+        {
+            AppWindowOf(window).MoveAndResize(new RectInt32(
+                left, top, ToPhysical(window, logicalWidth), ToPhysical(window, logicalHeight)));
+        }
+        catch
+        {
+        }
+    }
+
+    /// <summary>
+    /// 直接按物理像素摆放。全屏遮罩层专用 —— 它的尺寸来自虚拟桌面（已经是物理像素），
+    /// 再按 DPI 转一次会放大成 1.5 倍，盖不住屏幕。
+    /// </summary>
+    public static void MoveToPhysical(Window window, int left, int top, int width, int height)
     {
         try
         {

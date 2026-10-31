@@ -20,7 +20,10 @@ public sealed class AppConfig
     };
 
     // ---- 服务器与账号 ----
-    public string ServerUrl { get; set; } = "http://127.0.0.1:8000";
+    /// <summary>内置服务器地址。老版本配置里的 127.0.0.1 会在加载时自动迁移到这个地址。</summary>
+    public const string DefaultServerUrl = "https://chat.teatt.top";
+
+    public string ServerUrl { get; set; } = DefaultServerUrl;
     public string? Token { get; set; }
     public string? Username { get; set; }
     public string? Nickname { get; set; }
@@ -77,7 +80,16 @@ public sealed class AppConfig
                 var json = File.ReadAllText(FilePath);
                 var cfg = JsonSerializer.Deserialize<AppConfig>(json, Opts);
                 if (cfg is not null)
+                {
+                    // 早期版本的默认值，用户没改过就别让他一直连本机
+                    if (string.IsNullOrWhiteSpace(cfg.ServerUrl)
+                        || cfg.ServerUrl.Contains("127.0.0.1", StringComparison.Ordinal)
+                        || cfg.ServerUrl.Contains("localhost", StringComparison.Ordinal))
+                    {
+                        cfg.ServerUrl = DefaultServerUrl;
+                    }
                     return cfg;
+                }
             }
         }
         catch

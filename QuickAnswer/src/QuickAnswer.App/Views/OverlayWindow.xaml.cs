@@ -68,9 +68,16 @@ public sealed partial class OverlayWindow : Window
     {
         try
         {
+            // WorkArea 是物理像素，FullWidth 是设计稿里的逻辑像素，两者不能直接相减，
+            // 否则 150% 缩放下悬浮窗会跑到屏幕外面去。
             var work = WindowHelper.WorkArea(this);
-            int left = work.X + work.Width - FullWidth - 16;
-            int top = work.Y + work.Height - FullHeight - 16;
+            int w = WindowHelper.ToPhysical(this, FullWidth);
+            int h = WindowHelper.ToPhysical(this, FullHeight);
+            int margin = WindowHelper.ToPhysical(this, 16);
+
+            int left = work.X + work.Width - w - margin;
+            int top = work.Y + work.Height - h - margin;
+
             WindowHelper.MoveTo(this, left, top, FullWidth, FullHeight);
         }
         catch

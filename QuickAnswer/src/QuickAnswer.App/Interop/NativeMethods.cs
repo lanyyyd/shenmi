@@ -57,6 +57,12 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
+    // ---- DPI ----
+    // 必须用这个：AppWindow.Resize 吃的是物理像素，高分屏上直接把逻辑尺寸传进去，
+    // 150% 缩放下窗口只有应有大小的 2/3，内容会整体溢出（用户看到的就是"窗口很小、显示不全"）。
+    [DllImport("user32.dll")]
+    public static extern uint GetDpiForWindow(IntPtr hWnd);
+
     // ---- DWM 圆角（Win11）。Win10 上调用失败，忽略即可 ----
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     public const int DWMWCP_ROUND = 2;

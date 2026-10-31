@@ -34,7 +34,7 @@ public sealed partial class StealthWindow : Window
         WindowHelper.HideFromSwitcher(this);
 
         var vs = ScreenCapturer.VirtualScreen();
-        WindowHelper.MoveTo(this, vs.X, vs.Y, vs.Width, vs.Height);
+        WindowHelper.MoveToPhysical(this, vs.X, vs.Y, vs.Width, vs.Height);
 
         // 恒定穿透：这一层永远不会响应鼠标，用户点下去是点到下面的题目软件
         WindowHelper.EnableClickThrough(this, () => true);
