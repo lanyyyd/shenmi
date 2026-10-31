@@ -1,11 +1,14 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
 using QuickAnswer.App.Interop;
 using QuickAnswer.Core.Capture;
 using QuickAnswer.Core.Models;
 using Windows.Foundation;
+using Windows.Graphics.Imaging;
+using Windows.Security.Cryptography;
 using Windows.System;
 
 namespace QuickAnswer.App.Views;
@@ -43,9 +46,39 @@ public sealed partial class RegionSelectorWindow : Window
         Activated += (_, _) => Root.Focus(FocusState.Programmatic);
         Closed += (_, _) => _tcs.TrySetResult(null);
 
-        // 一定要 Activate：不显示窗口的话，调用方的 await PickAsync() 会永远挂着，
-        // 用户看到的就是「点了框选区域，什么也没发生」。
-        Activate();
+        // 先把截图贴上去再 Activate，避免用户看到一个纯黑的窗口闪一下。
+        _ = ShowWithBackdropAsync();
+    }
+
+    /// <summary>
+    /// 截一张全屏图铺在窗口里，用户看到的是「冻结的屏幕」，可以慢慢框。
+    /// 这也顺手解决了「窗口不透明，框选时看不到屏幕内容」的问题 ——
+    /// WinUI 3 的窗口没法简单做到全透明，那就干脆不透明，用截图假装。
+    /// </summary>
+    private async Task ShowWithBackdropAsync()
+    {
+        try
+        {
+            var shot = ScreenCapturer.Capture(_virtualScreen);
+            if (shot is not null)
+            {
+                var buffer = CryptographicBuffer.CreateFromByteArray(shot.Bgra);
+                var bitmap = SoftwareBitmap.CreateCopyFromBuffer(
+                    buffer, BitmapPixelFormat.Bgra8, shot.Width, shot.Height, BitmapAlphaMode.Ignore);
+
+                var source = new SoftwareBitmapSource();
+                await source.SetBitmapAsync(bitmap);
+                Backdrop.Source = source;
+            }
+        }
+        catch
+        {
+            // 截图失败就留着黑底，仍然能框选，只是看不见内容
+        }
+        finally
+        {
+            Activate();
+        }
     }
 
     /// <summary>等待用户框选。返回 null 表示取消。</summary>

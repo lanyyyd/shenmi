@@ -33,6 +33,8 @@ public sealed partial class OverlayWindow : Window
 
         WindowHelper.MakeOverlay(this);
         WindowHelper.HideFromSwitcher(this);
+        WindowHelper.EnableTransparency(this);
+        WindowHelper.SuppressEraseBackground(this);
         ApplyCorner();
 
         PlaceBottomRight();

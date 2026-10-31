@@ -2,19 +2,22 @@ using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Shapes;
 using QuickAnswer.App.Interop;
-using QuickAnswer.Core.Capture;
 using QuickAnswer.Core.Models;
-using Windows.Foundation;
 
 namespace QuickAnswer.App.Views;
 
 /// <summary>
-/// 隐蔽模式标注层：一层覆盖整个虚拟桌面的透明窗口，答案直接画在题目上。
+/// 隐蔽模式的标注层。
 ///
-/// 相比悬浮窗，它「不像一个软件」——没有窗口、没有面板，只有题目旁边多了一个三角。
-/// 代价是完全依赖 OCR 的坐标精度，所以三角定位做了左右两侧的兜底。
+/// 三条设计都是被坑出来的：
+///   1. **只覆盖题目区域，不铺满全屏。** 全屏窗口一旦透明失败就是整块白屏，
+///      又因为置顶 + 不在 Alt+Tab 里，用户会被锁死到只能重启电脑。
+///      只盖几百像素的话，最坏情况是一小块白，看得见也关得掉。
+///   2. **窗口真透明**靠 DwmExtendFrameIntoClientArea + 拦 WM_ERASEBKGND。
+///      WinUI 3 原生没有 TransparentTintBackdrop（那是 WinUIEx 的），
+///      不设 SystemBackdrop 时窗口会画主题纯色 —— 这就是白屏的根因。
+///   3. **不加 WS_EX_TOOLWINDOW。** 宁可牺牲一点隐蔽性，也要让用户能 Alt+Tab 切走。
 /// </summary>
 public sealed partial class StealthWindow : Window
 {
@@ -22,24 +25,28 @@ public sealed partial class StealthWindow : Window
     private static readonly Windows.UI.Color AnswerColor = Windows.UI.Color.FromArgb(240, 16, 185, 129);
     private static readonly Windows.UI.Color JudgeColor = Windows.UI.Color.FromArgb(240, 15, 118, 110);
 
+    private readonly record struct Mark(
+        string Text, double X, double Y, double Size, double MaxWidth,
+        Windows.UI.Color Color, bool Bold);
+
     private bool _ready;
 
     public StealthWindow()
     {
         InitializeComponent();
 
-        Title = "QuickAnswer";
+        Title = "QuickAnswer 标注";
 
         WindowHelper.MakeOverlay(this);
-        WindowHelper.HideFromSwitcher(this);
+        WindowHelper.EnableTransparency(this);
+        WindowHelper.SuppressEraseBackground(this);
 
-        var vs = ScreenCapturer.VirtualScreen();
-        WindowHelper.MoveToPhysical(this, vs.X, vs.Y, vs.Width, vs.Height);
-
-        // 恒定穿透：这一层永远不会响应鼠标，用户点下去是点到下面的题目软件
+        // 恒定穿透：这一层永远不响应鼠标
         WindowHelper.EnableClickThrough(this, () => true);
 
+        // 故意不调 HideFromSwitcher —— 出问题时用户至少能从 Alt+Tab 找到它
         Activated += OnFirstActivated;
+        AppWindow.Hide();
     }
 
     private void OnFirstActivated(object sender, WindowActivatedEventArgs args)
@@ -56,192 +63,210 @@ public sealed partial class StealthWindow : Window
     {
         Layer.Children.Clear();
 
-        if (result.Letter.Length == 0 && string.IsNullOrWhiteSpace(result.Text))
+        var marks = BuildMarks(question, result);
+        if (marks.Count == 0)
         {
-            // 没东西可画就把整层藏掉。它虽然设了点击穿透，但一层全屏窗口长期压在最上面
-            // 一旦穿透失效（比如 SetWindowSubclass 没挂上），下面所有按钮都会点不动，
-            // 而且用户完全看不出是被什么挡住的。
-            Hide();
+            AppWindow.Hide();
             return;
         }
 
-        Show();
+        // 标注包围盒（屏幕物理像素）
+        var bounds = ComputeBounds(marks);
 
-        var vs = ScreenCapturer.VirtualScreen();
+        // 窗口只盖住这块，不铺满屏幕
+        WindowHelper.MoveToPhysical(this, bounds.X, bounds.Y, bounds.Width, bounds.Height);
+
+        // Canvas 用 DIP，标注是物理像素，换算一下
+        double scale = WindowHelper.ScaleFactor(this);
+        if (scale <= 0)
+            scale = 1.0;
+
+        foreach (var m in marks)
+        {
+            AddText(m.Text,
+                (m.X - bounds.X) / scale,
+                (m.Y - bounds.Y) / scale,
+                m.Size,
+                m.MaxWidth / scale,
+                m.Color,
+                m.Bold);
+        }
+
+        // 尺寸变了要重新声明一次玻璃区，否则新增的那块可能是白的
+        WindowHelper.EnableTransparency(this);
+        WindowHelper.ShowNoActivate(this);
+
+        if (App.Config.ProtectFromCapture)
+            WindowHelper.ProtectFromCapture(this);
+    }
+
+    public void Clear()
+    {
+        Layer.Children.Clear();
+        AppWindow.Hide();
+    }
+
+    // ---------------------------------------------------------------- 标注计算
+
+    private List<Mark> BuildMarks(ParsedQuestion question, AnswerResult result)
+    {
+        var marks = new List<Mark>();
+
+        if (result.Letter.Length == 0 && string.IsNullOrWhiteSpace(result.Text))
+            return marks;
 
         switch (question.Type)
         {
             case QuestionType.Choice:
             case QuestionType.Multi:
-                DrawChoiceMarks(question, result, vs);
+                BuildChoiceMarks(question, result, marks);
                 break;
 
             case QuestionType.Judge:
-                DrawJudgeMark(question, result, vs);
-                break;
-
-            case QuestionType.Fill:
-                DrawAnswerText(question, result, vs, offsetY: question.StemRect?.Height + 4 ?? 24);
+                BuildJudgeMarks(question, result, marks);
                 break;
 
             default:
-                DrawAnswerText(question, result, vs, offsetY: question.StemRect?.Height + 4 ?? 24);
+                BuildAnswerTextMarks(question, result, marks);
                 break;
         }
+
+        return marks;
     }
 
-    // ---------------------------------------------------------------- 选择题
-
-    private void DrawChoiceMarks(ParsedQuestion question, AnswerResult result, ScreenRect vs)
+    private static void BuildChoiceMarks(ParsedQuestion question, AnswerResult result, List<Mark> marks)
     {
-        var targets = result.TargetOptions;
+        var targets = result.TargetOptions
+            .Where(o => o.Rect is { } r && !r.IsEmpty)
+            .ToList();
+
         if (targets.Count == 0)
         {
-            // 没拿到选项矩形（题库命中但 OCR 没框出选项）→ 退化为在题干下方写答案
-            DrawAnswerText(question, result, vs, offsetY: 0);
+            BuildAnswerTextMarks(question, result, marks);
             return;
         }
 
         foreach (var opt in targets)
         {
-            if (opt.Rect is not { } rect || rect.IsEmpty)
-                continue;
+            var rect = opt.Rect!.Value;
 
-            double screenLeft = rect.X - vs.X;
-            double screenTop = rect.Y - vs.Y;
-            double screenRight = rect.Right - vs.X;
-
-            const double size = 11;
-            string glyph = question.Type == QuestionType.Multi ? "\u25C0" : "\u25C0";
-
-            // 默认画在选项左侧行外 18px；贴左边缘时改到右侧，避免被裁掉
-            double x = screenLeft - 18;
+            // 默认在选项左侧行外；贴左边缘时改到右侧，避免被裁掉
+            double x = rect.X - 20;
             if (x < 4)
-                x = screenRight + 6;
+                x = rect.Right + 6;
 
-            AddGlyph(glyph, x, screenTop + rect.Height / 2.0 - size * 0.62, size, TriColor);
+            marks.Add(new Mark("\u25C0", x, rect.CenterY - 10, 13, 20, TriColor, true));
         }
 
         if (question.Type == QuestionType.Multi)
         {
-            double top = targets.Min(o => o.Rect?.Y ?? 0) - vs.Y - 22;
-            double left = targets.Min(o => o.Rect?.X ?? 0) - vs.X;
-            AddText($"多选 · {targets.Count} 项", Math.Max(4, left - 18), Math.Max(4, top), 10,
-                TriColor, bold: true);
+            var first = targets.Min(o => o.Rect!.Value.Y);
+            var left = targets.Min(o => o.Rect!.Value.X);
+            marks.Add(new Mark($"多选 · {targets.Count} 项", Math.Max(4, left - 20), first - 26,
+                11, 200, TriColor, true));
         }
     }
 
-    // ---------------------------------------------------------------- 判断题
-
-    private void DrawJudgeMark(ParsedQuestion question, AnswerResult result, ScreenRect vs)
+    private static void BuildJudgeMarks(ParsedQuestion question, AnswerResult result, List<Mark> marks)
     {
-        bool isTrue;
-        if (result.TargetOptions.Count > 0)
+        // 有 A/B 选项的判断题：直接标在正确选项旁
+        if (question.Options.Count >= 2 && question.Options.Any(o => o.Rect is { IsEmpty: false }))
         {
-            var t = result.TargetOptions[0].Text;
-            isTrue = t.Contains('对') || t.Contains("正确") || t.Contains('√')
-                     || t.Equals("T", StringComparison.OrdinalIgnoreCase);
+            BuildChoiceMarks(question, result, marks);
+            return;
         }
-        else
-        {
-            var t = result.Text;
-            isTrue = t.Contains('对') || t.Contains("正确") || t.Contains('√')
-                     || t.Equals("T", StringComparison.OrdinalIgnoreCase);
-        }
+
+        bool isTrue = result.TargetOptions.Count > 0
+            ? IsTrueText(result.TargetOptions[0].Text)
+            : IsTrueText(result.Text);
 
         var glyph = isTrue ? "√" : "×";
 
-        if (question.Options.Count >= 2 && question.Options[0].Rect is { } r0)
-        {
-            // 有 A/B 选项的判断题：标在正确选项左侧
-            DrawChoiceMarks(question, result, vs);
-            return;
-        }
-
-        // 括号式判断题：写在题干行尾右侧
         if (question.StemRect is { } stem)
         {
-            double x = stem.Right - vs.X + 8;
-            double y = stem.Y - vs.Y + 2;
-            AddText(glyph, x, y, 17, JudgeColor, bold: true);
+            marks.Add(new Mark(glyph, stem.Right + 6, stem.Y - 2, 16, 40, JudgeColor, true));
             return;
         }
 
-        AddText(glyph, 40, 40, 18, JudgeColor, bold: true);
+        marks.Add(new Mark(glyph, 40, 40, 18, 40, JudgeColor, true));
     }
 
-    // ---------------------------------------------------------------- 填空 / 简答
-
-    private void DrawAnswerText(ParsedQuestion question, AnswerResult result, ScreenRect vs, double offsetY)
+    private static void BuildAnswerTextMarks(ParsedQuestion question, AnswerResult result, List<Mark> marks)
     {
         var text = string.IsNullOrWhiteSpace(result.Text) ? result.Letter : result.Text;
         if (string.IsNullOrWhiteSpace(text))
             return;
 
-        // 优先挂在题干下方；没有题干矩形就退到选项上方 / 屏幕固定位置
         double x, y;
         if (question.StemRect is { } stem)
         {
-            x = stem.X - vs.X;
-            y = stem.Bottom - vs.Y + offsetY;
+            x = stem.X;
+            y = stem.Bottom + 4;
         }
         else if (question.BlockRect is { } block)
         {
-            x = block.X - vs.X;
-            y = block.Bottom - vs.Y + 4;
+            x = block.X;
+            y = block.Bottom + 4;
         }
         else
         {
-            x = 40;
-            y = 40;
+            x = 60;
+            y = 60;
         }
 
-        // 绿色竖线 + 文字：竖线让答案在密集文字里一眼能找到
-        var bar = new Rectangle
-        {
-            Width = 2.5,
-            Height = 18,
-            RadiusX = 1.2,
-            RadiusY = 1.2,
-            Fill = new SolidColorBrush(AnswerColor),
-        };
-        Canvas.SetLeft(bar, Math.Max(2, x - 8));
-        Canvas.SetTop(bar, y + 1);
-        Layer.Children.Add(bar);
-
-        AddText(text, Math.Max(2, x), y, 14.5, AnswerColor, bold: true);
+        // 简答可能上百字，限宽，避免拉出一个超宽窗口
+        marks.Add(new Mark(text, x, y, 14.5, 560, AnswerColor, true));
     }
 
-    private void Show()
+    private static bool IsTrueText(string? t)
     {
-        try
-        {
-            AppWindow.Show();
-        }
-        catch
-        {
-        }
+        if (string.IsNullOrWhiteSpace(t))
+            return false;
+
+        return t.Contains('对') || t.Contains("正确") || t.Contains('√')
+               || t.Equals("T", StringComparison.OrdinalIgnoreCase)
+               || t.Equals("True", StringComparison.OrdinalIgnoreCase);
     }
 
-    private void Hide()
+    // ---------------------------------------------------------------- 几何
+
+    private static ScreenRect ComputeBounds(List<Mark> marks)
     {
-        try
+        double x1 = double.MaxValue, y1 = double.MaxValue;
+        double x2 = double.MinValue, y2 = double.MinValue;
+
+        foreach (var m in marks)
         {
-            AppWindow.Hide();
+            // 粗估尺寸即可：宁可窗口略大，也不要裁掉字
+            double maxW = Math.Max(m.MaxWidth, 1);
+            double approxW = Math.Min(maxW, Math.Max(m.Text.Length, 1) * m.Size * 0.62);
+            int lines = Math.Max(1, (int)Math.Ceiling(m.Text.Length * m.Size * 0.62 / maxW));
+            double approxH = m.Size * 1.6 * lines;
+
+            x1 = Math.Min(x1, m.X);
+            y1 = Math.Min(y1, m.Y);
+            x2 = Math.Max(x2, m.X + approxW);
+            y2 = Math.Max(y2, m.Y + approxH);
         }
-        catch
-        {
-        }
+
+        const int pad = 14;
+
+        int left = (int)Math.Floor(x1) - pad;
+        int top = (int)Math.Floor(y1) - pad;
+        int width = (int)Math.Ceiling(x2 - x1) + pad * 2;
+        int height = (int)Math.Ceiling(y2 - y1) + pad * 2;
+
+        // 太小的话 DWM 玻璃可能不生效，给个下限
+        width = Math.Max(width, 120);
+        height = Math.Max(height, 60);
+
+        return new ScreenRect(left, top, width, height);
     }
 
-    // ---------------------------------------------------------------- 绘制原语
+    // ---------------------------------------------------------------- 绘制
 
-    private void AddGlyph(string glyph, double x, double y, double size, Windows.UI.Color color)
-    {
-        AddText(glyph, x, y, size, color, bold: true);
-    }
-
-    private void AddText(string text, double x, double y, double fontSize, Windows.UI.Color color, bool bold = false)
+    private void AddText(string text, double x, double y, double fontSize, double maxWidth,
+                         Windows.UI.Color color, bool bold)
     {
         var tb = new TextBlock
         {
@@ -251,11 +276,11 @@ public sealed partial class StealthWindow : Window
             Foreground = new SolidColorBrush(color),
             IsHitTestVisible = false,
             TextWrapping = TextWrapping.Wrap,
-            MaxWidth = 900,
+            MaxWidth = Math.Max(40, maxWidth),
         };
 
-        Canvas.SetLeft(tb, x);
-        Canvas.SetTop(tb, y);
+        Canvas.SetLeft(tb, Math.Max(0, x));
+        Canvas.SetTop(tb, Math.Max(0, y));
         Layer.Children.Add(tb);
     }
 }

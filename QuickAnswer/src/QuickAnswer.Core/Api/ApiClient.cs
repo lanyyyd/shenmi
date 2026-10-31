@@ -263,22 +263,29 @@ public sealed class ApiClient : IDisposable
         // 上报失败不影响用户，吞掉即可（有日志即可，不阻塞主流程）
     }
 
-    public async Task<List<ModelInfo>> GetModelsAsync(CancellationToken ct = default)
+    /// <summary>
+    /// 拉模型列表。返回 null 表示这次请求失败（路由不存在 / 服务端报错），
+    /// 返回空列表表示请求成功但后台还没配模型 —— 这两种情况对用户的提示完全不同。
+    /// </summary>
+    public async Task<List<ModelInfo>?> GetModelsAsync(CancellationToken ct = default)
     {
         try
         {
             using var req = Request(HttpMethod.Get, "/api/v1/qa/models");
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
-                return new List<ModelInfo>();
+                return null;
 
             var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            var list = JsonSerializer.Deserialize<List<ModelInfo>>(body, JsonOpts) ?? new();
+            var list = JsonSerializer.Deserialize<List<ModelInfo>>(body, JsonOpts);
+            if (list is null)
+                return null;
+
             return list.Where(m => m.Enabled).ToList();
         }
         catch
         {
-            return new List<ModelInfo>();
+            return null;
         }
     }
 
@@ -304,12 +311,20 @@ public sealed class ApiClient : IDisposable
         {
         }
 
+        // 500 一律把服务端返回的原文带出来 —— 否则只有一个状态码，
+        // 根本分不清是「后端没装题库模块」「AI 没配」还是「代码报错」。
+        var snippet = (body ?? "").Trim();
+        if (snippet.Length > 220)
+            snippet = snippet[..220];
+
         return status switch
         {
             HttpStatusCode.Unauthorized => "未登录或登录已过期",
             HttpStatusCode.Forbidden => "账号已被禁用",
-            HttpStatusCode.NotFound => "接口不存在，请检查服务器地址",
-            _ => $"请求失败（HTTP {(int)status}）",
+            HttpStatusCode.NotFound => "接口不存在——后端可能还没装题库模块，或服务器地址少了路径",
+            _ => snippet.Length > 0
+                ? $"服务端错误 HTTP {(int)status}：{snippet}"
+                : $"请求失败（HTTP {(int)status}）",
         };
     }
 

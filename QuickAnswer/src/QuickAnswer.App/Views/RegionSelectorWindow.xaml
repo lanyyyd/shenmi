@@ -7,15 +7,27 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid x:Name="Root" Background="#66000000" IsTabStop="True">
+    <!-- 背景用「打开瞬间的全屏截图」，而不是让窗口透明。
+         WinUI 3 的窗口在没设置 SystemBackdrop 时会画一层主题纯色（浅色主题 = 白），
+         光在 Content 上写 Background="Transparent" 并不会让窗口透出来，
+         结果就是一层灰罩住整个屏幕、根本看不见要框什么。
+         截图铺底相当于把屏幕冻结在当前帧，这也是 QQ / 微信截图的做法。 -->
+    <Grid x:Name="Root" Background="Black" IsTabStop="True">
+
+        <Image x:Name="Backdrop" Stretch="Fill" />
+
+        <!-- 压暗层：让选框醒目，但保留足够透明度看清内容 -->
+        <Rectangle Fill="#40000000" />
+
         <Canvas x:Name="Layer">
             <Rectangle x:Name="SelRect" Stroke="#FF2563EB" StrokeThickness="2"
-                       Fill="#332563EB" Visibility="Collapsed" />
+                       Fill="#1A2563EB" Visibility="Collapsed" />
         </Canvas>
 
         <!-- 尺寸提示，跟着选框走 -->
         <Border x:Name="SizeHint" Background="#FF2563EB" CornerRadius="4" Padding="8,3"
-                Visibility="Collapsed">
+                Visibility="Collapsed"
+                HorizontalAlignment="Left" VerticalAlignment="Top">
             <TextBlock x:Name="SizeText" Text="" FontSize="11" Foreground="White" />
         </Border>
 
@@ -25,7 +37,7 @@
             <StackPanel Spacing="4">
                 <TextBlock Text="拖动鼠标框选题目区域" FontSize="14" FontWeight="SemiBold"
                            Foreground="White" HorizontalAlignment="Center" />
-                <TextBlock Text="建议框住「题干 + 全部选项」；按 Esc 取消" FontSize="11"
+                <TextBlock Text="画面是打开时的截图，可以慢慢框；按 Esc 取消" FontSize="11"
                            Foreground="#FF94A3B8" HorizontalAlignment="Center" />
             </StackPanel>
         </Border>

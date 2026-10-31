@@ -22,6 +22,7 @@ public sealed partial class MainWindow : Window
     private const int HotkeyRecognize = 1;
     private const int HotkeyLoop = 2;
     private const int HotkeyStealth = 3;
+    private const int HotkeyPanic = 4;
 
     private readonly WinRtOcrEngine _ocr;
     private readonly AnswerOrchestrator _orchestrator;
@@ -122,7 +123,25 @@ public sealed partial class MainWindow : Window
         try
         {
             var models = await App.Api.GetModelsAsync();
+
+            if (models is null)
+            {
+                // 请求本身失败：多半是后端还没装题库模块，或者服务器地址少了路径
+                SetStatus("题库模块未就绪", "#FFDC2626");
+                PreviewAnswer.Text = "连不上题库接口，检查后端是否已部署 /admin-qa.html 那套模块";
+                PreviewDetail.Text = App.Config.ServerUrl + "/api/v1/qa/models";
+                SourceText.Text = "离线";
+                return;
+            }
+
             ModelBox.ItemsSource = models;
+
+            if (models.Count == 0)
+            {
+                PreviewAnswer.Text = "后台还没有配置 AI 模型";
+                PreviewDetail.Text = "去 " + App.Config.ServerUrl + "/admin-qa.html 添加一个";
+                return;
+            }
 
             var current = models.FirstOrDefault(m => m.Id == App.Config.ModelId) ?? models.FirstOrDefault();
             if (current is not null)
@@ -131,8 +150,9 @@ public sealed partial class MainWindow : Window
                 App.Config.ModelId = current.Id;
             }
         }
-        catch
+        catch (Exception ex)
         {
+            CrashLog.Write("MainWindow.LoadModels", ex);
         }
     }
 
@@ -159,6 +179,13 @@ public sealed partial class MainWindow : Window
                     case HotkeyStealth:
                         StealthSwitch.IsOn = !StealthSwitch.IsOn;
                         break;
+                    case HotkeyPanic:
+                        // 应急：任何浮层出问题（白屏、挡住鼠标）按这个立刻清场
+                        HideAllOverlays();
+                        if (StealthSwitch.IsOn)
+                            StealthSwitch.IsOn = false;
+                        SetStatus("已隐藏所有浮层", "#FF6B7280");
+                        break;
                 }
                 return IntPtr.Zero;
             }
@@ -171,6 +198,9 @@ public sealed partial class MainWindow : Window
         RegisterHotKey(hwnd, HotkeyRecognize, MOD_ALT | MOD_NOREPEAT, 0x51);  // Alt+Q
         RegisterHotKey(hwnd, HotkeyLoop, MOD_ALT | MOD_NOREPEAT, 0x57);       // Alt+W
         RegisterHotKey(hwnd, HotkeyStealth, MOD_ALT | MOD_NOREPEAT, 0x44);    // Alt+D
+
+        // 应急退出：Alt+Shift+D。浮层白屏/挡鼠标时靠它自救
+        RegisterHotKey(hwnd, HotkeyPanic, MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, 0x44);
     }
 
     private void ReleaseHotkeys()
@@ -182,6 +212,7 @@ public sealed partial class MainWindow : Window
         UnregisterHotKey(hwnd, HotkeyRecognize);
         UnregisterHotKey(hwnd, HotkeyLoop);
         UnregisterHotKey(hwnd, HotkeyStealth);
+        UnregisterHotKey(hwnd, HotkeyPanic);
     }
 
     // ---------------------------------------------------------------- 监听循环
@@ -404,8 +435,8 @@ public sealed partial class MainWindow : Window
         }
 
         _stealth ??= new StealthWindow();
+        // 不调 Activate：会把键盘焦点从题目软件抢走
         _stealth.Render(question, result);
-        _stealth.Activate();
     }
 
     private static string Truncate(string s, int max)

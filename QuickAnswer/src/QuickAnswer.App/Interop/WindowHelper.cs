@@ -88,6 +88,49 @@ public static class WindowHelper
         }
     }
 
+    /// <summary>当前窗口所在显示器的缩放倍率（1.0 = 100%，1.5 = 150%）。</summary>
+    public static double ScaleFactor(Window window)
+    {
+        try
+        {
+            var hwnd = Hwnd(window);
+            uint dpi = hwnd == IntPtr.Zero ? 96 : GetDpiForWindow(hwnd);
+            if (dpi == 0)
+                dpi = 96;
+            return dpi / 96.0;
+        }
+        catch
+        {
+            return 1.0;
+        }
+    }
+
+    /// <summary>
+    /// 让窗口真正透出下层内容（不许画主题背景色）。
+    /// 只对「标注层」这类需要浮在别人窗口上的场景用；必须在 HWND 有效后、显示前调用。
+    /// </summary>
+    public static void EnableTransparency(Window window)
+    {
+        var hwnd = Hwnd(window);
+        if (hwnd == IntPtr.Zero)
+            return;
+
+        try
+        {
+            // 整个客户区当成 DWM 玻璃
+            var margins = new MARGINS { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+            DwmExtendFrameIntoClientArea(hwnd, ref margins);
+
+            // 去掉标题栏/边框残留（否则四周会有一圈不透明边）
+            var style = GetWindowLongPtrW(hwnd, GWL_STYLE).ToInt64();
+            style &= ~(WS_CAPTION | WS_THICKFRAME | WS_BORDER);
+            SetWindowLongPtr(hwnd, GWL_STYLE, new IntPtr(style));
+        }
+        catch
+        {
+        }
+    }
+
     /// <summary>按逻辑像素设置窗口大小。</summary>
     public static void Resize(Window window, int logicalWidth, int logicalHeight)
     {
@@ -217,6 +260,42 @@ public static class WindowHelper
         // 委托必须被强引用，否则会被 GC 回收，回调变成野指针直接崩进程
         _subclassProcs.Add(proc);
         SetWindowSubclass(hwnd, proc, (UIntPtr)1, IntPtr.Zero);
+    }
+
+    /// <summary>
+    /// 显示窗口但不抢焦点。标注层必须用这个 ——
+    /// 用 Activate() 会把键盘焦点从题目软件抢走，用户打字直接断掉。
+    /// </summary>
+    public static void ShowNoActivate(Window window)
+    {
+        try
+        {
+            var hwnd = Hwnd(window);
+            if (hwnd != IntPtr.Zero)
+                ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        }
+        catch
+        {
+        }
+    }
+
+    /// <summary>禁止窗口擦除背景，否则每帧都会先用主题色刷一遍，透明就失效了。</summary>
+    public static void SuppressEraseBackground(Window window)
+    {
+        var hwnd = Hwnd(window);
+        if (hwnd == IntPtr.Zero)
+            return;
+
+        SubclassProc proc = (h, msg, w, l, id, data) =>
+        {
+            if (msg == WM_ERASEBKGND)
+                return new IntPtr(1);
+
+            return DefSubclassProc(h, msg, w, l);
+        };
+
+        _subclassProcs.Add(proc);
+        SetWindowSubclass(hwnd, proc, (UIntPtr)7, IntPtr.Zero);
     }
 
     private static readonly List<SubclassProc> _subclassProcs = new();
