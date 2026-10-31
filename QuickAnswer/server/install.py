@@ -46,14 +46,16 @@ def patch_main(main_py: Path) -> bool:
     changed = False
 
     # 1) import：把 qa 加进 from .routers import (...) 里
+    #    注意要先 strip 再比较 —— 直接 split(",") 得到的是 " qa"，裸比较永远不命中，
+    #    重复执行就会拼出 "qa, qa"。
     marker = "from .routers import ("
-    if "qa" not in src.split(marker, 1)[-1].split(")", 1)[0].split(","):
-        if marker in src:
-            head, tail = src.split(marker, 1)
-            names, rest = tail.split(")", 1)
-            items = [x.strip() for x in names.replace("\n", " ").split(",") if x.strip()]
+    if marker in src:
+        head, tail = src.split(marker, 1)
+        names, rest = tail.split(")", 1)
+        items = [x.strip() for x in names.replace("\n", " ").split(",") if x.strip()]
+        if "qa" not in items:
             items.append("qa")
-            src = head + marker + " " + ", ".join(items) + ")" + rest
+            src = head + marker + ", ".join(items) + ")" + rest
             changed = True
 
     # 2) include_router：插在第一个 include_router 前面，保证它在静态目录挂载之前
