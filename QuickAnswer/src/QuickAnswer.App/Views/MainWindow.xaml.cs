@@ -2,6 +2,7 @@ using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using QuickAnswer.App.Interop;
 using QuickAnswer.Core.Capture;
@@ -377,7 +378,7 @@ public sealed partial class MainWindow : Window
         SourceText.Text = result.Source.Length > 0 ? result.Source : "—";
 
         SourceBadge.Background = new SolidColorBrush(
-            result.Source == "题库" ? Color.FromArgb(255, 22, 101, 52) : Color.FromArgb(255, 30, 41, 59));
+            result.Source == "题库" ? Windows.UI.Color.FromArgb(255, 22, 101, 52) : Windows.UI.Color.FromArgb(255, 30, 41, 59));
     }
 
     private void ShowOverlay(AnswerResult result)

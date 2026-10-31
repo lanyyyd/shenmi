@@ -93,7 +93,7 @@ public sealed class WinRtOcrEngine : IOcrEngine
             bitmap = SoftwareBitmap.CreateCopyFromBuffer(
                 buffer, BitmapPixelFormat.Bgra8, image.Width, image.Height, BitmapAlphaMode.Premultiplied);
 
-            var ocr = await _engine.RecognizeAsync(bitmap).AsTask().ConfigureAwait(false);
+            var ocr = await _engine.RecognizeAsync(bitmap);
             if (ocr is null)
                 return result;
 

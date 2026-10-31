@@ -88,7 +88,7 @@ public sealed partial class OverlayWindow : Window
     {
         // 只调背景 alpha，文字保持不透明 —— 否则题看不清，答案也看不清
         byte alpha = (byte)Math.Round(255 * Math.Clamp(_opacity, 0.10, 0.95));
-        Root.Background = new SolidColorBrush(Color.FromArgb(alpha, 30, 36, 48));
+        Root.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(alpha, 30, 36, 48));
     }
 
     public void Render(AnswerResult result)
@@ -97,8 +97,8 @@ public sealed partial class OverlayWindow : Window
 
         SourceLabel.Text = result.Source.Length > 0 ? result.Source : "—";
         Dot.Fill = new SolidColorBrush(result.Source == "题库"
-            ? Color.FromArgb(255, 74, 222, 128)
-            : Color.FromArgb(255, 96, 165, 250));
+            ? Windows.UI.Color.FromArgb(255, 74, 222, 128)
+            : Windows.UI.Color.FromArgb(255, 96, 165, 250));
 
         if (choiceLike && result.Letter.Length > 0)
         {
@@ -120,7 +120,7 @@ public sealed partial class OverlayWindow : Window
             ? result.Detail + " · 低置信"
             : result.Detail;
 
-        ApplyBackground();
+        SetOpacity(App.Config.OverlayOpacity);
         App.Config.OverlayLeft = (int)AppWindow.Position.X;
         App.Config.OverlayTop = (int)AppWindow.Position.Y;
     }

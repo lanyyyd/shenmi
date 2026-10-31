@@ -114,7 +114,7 @@ public sealed class AnswerOrchestrator
         if (q.Options.Count > 0)
         {
             var keys = OptionMapper.SplitKeys(letter);
-            if (keys.Count == 0 || keys.Any(k => q.Options.All(o => !o.Key.Equals(k, StringComparison.OrdinalIgnoreCase))))
+            if (keys.Length == 0 || keys.Any(k => q.Options.All(o => !o.Key.Equals(k, StringComparison.OrdinalIgnoreCase))))
             {
                 var fail = AnswerResult.Fail("AI 返回的选项不在当前题目里");
                 AnswerReady?.Invoke(fail);
