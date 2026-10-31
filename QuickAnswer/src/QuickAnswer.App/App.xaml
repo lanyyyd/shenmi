@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application
+    x:Class="QuickAnswer.App.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- 全局配色：浅色、低饱和，避免在题目旁边太抢眼 -->
+            <Color x:Key="QaAccent">#FF2563EB</Color>
+            <SolidColorBrush x:Key="QaAccentBrush" Color="#FF2563EB" />
+            <SolidColorBrush x:Key="QaPageBrush" Color="#FFF8F9FB" />
+            <SolidColorBrush x:Key="QaCardBrush" Color="#FFFFFFFF" />
+            <SolidColorBrush x:Key="QaLineBrush" Color="#FFE4E8EF" />
+            <SolidColorBrush x:Key="QaTextBrush" Color="#FF14171C" />
+            <SolidColorBrush x:Key="QaSubBrush" Color="#FF6B7280" />
+            <SolidColorBrush x:Key="QaMutedBrush" Color="#FF9CA3AF" />
+            <SolidColorBrush x:Key="QaErrorBrush" Color="#FFDC2626" />
+
+            <x:Double x:Key="QaCornerRadius">6</x:Double>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="QuickAnswer.App.Views.OverlayWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <!-- 深色 + 低不透明度：叠在题目上时白色大字仍然清晰，浅色底会跟试卷糊成一片 -->
+    <Grid x:Name="Root" Background="#AA1E2430">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="26" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="20" />
+        </Grid.RowDefinitions>
+
+        <!-- 拖动区 + 状态 -->
+        <Grid x:Name="DragBar" Grid.Row="0" Padding="10,0" Background="Transparent">
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Ellipse x:Name="Dot" Width="5" Height="5" Fill="#FF4ADE80" />
+                <TextBlock x:Name="SourceLabel" Text="待命" FontSize="8.5" Foreground="#FF94A3B8"
+                           VerticalAlignment="Center" />
+            </StackPanel>
+
+            <Button x:Name="CloseBtn" Content="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="9"
+                    Width="20" Height="20" Padding="0" Background="Transparent" BorderThickness="0"
+                    Foreground="#FF64748B" HorizontalAlignment="Right" VerticalAlignment="Center"
+                    Click="OnCloseClick" />
+        </Grid>
+
+        <!-- 答案主体 -->
+        <Grid Grid.Row="1">
+            <TextBlock x:Name="BigLetter" Text="—" FontSize="54" FontWeight="Bold" Foreground="White"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+            <ScrollViewer x:Name="TextScroller" Visibility="Collapsed"
+                          VerticalScrollBarVisibility="Auto" Padding="10,0">
+                <TextBlock x:Name="BodyText" FontSize="12" Foreground="#FFE2E8F0"
+                           TextWrapping="Wrap" LineHeight="18" />
+            </ScrollViewer>
+        </Grid>
+
+        <!-- 详情 -->
+        <TextBlock x:Name="DetailLabel" Grid.Row="2" Text="" FontSize="8.5"
+                   Foreground="#FF64748B" HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </Grid>
+</Window>

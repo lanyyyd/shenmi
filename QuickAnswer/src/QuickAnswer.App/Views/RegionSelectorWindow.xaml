@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="QuickAnswer.App.Views.RegionSelectorWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid x:Name="Root" Background="#66000000" IsTabStop="True">
+        <Canvas x:Name="Layer">
+            <Rectangle x:Name="SelRect" Stroke="#FF2563EB" StrokeThickness="2"
+                       Fill="#332563EB" Visibility="Collapsed" />
+        </Canvas>
+
+        <!-- 尺寸提示，跟着选框走 -->
+        <Border x:Name="SizeHint" Background="#FF2563EB" CornerRadius="4" Padding="8,3"
+                Visibility="Collapsed">
+            <TextBlock x:Name="SizeText" Text="" FontSize="11" Foreground="White" />
+        </Border>
+
+        <!-- 顶部说明 -->
+        <Border Background="#CC1E2430" CornerRadius="8" Padding="16,10"
+                HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,40,0,0">
+            <StackPanel Spacing="4">
+                <TextBlock Text="拖动鼠标框选题目区域" FontSize="14" FontWeight="SemiBold"
+                           Foreground="White" HorizontalAlignment="Center" />
+                <TextBlock Text="建议框住「题干 + 全部选项」；按 Esc 取消" FontSize="11"
+                           Foreground="#FF94A3B8" HorizontalAlignment="Center" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

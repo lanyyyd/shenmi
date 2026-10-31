@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="QuickAnswer.App.Views.StealthWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <!-- 整层透明，只画标注。背景必须是 Transparent 而不是 null，
+         否则整块区域不参与命中测试，虽然我们本来就返回 HTTRANSPARENT。 -->
+    <Canvas x:Name="Layer" Background="Transparent" />
+</Window>
