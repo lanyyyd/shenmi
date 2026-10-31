@@ -28,21 +28,33 @@ public partial class App : Application
         };
     }
 
-    protected override async void OnLaunched(LaunchActivatedEventArgs args)
+    protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         Config = AppConfig.Load();
         Config.RollDayIfNeeded();
 
         Api.Configure(Config.ServerUrl, Config.Token);
 
-        // 有 token 就先验一次：7 天过期的 JWT 在本地看不出，必须问服务端。
-        if (!string.IsNullOrEmpty(Config.Token))
-        {
-            var (state, me) = await Api.VerifyTokenAsync();
+        // 先把登录窗口显示出来，再去后台校验 token。
+        // 反过来的话，服务器不可达时用户会对着空桌面等满一个网络超时，
+        // 看起来就是「软件启动了但没有界面」。
+        ShowLogin();
 
-            if (state == TokenState.Valid && me is not null)
+        if (!string.IsNullOrEmpty(Config.Token))
+            _ = TryAutoLoginAsync();
+    }
+
+    /// <summary>静默续期：token 还有效就直接切到主界面，用户不用再输密码。</summary>
+    private static async Task TryAutoLoginAsync()
+    {
+        try
+        {
+            // 这一步在后台跑，失败也不打扰用户 —— 登录页已经在那儿了
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+            var (state, me) = await Api.VerifyTokenAsync(cts.Token);
+
+            if (state == TokenState.Valid && me is not null && !string.IsNullOrEmpty(Config.Token))
             {
-                // 记住登录：直接进主界面，不再要求重新输密码
                 Session.SignIn(me, Config.Token);
                 ShowMain();
                 return;
@@ -50,15 +62,15 @@ public partial class App : Application
 
             if (state == TokenState.Unauthorized)
             {
-                // 只有服务端明确说 token 失效才清掉
+                // 只有服务端明确说 token 失效才清掉；断网时原样保留
                 Config.Token = null;
                 Config.Save();
             }
-
-            // NetworkError：token 原样保留，下次有网还能自动登录
         }
-
-        ShowLogin();
+        catch (Exception ex)
+        {
+            CrashLog.Write("App.TryAutoLogin", ex);
+        }
     }
 
     public static void ShowLogin()
