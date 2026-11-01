@@ -44,8 +44,11 @@ public sealed class AppConfig
     /// <summary>题库命中阈值：低于此值改问 AI，宁慢不给错。</summary>
     public double HitThreshold { get; set; } = 0.85;
 
-    /// <summary>OCR 前的放大倍数。小字识别率靠它，不要低于 1.5。</summary>
+    /// <summary>OCR 前的放大倍数。小字识别率靠它，不要低于 1.5。实际会用自适应倍数覆盖。</summary>
     public double OcrScale { get; set; } = 2.0;
+
+    /// <summary>保留最近 20 次识别样本（截图 + 文本）到 %LOCALAPPDATA%\QuickAnswer\diag，用于排查识别问题。</summary>
+    public bool SaveDiagnostics { get; set; } = true;
 
     // ---- 呈现 ----
     /// <summary>true = 隐蔽模式（在题目上直接标注）；false = 悬浮窗。</summary>

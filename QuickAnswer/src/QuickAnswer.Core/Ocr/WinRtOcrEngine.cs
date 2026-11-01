@@ -12,7 +12,12 @@ public interface IOcrEngine
 {
     string Name { get; }
     bool IsAvailable { get; }
-    Task<List<OcrTextLine>> RecognizeAsync(CapturedImage image, double scale);
+
+    /// <summary>
+    /// 识别一张已经处理好的图。坐标按 <see cref="CapturedImage.Scale"/> 除回去，
+    /// 再加上 <see cref="CapturedImage.SourceRect"/> 的偏移，得到屏幕坐标。
+    /// </summary>
+    Task<List<OcrTextLine>> RecognizeAsync(CapturedImage image);
 }
 
 /// <summary>
@@ -75,23 +80,24 @@ public sealed class WinRtOcrEngine : IOcrEngine
             "系统缺少中文 OCR 语言包。请到「设置 → 时间和语言 → 语言和区域 → 中文 → 语言选项」安装「光学字符识别」。");
     }
 
-    public async Task<List<OcrTextLine>> RecognizeAsync(CapturedImage image, double scale)
+    public async Task<List<OcrTextLine>> RecognizeAsync(CapturedImage image)
     {
         var result = new List<OcrTextLine>();
         if (_engine is null || image.Width <= 0 || image.Height <= 0)
             return result;
 
-        if (scale <= 0)
-            scale = 1;
+        double scale = image.Scale > 0 ? image.Scale : 1;
 
         SoftwareBitmap? bitmap = null;
         try
         {
             // CryptographicBuffer 是拿 IBuffer 最稳的途径：
             // AsBuffer() 那套扩展在 .NET Core 之后已经不可靠了。
+            // 用 Ignore 而不是 Premultiplied：预处理已经把 alpha 写成 255，
+            // 但 Ignore 能挡住将来某个环节再递进来一张 alpha=0 的图。
             var buffer = CryptographicBuffer.CreateFromByteArray(image.Bgra);
             bitmap = SoftwareBitmap.CreateCopyFromBuffer(
-                buffer, BitmapPixelFormat.Bgra8, image.Width, image.Height, BitmapAlphaMode.Premultiplied);
+                buffer, BitmapPixelFormat.Bgra8, image.Width, image.Height, BitmapAlphaMode.Ignore);
 
             var ocr = await _engine.RecognizeAsync(bitmap);
             if (ocr is null)

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
@@ -9,6 +10,7 @@ using QuickAnswer.App.Interop;
 using QuickAnswer.App.Services;
 using QuickAnswer.Core.Capture;
 using QuickAnswer.Core.Detect;
+using QuickAnswer.Core.Diagnostics;
 using QuickAnswer.Core.Match;
 using QuickAnswer.Core.Models;
 using QuickAnswer.Core.Ocr;
@@ -26,6 +28,7 @@ public sealed partial class MainWindow : Window
     private const int HotkeyPanic = 4;
 
     private readonly WinRtOcrEngine _ocr;
+    private readonly OcrPipeline _pipeline;
     private readonly AnswerOrchestrator _orchestrator;
 
     private CancellationTokenSource? _loopCts;
@@ -56,6 +59,8 @@ public sealed partial class MainWindow : Window
         AppWindow.IsShownInSwitchers = true;
 
         _ocr = WinRtOcrEngine.Create();
+        _pipeline = new OcrPipeline(_ocr);
+        OcrDiagnostics.Enabled = App.Config.SaveDiagnostics;
         _orchestrator = new AnswerOrchestrator(App.Api, App.Config)
         {
             StatusChanged = s => Post(() => StatusLabel.Text = s),
@@ -343,15 +348,11 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            var img = ScreenCapturer.CaptureScaled(region, App.Config.OcrScale);
-            if (img is null)
+            var outcome = await _pipeline.RunAsync(region, App.Config.OcrScale, ct).ConfigureAwait(false);
+            if (outcome is null || outcome.Lines.Count == 0 || ct.IsCancellationRequested)
                 return;
 
-            var lines = await _ocr.RecognizeAsync(img, App.Config.OcrScale).ConfigureAwait(false);
-            if (lines.Count == 0 || ct.IsCancellationRequested)
-                return;
-
-            var question = QuestionParser.Parse(lines);
+            var question = QuestionParser.Parse(outcome.Lines);
 
             // 这一帧不像题目：可能是桌面图标、报错弹窗、加载占位。
             // 注意别把这一帧记成"已处理"—— 下一帧很可能就是真题。
@@ -359,6 +360,16 @@ public sealed partial class MainWindow : Window
                 return;
             if (TextNormalizer.ChineseRatio(question.RawOcr) < 0.25 && question.Options.Count == 0)
                 return;
+
+            // 图太糊、或者根本没框到题目：认出来的东西撑不起一次检索。
+            // 这时候送出去问 AI，只会拿到一个看起来很确定的错答案 —— 比不给答案更糟。
+            // 手动识别（force）不受此限，用户都主动点了，就照他的意思跑。
+            if (!force && outcome.Quality.IsPoor)
+            {
+                Post(() => SetStatus("这块看不清，建议重新框选", "#FFD97706"));
+                _ = OcrDiagnostics.SaveAsync(outcome, region, question, "质量分过低，未作答");
+                return;
+            }
 
             var fingerprint = BuildFingerprint(question);
 
@@ -380,6 +391,12 @@ public sealed partial class MainWindow : Window
                 return;
 
             Post(() => Render(question, result));
+
+            // 留样只在两种情况：用户手动点的（他明确觉得有问题），或者这题没出答案。
+            // 自动出对的那些不占磁盘，20 个名额留给真正需要看的。
+            bool failed = result.Text.Length == 0 && result.Letter.Length == 0;
+            if (force || failed)
+                _ = OcrDiagnostics.SaveAsync(outcome, region, question, force ? "手动识别" : "未取到答案");
         }
         catch (OperationCanceledException)
         {
@@ -596,8 +613,84 @@ public sealed partial class MainWindow : Window
         Add("后端自检", App.Config.ServerUrl + "/api/v1/qa/diag");
 
         panel.Children.Add(BuildOverlaySection());
+        panel.Children.Add(BuildDiagnosticsSection());
 
         return panel;
+    }
+
+    /// <summary>设置页里的诊断区：留样开关 + 打开目录。</summary>
+    private UIElement BuildDiagnosticsSection()
+    {
+        var muted = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 107, 114, 128));
+
+        var box = new StackPanel { Spacing = 8, Margin = new Thickness(0, 4, 0, 0) };
+
+        box.Children.Add(new TextBlock
+        {
+            Text = "识别诊断",
+            FontSize = 11,
+            Foreground = muted,
+        });
+
+        box.Children.Add(new TextBlock
+        {
+            Text = "识别不准时，最近 20 次的截图和识别文本会留在这里。把这几个文件发出来，就能直接看出是字太小、深色底没反相、还是框选歪了。",
+            FontSize = 10.5,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = muted,
+        });
+
+        var row = new Grid();
+        row.Children.Add(new TextBlock
+        {
+            Text = "保存识别样本",
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        var toggle = new ToggleSwitch
+        {
+            IsOn = App.Config.SaveDiagnostics,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            OnContent = "",
+            OffContent = "",
+        };
+        toggle.Toggled += (_, _) =>
+        {
+            App.Config.SaveDiagnostics = toggle.IsOn;
+            OcrDiagnostics.Enabled = toggle.IsOn;
+            App.Config.Save();
+        };
+        row.Children.Add(toggle);
+        box.Children.Add(row);
+
+        var open = new Button
+        {
+            Content = "打开诊断目录",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        open.Click += (_, _) => OpenDiagnosticsFolder();
+        box.Children.Add(open);
+
+        return box;
+    }
+
+    private void OpenDiagnosticsFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(OcrDiagnostics.Dir);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = OcrDiagnostics.Dir,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            SetStatus("打不开目录：" + ex.Message, "#FFDC2626");
+        }
     }
 
     /// <summary>设置页里的浮层设置：点击穿透、位置复位。</summary>

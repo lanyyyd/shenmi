@@ -11,6 +11,9 @@ public sealed class CapturedImage
 
     /// <summary>这张图在虚拟桌面里的位置（物理像素）。OCR 结果的 BoundingRect 要加这个偏移才是屏幕坐标。</summary>
     public ScreenRect SourceRect { get; init; }
+
+    /// <summary>这张图相对屏幕的放大倍数。OCR 结果按它除回去才能得到屏幕坐标。</summary>
+    public double Scale { get; init; } = 1.0;
 }
 
 /// <summary>
@@ -125,59 +128,6 @@ public static class ScreenCapturer
                 gray[i] = (byte)((bgra[p + 2] * 77 + bgra[p + 1] * 150 + bgra[p] * 29) >> 8);
             }
             return gray;
-        }
-        catch
-        {
-            return null;
-        }
-        finally
-        {
-            if (oldObj != IntPtr.Zero && memDc != IntPtr.Zero)
-                NativeGdi.SelectObject(memDc, oldObj);
-            if (hBmp != IntPtr.Zero) NativeGdi.DeleteObject(hBmp);
-            if (memDc != IntPtr.Zero) NativeGdi.DeleteDC(memDc);
-            if (screenDc != IntPtr.Zero) NativeGdi.ReleaseDC(IntPtr.Zero, screenDc);
-        }
-    }
-
-    /// <summary>
-    /// 截取并放大 —— 给 OCR 用。
-    /// 放大倍数不是可选项：单字高度低于 12px 时 Windows OCR 的准确率断崖式下跌，
-    /// 2 倍双三次放大的收益远大于任何后处理滤镜。
-    /// </summary>
-    public static CapturedImage? CaptureScaled(ScreenRect rect, double scale)
-    {
-        int w = Math.Max(1, (int)Math.Round(rect.Width * scale));
-        int h = Math.Max(1, (int)Math.Round(rect.Height * scale));
-
-        // 超过 OCR 引擎上限（10000px）就退回去，否则 RecognizeAsync 会抛
-        if (w > 8000 || h > 8000)
-            return Capture(rect);
-
-        if (Math.Abs(scale - 1.0) < 0.01)
-            return Capture(rect);
-
-        IntPtr screenDc = IntPtr.Zero, memDc = IntPtr.Zero, hBmp = IntPtr.Zero, oldObj = IntPtr.Zero;
-        try
-        {
-            screenDc = NativeGdi.GetDC(IntPtr.Zero);
-            memDc = NativeGdi.CreateCompatibleDC(screenDc);
-            hBmp = NativeGdi.CreateCompatibleBitmap(screenDc, w, h);
-            oldObj = NativeGdi.SelectObject(memDc, hBmp);
-
-            NativeGdi.SetStretchBltMode(memDc, NativeGdi.HALFTONE);
-            if (!NativeGdi.StretchBlt(memDc, 0, 0, w, h, screenDc, rect.X, rect.Y, rect.Width, rect.Height,
-                                      NativeGdi.SRCCOPY))
-                return null;
-
-            NativeGdi.SelectObject(memDc, oldObj);
-            oldObj = IntPtr.Zero;
-
-            var pixels = ReadPixels(memDc, hBmp, w, h);
-            if (pixels is null)
-                return null;
-
-            return new CapturedImage { Width = w, Height = h, Bgra = pixels, SourceRect = rect };
         }
         catch
         {
