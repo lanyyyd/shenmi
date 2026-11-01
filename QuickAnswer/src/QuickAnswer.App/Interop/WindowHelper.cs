@@ -1,4 +1,5 @@
 using Microsoft.UI;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Windows.Graphics;
@@ -107,7 +108,14 @@ public static class WindowHelper
 
     /// <summary>
     /// 让窗口真正透出下层内容（不许画主题背景色）。
-    /// 只对「标注层」这类需要浮在别人窗口上的场景用；必须在 HWND 有效后、显示前调用。
+    ///
+    /// 三步缺一不可，少任何一步的表现都是「设了透明，实际还是白的」：
+    ///   1) DwmExtendFrameIntoClientArea —— 告诉 DWM 客户区按玻璃合成；
+    ///   2) DwmEnableBlurBehindWindow + 空区域 —— 打开 per-pixel alpha，不做模糊；
+    ///   3) 把窗口的合成背景刷换成全透明的 CompositionColorBrush ——
+    ///      WinUI 在没有 SystemBackdrop 时会自己按主题画一层纯色，
+    ///      浅色主题下就是耀眼的白底。前两步只是让 DWM 愿意透，
+    ///      这一步才是把 WinUI 那层白漆刮掉。
     /// </summary>
     public static void EnableTransparency(Window window)
     {
@@ -117,14 +125,46 @@ public static class WindowHelper
 
         try
         {
-            // 整个客户区当成 DWM 玻璃
-            var margins = new MARGINS { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+            var margins = new MARGINS { Left = 0, Right = 0, Top = 0, Bottom = 0 };
             DwmExtendFrameIntoClientArea(hwnd, ref margins);
+
+            var rgn = CreateRectRgn(-2, -2, -1, -1);
+            var blur = new DWM_BLURBEHIND
+            {
+                dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION,
+                fEnable = 1,
+                hRgnBlur = rgn,
+                fTransitionOnMaximized = 0,
+            };
+            DwmEnableBlurBehindWindow(hwnd, ref blur);
+
+            if (rgn != IntPtr.Zero)
+                DeleteObject(rgn);
+
+            ApplyTransparentBackdrop(window);
 
             // 去掉标题栏/边框残留（否则四周会有一圈不透明边）
             var style = GetWindowLongPtrW(hwnd, GWL_STYLE).ToInt64();
             style &= ~(WS_CAPTION | WS_THICKFRAME | WS_BORDER);
             SetWindowLongPtr(hwnd, GWL_STYLE, new IntPtr(style));
+        }
+        catch
+        {
+        }
+    }
+
+    /// <summary>
+    /// 挂一个全透明的 SystemBackdrop。WinUI 在没有背景时会按主题画纯色，
+    /// 浅色主题下就是「透明度 0 却一片白」的元凶。
+    /// </summary>
+    public static void ApplyTransparentBackdrop(Window window)
+    {
+        try
+        {
+            if (window.SystemBackdrop is TransparentBackdrop)
+                return;
+
+            window.SystemBackdrop = new TransparentBackdrop();
         }
         catch
         {

@@ -84,6 +84,31 @@ internal static class NativeMethods
     [DllImport("dwmapi.dll")]
     public static extern int DwmExtendFrameIntoClientArea(IntPtr hWnd, ref MARGINS margins);
 
+    // ---- 逐像素透明 ----
+    // 光设 MARGINS 不够：WinUI 还会按主题在客户区画一层纯色（浅色主题就是白），
+    // 所以必须同时 DwmEnableBlurBehindWindow（空区域，只为打开 per-pixel alpha）
+    // 并把窗口的合成背景刷设成全透明。
+    public const uint DWM_BB_ENABLE = 0x00000001;
+    public const uint DWM_BB_BLURREGION = 0x00000002;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DWM_BLURBEHIND
+    {
+        public uint dwFlags;
+        public int fEnable;          // BOOL
+        public IntPtr hRgnBlur;
+        public int fTransitionOnMaximized;
+    }
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmEnableBlurBehindWindow(IntPtr hWnd, ref DWM_BLURBEHIND pBlurBehind);
+
+    [DllImport("gdi32.dll")]
+    public static extern IntPtr CreateRectRgn(int x1, int y1, int x2, int y2);
+
+    [DllImport("gdi32.dll")]
+    public static extern bool DeleteObject(IntPtr hObject);
+
     public const int GWL_STYLE = -16;
     public const int WS_CAPTION = 0x00C00000;
     public const int WS_THICKFRAME = 0x00040000;

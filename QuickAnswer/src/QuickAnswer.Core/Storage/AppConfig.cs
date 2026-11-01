@@ -35,8 +35,11 @@ public sealed class AppConfig
     /// <summary>检测间隔（毫秒）。200–5000。</summary>
     public int IntervalMs { get; set; } = 1000;
 
-    /// <summary>换题判定：新文本与上一题的相似度低于此值即认为换题。</summary>
-    public double ChangeThreshold { get; set; } = 0.70;
+    /// <summary>
+    /// 同一题判定：新指纹与上一题的相似度高于此值就认为没换题，不再请求接口。
+    /// 曾经是 0.70，等于「题干像就跳过」，模板题全被吃掉，所以提到 0.95。
+    /// </summary>
+    public double ChangeThreshold { get; set; } = 0.95;
 
     /// <summary>题库命中阈值：低于此值改问 AI，宁慢不给错。</summary>
     public double HitThreshold { get; set; } = 0.85;
@@ -95,6 +98,11 @@ public sealed class AppConfig
                     {
                         cfg.ServerUrl = DefaultServerUrl;
                     }
+
+                    // 0.70 是旧的「同题」阈值，会把题干类似的相邻题当成同一题吞掉
+                    if (Math.Abs(cfg.ChangeThreshold - 0.70) < 0.001)
+                        cfg.ChangeThreshold = 0.95;
+
                     return cfg;
                 }
             }

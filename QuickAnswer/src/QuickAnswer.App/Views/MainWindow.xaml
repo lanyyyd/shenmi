@@ -98,12 +98,6 @@
                 <!-- 开关区 -->
                 <StackPanel Spacing="10" Margin="0,2,0,2">
                     <Grid>
-                        <TextBlock Text="自动循环" FontSize="12" Foreground="{StaticResource QaTextBrush}"
-                                   VerticalAlignment="Center" />
-                        <ToggleSwitch x:Name="AutoLoopSwitch" HorizontalAlignment="Right" OnContent=""
-                                      OffContent="" Toggled="OnAutoLoopToggled" />
-                    </Grid>
-                    <Grid>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="隐蔽模式" FontSize="12" Foreground="{StaticResource QaTextBrush}" />
                             <TextBlock Text="答案浮在屏幕中央，按住可拖动" FontSize="9.5"
@@ -124,24 +118,33 @@
                 </StackPanel>
 
                 <!-- 操作按钮 -->
-                <Grid ColumnSpacing="10">
+                <Grid ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="120" />
+                        <ColumnDefinition Width="92" />
+                        <ColumnDefinition Width="92" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
-                    <Button Grid.Column="0" Content="框选区域" Height="42" HorizontalAlignment="Stretch"
-                            Click="OnSelectRegionClick" />
+                    <Button x:Name="StartBtn" Grid.Column="0" Content="开始" Height="42"
+                            HorizontalAlignment="Stretch" Style="{StaticResource AccentButtonStyle}"
+                            Click="OnStartClick" ToolTipService.ToolTip="开始监听换题（Alt+W 也可以）" />
 
-                    <Button Grid.Column="1" Content="立即识别" Height="42" HorizontalAlignment="Stretch"
-                            Style="{StaticResource AccentButtonStyle}" Click="OnRecognizeClick" />
+                    <Button x:Name="PauseBtn" Grid.Column="1" Content="暂停" Height="42"
+                            HorizontalAlignment="Stretch" IsEnabled="False"
+                            Click="OnPauseClick" ToolTipService.ToolTip="暂停监听，已出的答案留在屏幕上" />
+
+                    <Button Grid.Column="2" Content="立即识别" Height="42" HorizontalAlignment="Stretch"
+                            Click="OnRecognizeClick" />
                 </Grid>
+
+                <Button Content="框选题目区域" Height="38" HorizontalAlignment="Stretch"
+                        Click="OnSelectRegionClick" />
 
                 <!-- 底部统计 -->
                 <Grid Margin="0,4,0,0">
                     <TextBlock x:Name="StatsLabel" Text="今日 0 题 · 命中 0" FontSize="10"
                                Foreground="{StaticResource QaMutedBrush}" />
-                    <TextBlock Text="Alt+Q 识别 · Alt+D 隐蔽 · Alt+W 循环" FontSize="9.5"
+                    <TextBlock Text="Alt+Q 识别 · Alt+D 隐蔽 · Alt+W 开关监听" FontSize="9.5"
                                Foreground="#FFC0C6D0" HorizontalAlignment="Right" />
                 </Grid>
 

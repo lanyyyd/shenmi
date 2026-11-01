@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -33,8 +34,9 @@ public sealed partial class MainWindow : Window
     private OverlayWindow? _overlay;
     private StealthWindow? _stealth;
 
-    private ulong _lastHash;
-    private string _lastStem = "";
+    private byte[]? _lastFrame;
+    private string _lastFingerprint = "";
+    private int _sameFrameTicks;
     private DateTime _lastTriggerUtc = DateTime.MinValue;
     private bool _working;
     private bool _ready;
@@ -88,7 +90,10 @@ public sealed partial class MainWindow : Window
 
         _ = LoadModelsAsync();
 
-        if (App.Config.AutoLoop && App.Config.Region is not null)
+        // 上次是在监听状态就直接接着监听；没框选区域就别自动开跑
+        bool resume = App.Config.AutoLoop && App.Config.Region is not null;
+        UpdateLoopButtons(resume);
+        if (resume)
             StartLoop();
     }
 
@@ -109,7 +114,7 @@ public sealed partial class MainWindow : Window
     {
         var cfg = App.Config;
 
-        AutoLoopSwitch.IsOn = cfg.AutoLoop;
+        UpdateLoopButtons(false);           // 构造阶段必然没在监听，真正的状态在首次激活时定
         StealthSwitch.IsOn = cfg.StealthMode;
         ProtectSwitch.IsOn = cfg.ProtectFromCapture;
 
@@ -176,7 +181,7 @@ public sealed partial class MainWindow : Window
                         _ = RecognizeOnceAsync();
                         break;
                     case HotkeyLoop:
-                        AutoLoopSwitch.IsOn = !AutoLoopSwitch.IsOn;
+                        SetAutoLoop(!App.Config.AutoLoop);
                         break;
                     case HotkeyStealth:
                         StealthSwitch.IsOn = !StealthSwitch.IsOn;
@@ -268,38 +273,56 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 一次检测周期。绝大多数情况下在第 3 行就返回了 —— 这正是设计意图：
+    /// 一次检测周期。绝大多数情况下在「画面没变」那步就返回了 —— 这正是设计意图：
     /// 画面没变就不做 OCR，否则每秒跑一次 OCR 会把 CPU 吃满。
+    ///
+    /// 但闸门不能太粗：以前用 9×8 dHash 判「变没变」，换一行字指纹只差几位，
+    /// 直接被当成没变，用户点了下一题也不触发 —— 只能手动识别。
+    /// 现在用 64×64 逐格比较（见 FrameDiff），并在「没变」时允许重试两次，
+    /// 因为 OCR 偶尔会把一帧读空。
     /// </summary>
     private async Task TickAsync(ScreenRect region, bool force, CancellationToken ct)
     {
-        var gray = ScreenCapturer.CaptureGray(region, DHash.W, DHash.H);
-        if (gray is null)
+        var frame = ScreenCapturer.CaptureGray(region, FrameDiff.W, FrameDiff.H);
+        if (frame is null)
             return;
 
-        var hash = DHash.Compute(gray);
-        int dist = DHash.Hamming(hash, _lastHash);
+        bool changed = force || FrameDiff.HasChanged(_lastFrame, frame);
 
-        if (!force && _lastHash != 0 && dist <= ChangeThresholds.Unchanged)
-            return;
-
-        // 画面还在动（加载动画、弹窗渐入）就先等等，别把过渡态当成新题目
-        if (!force && dist <= ChangeThresholds.PageSwitch)
+        if (changed)
         {
-            await Task.Delay(ChangeThresholds.SettleDelay, ct).ConfigureAwait(false);
+            _sameFrameTicks = 0;
 
-            var again = ScreenCapturer.CaptureGray(region, DHash.W, DHash.H);
-            if (again is null)
+            // 画面还在动（加载动画、弹窗渐入）就先等等，别把过渡态当成新题目
+            if (!force)
+            {
+                await Task.Delay(ChangeThresholds.SettleDelay, ct).ConfigureAwait(false);
+
+                var again = ScreenCapturer.CaptureGray(region, FrameDiff.W, FrameDiff.H);
+                if (again is not null)
+                {
+                    // 只有「整页还在动」才放弃这一轮。用大阈值是为了别被一个闪烁的光标
+                    // 或秒表数字卡住 —— 那种小改动该照样识别。
+                    if (FrameDiff.HasChanged(frame, again, FrameDiff.BusyCells))
+                    {
+                        // 仍在变化，这一轮放弃；记下当前画面，下一轮接着判
+                        _lastFrame = again;
+                        return;
+                    }
+
+                    frame = again;
+                }
+            }
+        }
+        else
+        {
+            // 和上一帧一模一样。允许重试两次：上一次可能是 OCR 读空了，
+            // 不是画面没问题。超过就安静等画面变化。
+            if (_sameFrameTicks++ >= ChangeThresholds.MaxSameFrameRetries)
                 return;
-
-            var hash2 = DHash.Compute(again);
-            if (DHash.Hamming(hash, hash2) > 2)
-                return;   // 仍在变化，这一轮放弃
-
-            hash = hash2;
         }
 
-        _lastHash = hash;
+        _lastFrame = frame;
 
         if (!force && DateTime.UtcNow - _lastTriggerUtc < ChangeThresholds.Debounce)
             return;
@@ -330,17 +353,18 @@ public sealed partial class MainWindow : Window
 
             var question = QuestionParser.Parse(lines);
 
-            // 这一帧不像题目：可能是桌面图标、报错弹窗、加载占位
+            // 这一帧不像题目：可能是桌面图标、报错弹窗、加载占位。
+            // 注意别把这一帧记成"已处理"—— 下一帧很可能就是真题。
             if (question.RawOcr.Length < 6)
                 return;
             if (TextNormalizer.ChineseRatio(question.RawOcr) < 0.25 && question.Options.Count == 0)
                 return;
 
-            var stemNorm = TextNormalizer.Normalize(question.Stem ?? "");
+            var fingerprint = BuildFingerprint(question);
 
-            if (!force && _lastStem.Length > 0)
+            if (!force && _lastFingerprint.Length > 0)
             {
-                var sim = Similarity.Dice(stemNorm, _lastStem);
+                var sim = Similarity.Dice(fingerprint, _lastFingerprint);
                 if (sim >= App.Config.ChangeThreshold)
                 {
                     Post(() => SetStatus("监听中", "#FF166534"));
@@ -348,7 +372,7 @@ public sealed partial class MainWindow : Window
                 }
             }
 
-            _lastStem = stemNorm;
+            _lastFingerprint = fingerprint;
             _lastTriggerUtc = DateTime.UtcNow;
 
             var result = await _orchestrator.ProcessAsync(question, ct).ConfigureAwait(false);
@@ -441,6 +465,22 @@ public sealed partial class MainWindow : Window
         _stealth.Render(result);
     }
 
+    /// <summary>
+    /// 「是不是同一题」的指纹：题干 + 全部选项。
+    ///
+    /// 只比题干会被模板题骗过去 —— 「下列说法正确的是」这种句子在整张卷子里
+    /// 重复十几次，光比题干就永远是同一题，新题被静默丢掉，用户只能手动识别。
+    /// 选项也进指纹之后，题干雷同、选项不同的两道题会被正确区分开。
+    /// </summary>
+    private static string BuildFingerprint(ParsedQuestion q)
+    {
+        var sb = new StringBuilder(q.Stem ?? "");
+        foreach (var o in q.Options)
+            sb.Append('|').Append(o.Text);
+
+        return TextNormalizer.Normalize(sb.ToString());
+    }
+
     private static string Truncate(string s, int max)
     {
         if (string.IsNullOrEmpty(s))
@@ -467,8 +507,9 @@ public sealed partial class MainWindow : Window
         App.Config.Region = rect.Value;
         App.Config.Save();
 
-        _lastHash = 0;
-        _lastStem = "";
+        _lastFrame = null;
+        _lastFingerprint = "";
+        _sameFrameTicks = 0;
 
         UpdateRegionLabel();
         SetStatus("监听中", "#FF166534");
@@ -484,8 +525,9 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        _lastHash = 0;
-        _lastStem = "";
+        _lastFrame = null;
+        _lastFingerprint = "";
+        _sameFrameTicks = 0;
 
         try
         {
@@ -641,21 +683,57 @@ public sealed partial class MainWindow : Window
         App.Config.Region = null;
         App.Config.Save();
 
-        _lastHash = 0;
-        _lastStem = "";
+        _lastFrame = null;
+        _lastFingerprint = "";
+        _sameFrameTicks = 0;
         UpdateRegionLabel();
         SetStatus("已清除框选区域", "#FF6B7280");
     }
 
-    private void OnAutoLoopToggled(object sender, RoutedEventArgs e)
-    {
-        App.Config.AutoLoop = AutoLoopSwitch.IsOn;
-        App.Config.Save();
+    // ---------------------------------------------------------------- 开始 / 暂停
 
-        if (AutoLoopSwitch.IsOn)
+    private void OnStartClick(object sender, RoutedEventArgs e) => SetAutoLoop(true);
+
+    private void OnPauseClick(object sender, RoutedEventArgs e) => SetAutoLoop(false);
+
+    /// <summary>
+    /// 开始/暂停的唯一入口（按钮、Alt+W、启动续跑都走这里），
+    /// 免得按钮状态和实际循环状态对不上。
+    /// </summary>
+    private void SetAutoLoop(bool on, bool save = true)
+    {
+        if (on && App.Config.Region is null)
+        {
+            SetStatus("请先框选题目区域", "#FFDC2626");
+            UpdateLoopButtons(false);
+            return;
+        }
+
+        App.Config.AutoLoop = on;
+        if (save)
+            App.Config.Save();
+
+        if (on)
+        {
+            // 重新开始时丢掉上一帧：屏幕上正显示的那道题应该马上被识别一次，
+            // 而不是等用户翻页才动
+            _lastFrame = null;
+            _sameFrameTicks = 0;
             StartLoop();
+        }
         else
+        {
             StopLoop();
+        }
+
+        UpdateLoopButtons(on);
+    }
+
+    private void UpdateLoopButtons(bool running)
+    {
+        // 状态只靠「哪个可点」表达：跑着的时候开始变灰、暂停可点，反之亦然
+        StartBtn.IsEnabled = !running;
+        PauseBtn.IsEnabled = running;
     }
 
     private void OnStealthToggled(object sender, RoutedEventArgs e)
