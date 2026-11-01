@@ -78,6 +78,12 @@ public sealed class AppConfig
     /// <summary>隐蔽模式浮层点击穿透。开着就不能拖动（只能从设置页复位位置）。</summary>
     public bool StealthClickThrough { get; set; }
 
+    /// <summary>
+    /// 填空题 / 简答题出答案后自动放进剪贴板。
+    /// 判断、单选、多选不触发 —— 一个字母复制过去没意义，还会毁掉用户自己复制的东西。
+    /// </summary>
+    public bool AutoCopyAnswer { get; set; } = true;
+
     /// <summary>窗口从屏幕捕获中排除。关掉它才能被 OBS/极域录到。</summary>
     public bool ProtectFromCapture { get; set; } = true;
 

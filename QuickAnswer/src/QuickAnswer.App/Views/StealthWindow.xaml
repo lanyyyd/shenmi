@@ -23,7 +23,7 @@
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
 
-                    <TextBlock x:Name="HintLabel" Text="按住拖动" FontSize="9" Foreground="#FF94A3B8"
+                    <TextBlock x:Name="HintLabel" Text="点击复制 · 拖动移位" FontSize="9" Foreground="#FF94A3B8"
                                HorizontalAlignment="Right" VerticalAlignment="Center" />
                 </Grid>
 

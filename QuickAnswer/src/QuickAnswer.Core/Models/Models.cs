@@ -74,6 +74,57 @@ public sealed class AnswerResult
     [JsonIgnore]
     public List<OptionItem> TargetOptions { get; set; } = new();
 
+    /// <summary>
+    /// 是不是「得自己把答案打进答题框」的题：填空、简答。
+    ///
+    /// 判断/单选/多选不算 —— 它们的产物是一个字母，用户点选项就行，
+    /// 自动复制只会把剪贴板搞脏（还要连带毁掉用户自己复制的东西）。
+    ///
+    /// Type 未知时（视觉模型没给 type、或者本地没判出来）退化成看形状：
+    /// 没有字母、但有正文，那基本就是自由作答。
+    /// </summary>
+    [JsonIgnore]
+    public bool IsSubjective => Type switch
+    {
+        QuestionType.Fill or QuestionType.Short => true,
+        QuestionType.Choice or QuestionType.Multi or QuestionType.Judge => false,
+        _ => (Letter ?? "").Trim().Length == 0 && (Text ?? "").Trim().Length > 0,
+    };
+
+    /// <summary>
+    /// 该放进剪贴板的那段字。
+    ///
+    /// 主观题只给正文（去掉「答案：」这类抬头），因为用户要的是答案本身；
+    /// 客观题优先给字母 —— 外面粘贴到聊天框里一个 "A" 比一整句选项原文更好用。
+    /// </summary>
+    [JsonIgnore]
+    public string CopyText
+    {
+        get
+        {
+            var text = StripPrefix(Text);
+            var letter = (Letter ?? "").Trim();
+
+            if (IsSubjective)
+                return text.Length > 0 ? text : letter;
+
+            return letter.Length > 0 ? letter : text;
+        }
+    }
+
+    /// <summary>模型偶尔会把「答案：xxx」「答: xxx」一起写进 answer_text，贴过去很碍眼。</summary>
+    private static string StripPrefix(string? raw)
+    {
+        var s = (raw ?? "").Trim();
+        foreach (var prefix in new[] { "答案：", "答案:", "答：", "答:", "参考答案：", "参考答案:" })
+        {
+            if (s.StartsWith(prefix, StringComparison.Ordinal))
+                return s[prefix.Length..].Trim();
+        }
+
+        return s;
+    }
+
     public static AnswerResult Fail(string reason) => new() { Source = "", Text = "", Detail = reason };
 }
 

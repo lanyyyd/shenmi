@@ -723,8 +723,37 @@ public sealed partial class MainWindow : Window
         else
             ShowOverlay(result);
 
+        AutoCopy(result);
+
         UpdateStats();
         App.Config.Save();
+    }
+
+    /// <summary>
+    /// 填空题 / 简答题出答案后自动进剪贴板。
+    ///
+    /// 只对「要自己打字」的题生效：判断题、单选、多选的答案是一个字母，
+    /// 用户点一下就完了；硬复制过去反而毁掉他自己刚复制的东西。
+    ///
+    /// 每道新题只跑一次 —— Render 只在新题（或手动识别）时被调用，
+    /// 循环里逐帧比对不会走到这里。
+    /// </summary>
+    private void AutoCopy(AnswerResult result)
+    {
+        if (!App.Config.AutoCopyAnswer || !result.IsSubjective)
+            return;
+
+        var text = result.CopyText;
+        if (text.Length == 0)
+            return;
+
+        bool ok = ClipboardWriter.SetText(text);
+
+        // 隐蔽模式让浮层自己打一句「已复制」，两处提示只留一处
+        if (App.Config.StealthMode)
+            _stealth?.NotifyCopied(ok);
+        else if (ok)
+            SetStatus("答案已复制到剪贴板", "#FF166534");
     }
 
     private void UpdatePreview(ParsedQuestion question, AnswerResult result)
@@ -1007,7 +1036,7 @@ public sealed partial class MainWindow : Window
         var row = new Grid();
         row.Children.Add(new TextBlock
         {
-            Text = "点击穿透（开启后无法拖动）",
+            Text = "点击穿透（开启后无法拖动、也无法点浮层复制）",
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
             Width = 210,
@@ -1029,6 +1058,39 @@ public sealed partial class MainWindow : Window
         };
         row.Children.Add(toggle);
         box.Children.Add(row);
+
+        // ---- 自动复制 ----
+        box.Children.Add(new TextBlock
+        {
+            Text = "填空 / 简答出答案后自动进剪贴板；选择题不复制（答案是个字母，复制过去没意义）。\n隐蔽模式下点一下浮层也能手动复制。",
+            FontSize = 10.5,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 107, 114, 128)),
+        });
+
+        var copyRow = new Grid();
+        copyRow.Children.Add(new TextBlock
+        {
+            Text = "自动复制答案",
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        var copyToggle = new ToggleSwitch
+        {
+            IsOn = App.Config.AutoCopyAnswer,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            OnContent = "",
+            OffContent = "",
+        };
+        copyToggle.Toggled += (_, _) =>
+        {
+            App.Config.AutoCopyAnswer = copyToggle.IsOn;
+            App.Config.Save();
+        };
+        copyRow.Children.Add(copyToggle);
+        box.Children.Add(copyRow);
 
         var reset = new Button
         {

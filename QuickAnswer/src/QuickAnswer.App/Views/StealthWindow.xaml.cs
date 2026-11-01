@@ -55,12 +55,30 @@ public sealed partial class StealthWindow : Window
     private int _dragCursorX, _dragCursorY;
     private int _dragOriginX, _dragOriginY;
 
+    /// <summary>按下时的绝对光标位置与时间，用来区分「点一下」和「拖动」。</summary>
+    private int _pressX, _pressY;
+    private long _pressTicks;
+    private bool _movedFar;
+
     private int _logicalW = MinWidth;
     private int _logicalH = MinHeight;
     private int _left;
     private int _top;
 
     private double _opacity = 0.30;
+
+    /// <summary>当前卡片对应的、可以放进剪贴板的那段字。</summary>
+    private string _copyText = "";
+
+    private int _flashToken;
+
+    private const string HintText = "点击复制 · 拖动移位";
+
+    /// <summary>移动超过这么多物理像素就算拖动，不算点击。手抖几个像素很正常（200% 缩放下尤其）。</summary>
+    private const int TapSlop = 8;
+
+    /// <summary>按住超过这个时长就不当点击了（长按拖沓的人不至于误触发复制）。</summary>
+    private const int TapMaxMs = 900;
 
     public StealthWindow()
     {
@@ -122,6 +140,7 @@ public sealed partial class StealthWindow : Window
     public void Clear()
     {
         _dragging = false;
+        _copyText = "";
         AppWindow.Hide();
     }
 
@@ -172,6 +191,9 @@ public sealed partial class StealthWindow : Window
             : Windows.UI.Color.FromArgb(255, 96, 165, 250));
 
         MeasureCard(hasLetter, letter, text);
+
+        // 复制用「整理过」的文本：主观题去掉「答案：」抬头，客观题优先给字母
+        _copyText = result.CopyText;
         return true;
     }
 
@@ -309,6 +331,12 @@ public sealed partial class StealthWindow : Window
         _dragOriginX = AppWindow.Position.X;
         _dragOriginY = AppWindow.Position.Y;
 
+        // 同一个按下还要负责分辨「点一下复制」和「拖走」
+        _pressX = cursor.X;
+        _pressY = cursor.Y;
+        _pressTicks = Environment.TickCount64;
+        _movedFar = false;
+
         Hit.CapturePointer(e.Pointer);
         e.Handled = true;
     }
@@ -321,8 +349,14 @@ public sealed partial class StealthWindow : Window
         if (!GetCursorPos(out var cursor))
             return;
 
-        int left = _dragOriginX + (cursor.X - _dragCursorX);
-        int top = _dragOriginY + (cursor.Y - _dragCursorY);
+        int dx = cursor.X - _dragCursorX;
+        int dy = cursor.Y - _dragCursorY;
+
+        if (!_movedFar && Math.Abs(cursor.X - _pressX) + Math.Abs(cursor.Y - _pressY) > TapSlop)
+            _movedFar = true;
+
+        int left = _dragOriginX + dx;
+        int top = _dragOriginY + dy;
 
         var area = WindowHelper.WorkAreaAt(this, cursor.X, cursor.Y);
         var size = AppWindow.Size;
@@ -346,6 +380,55 @@ public sealed partial class StealthWindow : Window
         App.Config.StealthTop = _top;
         App.Config.Save();
 
+        // 没挪动、也没按太久 → 这是「点了一下」，复制答案
+        bool tap = !_movedFar && Environment.TickCount64 - _pressTicks <= TapMaxMs;
+        if (tap)
+            CopyAnswer();
+
         e.Handled = true;
+    }
+
+    // ---------------------------------------------------------------- 复制
+
+    /// <summary>
+    /// 把当前答案放进剪贴板。
+    ///
+    /// 主观题复制正文，客观题复制字母（见 AnswerResult.CopyText）。
+    /// 返回值只用于界面提示 —— 剪贴板被别的程序占住时失败很正常。
+    /// </summary>
+    public bool CopyAnswer()
+    {
+        bool ok = ClipboardWriter.SetText(_copyText);
+        NotifyCopied(ok);
+        return ok;
+    }
+
+    /// <summary>自动复制之后由主窗口回调，让用户知道剪贴板里已经有答案了。</summary>
+    public void NotifyCopied(bool ok)
+    {
+        int token = ++_flashToken;
+
+        HintLabel.Text = ok ? "已复制 ✓" : "剪贴板被占用";
+        HintLabel.Foreground = new SolidColorBrush(
+            ok ? Windows.UI.Color.FromArgb(255, 74, 222, 128)
+               : Windows.UI.Color.FromArgb(255, 248, 113, 113));
+
+        // 1.4 秒后撤回提示。token 是防止连续换题时旧定时器把新提示冲掉。
+        try
+        {
+            _ = DispatcherQueue.TryEnqueue(async () =>
+            {
+                await Task.Delay(1400);
+                if (token != _flashToken)
+                    return;
+
+                HintLabel.Text = HintText;
+                ApplyOpacity();          // 顺便把配色还原（无背景时是另一套颜色）
+            });
+        }
+        catch
+        {
+            // 窗口正在关闭时排队会失败，提示留在上面无所谓
+        }
     }
 }
