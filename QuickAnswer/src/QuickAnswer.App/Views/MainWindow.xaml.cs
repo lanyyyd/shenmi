@@ -49,7 +49,9 @@ public sealed partial class MainWindow : Window
 
         WindowHelper.Resize(this, 420, 680);
         WindowHelper.CenterOnScreen(this, 420, 680);
-        WindowHelper.HideFromSwitcher(this);
+        // 主窗口就是普通软件窗口：Alt+Tab 能看到、任务栏有图标。
+        // 隐蔽只作用于悬浮窗和标注层，不该让用户找不到主程序。
+        AppWindow.IsShownInSwitchers = true;
 
         _ocr = WinRtOcrEngine.Create();
         _orchestrator = new AnswerOrchestrator(App.Api, App.Config)
@@ -548,7 +550,8 @@ public sealed partial class MainWindow : Window
         Add("账号", App.Session.DisplayName);
         Add("服务器", App.Config.ServerUrl);
         Add("今日", $"{App.Config.TodayCount} 题 · 命中 {App.Config.TodayHit}");
-        Add("热键", "Alt+Q 识别 · Alt+W 循环 · Alt+D 隐蔽模式");
+        Add("热键", "Alt+Q 识别 · Alt+W 循环 · Alt+D 隐蔽模式 · Alt+Shift+D 应急隐藏");
+        Add("后端自检", App.Config.ServerUrl + "/api/v1/qa/diag");
 
         return panel;
     }

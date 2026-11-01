@@ -11,13 +11,18 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import sqlite3
+import sys
 import time
 import unicodedata
 from collections import Counter
 from typing import Any, Optional
 
 from .db import cursor, execute, query_all, query_one
+
+log = logging.getLogger("gateway.qa")
 
 # ============================================================ 建表
 
@@ -86,17 +91,26 @@ CREATE TABLE IF NOT EXISTS qa_prompts (
 """
 
 _schema_ready = False
+_init_error: Optional[str] = None
 
 
 def ensure_schema() -> None:
     """懒建表。放在首次请求里执行，避免依赖 main.py 的 startup 钩子。"""
-    global _schema_ready
+    global _schema_ready, _init_error
     if _schema_ready:
         return
-    with cursor() as cur:
-        cur.executescript(SCHEMA_SQL)
-    _seed_defaults()
-    _schema_ready = True
+
+    try:
+        with cursor() as cur:
+            cur.executescript(SCHEMA_SQL)
+        _seed_defaults()
+        _schema_ready = True
+        _init_error = None
+    except Exception as exc:
+        # 记下来，/diag 能查到；否则只有一个 500，根本不知道哪一步炸的
+        _init_error = f"{type(exc).__name__}: {exc}"
+        log.warning("题库建表失败：%s", _init_error)
+        raise
 
 
 def _seed_defaults() -> None:
@@ -110,6 +124,45 @@ def _seed_defaults() -> None:
 
 def now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def diagnostics() -> dict:
+    """给 /diag 用：不抛异常，把能看到的状态全吐出来。"""
+    # 主动试着建一次表：这样第一次打开 /diag 就能看到「建表成功/失败」的真实结果，
+    # 而不是一片「缺失」让人以为模块没装
+    if not _schema_ready:
+        try:
+            ensure_schema()
+        except Exception:                                 # noqa: BLE001
+            pass                                          # 错误已经记进 _init_error
+
+    info: dict = {
+        "schema_ready": _schema_ready,
+        "init_error": _init_error,
+        "python": sys.version.split()[0],
+        "sqlite": sqlite3.sqlite_version,
+        "tables": {},
+        "ok": False,
+    }
+
+    try:
+        rows = query_all("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'qa_%'")
+        existing = {r["name"] for r in rows}
+
+        for t in ("qa_questions", "qa_variants", "qa_votes", "qa_models", "qa_prompts"):
+            if t not in existing:
+                info["tables"][t] = "缺失"
+                continue
+            try:
+                info["tables"][t] = int(query_one(f"SELECT COUNT(*) AS c FROM {t}")["c"])
+            except Exception as exc:                       # noqa: BLE001
+                info["tables"][t] = f"查询失败: {exc}"
+
+        info["ok"] = _schema_ready and all(isinstance(v, int) for v in info["tables"].values())
+    except Exception as exc:                              # noqa: BLE001
+        info["error"] = f"{type(exc).__name__}: {exc}"
+
+    return info
 
 
 # ============================================================ 文本处理

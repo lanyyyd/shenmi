@@ -19,7 +19,6 @@ public sealed partial class LoginWindow : Window
         Title = "QuickAnswer · 登录";
         WindowHelper.Resize(this, 420, 600);
         WindowHelper.CenterOnScreen(this, 420, 600);
-        WindowHelper.HideFromSwitcher(this);
 
         UserBox.Text = App.Config.Username ?? "";
         ServerBox.Text = App.Config.ServerUrl;

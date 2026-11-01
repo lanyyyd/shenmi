@@ -13,7 +13,6 @@ import logging
 import time
 from typing import Any, Optional
 
-import requests
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -62,11 +61,20 @@ def solve(payload: dict = Body(...), user: dict = Depends(get_current_user)):
     if not stem:
         raise HTTPException(400, "题干为空")
 
-    model = QA.get_model(model_id)
-    if not model:
-        raise HTTPException(503, "后台还没有配置可用的 AI 模型，请联系管理员")
+    try:
+        model = QA.get_model(model_id)
+    except Exception as exc:                              # noqa: BLE001
+        log.warning("读取模型配置失败：%s", exc)
+        raise HTTPException(500, f"题库模块未就绪：{exc}")
 
-    prompt = QA.build_prompt(qtype, stem, options if isinstance(options, list) else [])
+    if not model:
+        raise HTTPException(503, "后台还没有配置可用的 AI 模型，请管理员在 /admin-qa.html 添加")
+
+    try:
+        prompt = QA.build_prompt(qtype, stem, options if isinstance(options, list) else [])
+    except Exception as exc:                              # noqa: BLE001
+        log.warning("构建提示词失败：%s", exc)
+        raise HTTPException(500, f"提示词读取失败：{exc}")
     messages = [{"role": "user", "content": prompt}]
 
     def event(payload_obj: dict) -> str:
@@ -170,6 +178,14 @@ def _call_model_stream(model: dict, messages: list[dict]):
     这段 SSE 解析与 aicore._call_model_stream 同源：关键在于必须按 UTF-8 解码，
     否则某些中转不声明 charset 时 requests 会按 latin-1 解，中文直接变乱码。
     """
+    # 延迟导入：requests 缺失时只影响 AI 调用，不该让整个题库路由 500
+    try:
+        import requests
+        from requests import Timeout as RequestsTimeout
+    except ImportError:
+        yield "error", "服务端缺少 requests 库（pip install requests），AI 调用不可用"
+        return
+
     base = str(model.get("base_url") or "").rstrip("/")
     key = str(model.get("api_key") or "").strip()
     name = str(model.get("model_name") or "")
@@ -238,7 +254,7 @@ def _call_model_stream(model: dict, messages: list[dict]):
                 if piece:
                     yield "delta", str(piece)
 
-    except requests.Timeout:
+    except RequestsTimeout:
         yield "error", "AI 接口超时"
     except Exception as exc:                           # noqa: BLE001
         log.warning("AI 流式调用异常：%s", exc)
@@ -268,6 +284,15 @@ def contribute(payload: dict = Body(...), user: dict = Depends(get_current_user)
     except (TypeError, ValueError):
         confidence = 0.0
 
+    try:
+        return _do_contribute(user, payload, stem, options, confidence)
+
+    except Exception as exc:                              # noqa: BLE001
+        log.warning("上报题库失败：%s", exc)
+        raise HTTPException(500, f"入库失败：{exc}")
+
+
+def _do_contribute(user, payload, stem, options, confidence):
     result = QA.contribute(
         stem=stem,
         options=options,
@@ -288,7 +313,17 @@ def contribute(payload: dict = Body(...), user: dict = Depends(get_current_user)
 
 @router.get("/models")
 def models(user: dict = Depends(get_current_user)):
-    return [m for m in QA.list_models() if m.get("enabled")]
+    try:
+        return [m for m in QA.list_models() if m.get("enabled")]
+    except Exception as exc:                              # noqa: BLE001
+        log.warning("模型列表失败：%s", exc)
+        raise HTTPException(500, f"题库模块未就绪：{exc}")
+
+
+@router.get("/diag")
+def diag(user: dict = Depends(get_current_user)):
+    """浏览器直接打开就能看后端题库模块的健康状态。出问题时先看这个。"""
+    return QA.diagnostics()
 
 
 # ============================================================ 管理接口（网页后台）
