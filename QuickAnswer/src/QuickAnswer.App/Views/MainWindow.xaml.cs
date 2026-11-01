@@ -666,7 +666,7 @@ public sealed partial class MainWindow : Window
                     return;
                 }
                 var sb = new StringBuilder();
-                sb.AppendLine($"模型 {resp.Model ?? "?"} · 请求 {sw.ElapsedMilliseconds}ms · 服务端 {resp.ElapsedMs}ms");
+                sb.AppendLine($"模型 {resp?.Model ?? "?"} · 请求 {sw.ElapsedMilliseconds}ms · 服务端 {resp?.ElapsedMs ?? 0}ms");
                 sb.AppendLine($"图片 {fit.Width}×{fit.Height} · PNG {png.Length / 1024} KB · base64 约 {png.Length * 4 / 3 / 1024} KB");
                 sb.AppendLine();
                 sb.AppendLine($"type       {dto.Type}");
