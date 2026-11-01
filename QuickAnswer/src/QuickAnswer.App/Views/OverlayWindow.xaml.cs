@@ -37,7 +37,8 @@ public sealed partial class OverlayWindow : Window
         WindowHelper.SuppressEraseBackground(this);
         ApplyCorner();
 
-        PlaceBottomRight();
+        PlaceInitial();
+        SetOpacity(App.Config.OverlayOpacity);
         WindowHelper.EnableClickThrough(this, () => App.Config.ClickThrough);
 
         Root.DoubleTapped += OnDoubleTapped;
@@ -66,6 +67,32 @@ public sealed partial class OverlayWindow : Window
         }
     }
 
+    /// <summary>上次拖到的位置还在屏幕里就沿用，否则停回右下角。</summary>
+    private void PlaceInitial()
+    {
+        try
+        {
+            if (App.Config.OverlayLeft >= 0 && App.Config.OverlayTop >= 0)
+            {
+                WindowHelper.MoveTo(this, App.Config.OverlayLeft, App.Config.OverlayTop, FullWidth, FullHeight);
+                return;
+            }
+        }
+        catch
+        {
+        }
+
+        PlaceBottomRight();
+    }
+
+    /// <summary>设置页「复位」用：丢掉记忆位置，停回右下角。</summary>
+    public void ResetPosition()
+    {
+        App.Config.OverlayLeft = -1;
+        App.Config.OverlayTop = -1;
+        PlaceBottomRight();
+    }
+
     private void PlaceBottomRight()
     {
         try
@@ -89,15 +116,20 @@ public sealed partial class OverlayWindow : Window
 
     public void SetOpacity(double opacity)
     {
-        _opacity = Math.Clamp(opacity, 0.1, 1.0);
+        // 0 是合法值：等于「不要背景色」，只留文字
+        _opacity = Math.Clamp(opacity, 0, 1.0);
         ApplyBackground();
     }
 
     private void ApplyBackground()
     {
         // 只调背景 alpha，文字保持不透明 —— 否则题看不清，答案也看不清
-        byte alpha = (byte)Math.Round(255 * Math.Clamp(_opacity, 0.10, 0.95));
-        Root.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(alpha, 30, 36, 48));
+        byte alpha = (byte)Math.Round(255 * Math.Clamp(_opacity, 0, 0.95));
+
+        if (alpha == 0)
+            Root.Background = null;          // 0 = 不要背景色
+        else
+            Root.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(alpha, 30, 36, 48));
     }
 
     public void Render(AnswerResult result)

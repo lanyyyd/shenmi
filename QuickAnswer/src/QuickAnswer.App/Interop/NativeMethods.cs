@@ -41,6 +41,8 @@ internal static class NativeMethods
     public const uint WM_NCHITTEST = 0x0084;
     public const uint WM_HOTKEY = 0x0312;
     public const uint WM_DPICHANGED = 0x02E0;
+    public const uint WM_MOUSEACTIVATE = 0x0021;
+    public const int MA_NOACTIVATE = 3;
     public const int HTTRANSPARENT = -1;
     public const int HTCAPTION = 2;
     public const int DWLP_MSGRESULT = 0;
@@ -96,6 +98,17 @@ internal static class NativeMethods
     // 150% 缩放下窗口只有应有大小的 2/3，内容会整体溢出（用户看到的就是"窗口很小、显示不全"）。
     [DllImport("user32.dll")]
     public static extern uint GetDpiForWindow(IntPtr hWnd);
+
+    // ---- 光标位置（浮层拖动用绝对坐标算位移，相对坐标会越拖越飘）----
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool GetCursorPos(out POINT lpPoint);
 
     // ---- DWM 圆角（Win11）。Win10 上调用失败，忽略即可 ----
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;

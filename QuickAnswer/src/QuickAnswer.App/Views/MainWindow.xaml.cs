@@ -113,8 +113,8 @@ public sealed partial class MainWindow : Window
         StealthSwitch.IsOn = cfg.StealthMode;
         ProtectSwitch.IsOn = cfg.ProtectFromCapture;
 
-        OpacitySlider.Value = Math.Clamp(cfg.OverlayOpacity * 100, 10, 100);
-        OpacityLabel.Text = $"{(int)OpacitySlider.Value}%";
+        OpacitySlider.Value = Math.Clamp(cfg.OverlayOpacity * 100, 0, 100);
+        OpacityLabel.Text = DescribeOpacity(OpacitySlider.Value);
 
         UpdateRegionLabel();
         UpdateStats();
@@ -383,7 +383,7 @@ public sealed partial class MainWindow : Window
         UpdatePreview(question, result);
 
         if (App.Config.StealthMode)
-            ShowStealth(question, result);
+            ShowStealth(result);
         else
             ShowOverlay(result);
 
@@ -428,7 +428,7 @@ public sealed partial class MainWindow : Window
         _overlay.Activate();
     }
 
-    private void ShowStealth(ParsedQuestion question, AnswerResult result)
+    private void ShowStealth(AnswerResult result)
     {
         if (_overlay is not null)
         {
@@ -438,7 +438,7 @@ public sealed partial class MainWindow : Window
 
         _stealth ??= new StealthWindow();
         // 不调 Activate：会把键盘焦点从题目软件抢走
-        _stealth.Render(question, result);
+        _stealth.Render(result);
     }
 
     private static string Truncate(string s, int max)
@@ -553,7 +553,73 @@ public sealed partial class MainWindow : Window
         Add("热键", "Alt+Q 识别 · Alt+W 循环 · Alt+D 隐蔽模式 · Alt+Shift+D 应急隐藏");
         Add("后端自检", App.Config.ServerUrl + "/api/v1/qa/diag");
 
+        panel.Children.Add(BuildOverlaySection());
+
         return panel;
+    }
+
+    /// <summary>设置页里的浮层设置：点击穿透、位置复位。</summary>
+    private UIElement BuildOverlaySection()
+    {
+        var box = new StackPanel { Spacing = 8, Margin = new Thickness(0, 4, 0, 0) };
+
+        box.Children.Add(new TextBlock
+        {
+            Text = "答案浮层",
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 107, 114, 128)),
+        });
+
+        var row = new Grid();
+        row.Children.Add(new TextBlock
+        {
+            Text = "点击穿透（开启后无法拖动）",
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            Width = 210,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        var toggle = new ToggleSwitch
+        {
+            IsOn = App.Config.StealthClickThrough,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            OnContent = "",
+            OffContent = "",
+        };
+        toggle.Toggled += (_, _) =>
+        {
+            App.Config.StealthClickThrough = toggle.IsOn;
+            App.Config.Save();
+        };
+        row.Children.Add(toggle);
+        box.Children.Add(row);
+
+        var reset = new Button
+        {
+            Content = "把浮层复位到屏幕中央",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        reset.Click += (_, _) => ResetOverlayPositions();
+        box.Children.Add(reset);
+
+        return box;
+    }
+
+    /// <summary>把拖丢了的浮层拉回屏幕中央。</summary>
+    private void ResetOverlayPositions()
+    {
+        App.Config.StealthLeft = -1;
+        App.Config.StealthTop = -1;
+        App.Config.OverlayLeft = -1;
+        App.Config.OverlayTop = -1;
+        App.Config.Save();
+
+        _stealth?.ResetPosition();
+        _overlay?.ResetPosition();
+
+        SetStatus("浮层已复位到屏幕中央", "#FF6B7280");
     }
 
     private void DoLogout()
@@ -622,19 +688,25 @@ public sealed partial class MainWindow : Window
 
     private void OnOpacityChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
-        // XAML 解析阶段就会进来一次：Slider 的 Minimum="10" 赋值时，默认 Value=0 被强制
-        // 拉起到 10，于是 ValueChanged 提前触发 —— 那时 OpacityLabel 还没被创建出来。
+        // XAML 解析阶段就会进来一次：Slider 的 Minimum 赋值时，默认 Value=0 可能被拉起，
+        // 于是 ValueChanged 提前触发 —— 那时 OpacityLabel 还没被创建出来。
         // 不挡这一下，整个窗口会在 InitializeComponent 里抛 NRE，外面只会看到
         // "Failed to assign to property RangeBase.Minimum" 这种完全对不上号的错误。
         if (OpacityLabel is null)
             return;
 
         var pct = (int)Math.Round(e.NewValue);
-        OpacityLabel.Text = $"{pct}%";
+        OpacityLabel.Text = DescribeOpacity(pct);
 
         App.Config.OverlayOpacity = pct / 100.0;
+
+        // 两种呈现方式共用这一个设置：0 就是「完全不要背景色」
         _overlay?.SetOpacity(pct / 100.0);
+        _stealth?.SetOpacity(pct / 100.0);
     }
+
+    private static string DescribeOpacity(double percent)
+        => percent <= 0 ? "0% · 无背景" : $"{(int)Math.Round(percent)}%";
 
     private void OnModelChanged(object sender, SelectionChangedEventArgs e)
     {

@@ -1,50 +1,91 @@
-using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using QuickAnswer.App.Interop;
 using QuickAnswer.Core.Models;
+using Windows.Graphics;
+using static QuickAnswer.App.Interop.NativeMethods;
 
 namespace QuickAnswer.App.Views;
 
 /// <summary>
-/// 隐蔽模式的标注层。
+/// 隐蔽模式的答案浮层。
 ///
-/// 三条设计都是被坑出来的：
-///   1. **只覆盖题目区域，不铺满全屏。** 全屏窗口一旦透明失败就是整块白屏，
-///      又因为置顶 + 不在 Alt+Tab 里，用户会被锁死到只能重启电脑。
-///      只盖几百像素的话，最坏情况是一小块白，看得见也关得掉。
-///   2. **窗口真透明**靠 DwmExtendFrameIntoClientArea + 拦 WM_ERASEBKGND。
-///      WinUI 3 原生没有 TransparentTintBackdrop（那是 WinUIEx 的），
-///      不设 SystemBackdrop 时窗口会画主题纯色 —— 这就是白屏的根因。
-///   3. **不加 WS_EX_TOOLWINDOW。** 宁可牺牲一点隐蔽性，也要让用户能 Alt+Tab 切走。
+/// 和上一版的根本差别在「窗口位置由谁决定」：
+///
+///   旧版把标注画在题干/选项旁边，每帧都按 OCR 出来的包围盒 MoveAndResize 一次。
+///   后果就是用户看到的「乱跑」—— 换题、页面滚动、某个选项被识别成两行，
+///   包围盒都会变，窗口于是跟着跳；再叠加一层 DIP/物理像素换算，
+///   高缩放下还会偏出去一截。
+///
+///   新版是一张固定尺寸的卡片：**默认停在屏幕中央**，位置只由用户拖动决定，
+///   并记进配置（StealthLeft / StealthTop），下次开还是那儿。
+///   代价是不能再指着某个选项画三角，但卡片里本来就写着答案字母，信息没丢。
+///
+///   另外两个约束：
+///   · 点击不激活（WM_MOUSEACTIVATE → MA_NOACTIVATE），拖动时不抢焦点，
+///     用户在题目软件里打字不会断；
+///   · 背景不透明度来自设置项，0 = 完全不画背景色（只剩文字）。
 /// </summary>
 public sealed partial class StealthWindow : Window
 {
-    private static readonly Windows.UI.Color TriColor = Windows.UI.Color.FromArgb(235, 239, 68, 68);
-    private static readonly Windows.UI.Color AnswerColor = Windows.UI.Color.FromArgb(240, 16, 185, 129);
-    private static readonly Windows.UI.Color JudgeColor = Windows.UI.Color.FromArgb(240, 15, 118, 110);
+    private const int MinWidth = 232;
+    private const int TextCardWidth = 300;
+    private const int LetterCardWidth = 148;
+    private const int MinHeight = 76;
+    private const int MaxHeight = 220;
 
-    private readonly record struct Mark(
-        string Text, double X, double Y, double Size, double MaxWidth,
-        Windows.UI.Color Color, bool Bold);
+    /// <summary>卡片内边距（左右各 16）+ 抬头行 16 + 行距 7，见 XAML。</summary>
+    private const int ChromeHeight = 22 + 16 + 7;
+    private const int SidePadding = 32;
+
+    private static readonly Windows.UI.Color BgColor = Windows.UI.Color.FromArgb(255, 15, 23, 42);
+    private static readonly Windows.UI.Color LetterColor = Windows.UI.Color.FromArgb(255, 74, 222, 128);
+    private static readonly Windows.UI.Color BodyColor = Windows.UI.Color.FromArgb(255, 241, 245, 249);
+
+    // 没有背景色时只能靠文字自己立住：换成深一点的绿，压在白底试卷上也看得清
+    private static readonly Windows.UI.Color LetterColorNoBg = Windows.UI.Color.FromArgb(255, 5, 150, 105);
+    private static readonly Windows.UI.Color BodyColorNoBg = Windows.UI.Color.FromArgb(255, 6, 78, 59);
 
     private bool _ready;
+    private bool _placed;
+
+    private bool _dragging;
+    private int _dragCursorX, _dragCursorY;
+    private int _dragOriginX, _dragOriginY;
+
+    private int _logicalW = MinWidth;
+    private int _logicalH = MinHeight;
+    private int _left;
+    private int _top;
+
+    private double _opacity = 0.30;
 
     public StealthWindow()
     {
         InitializeComponent();
 
-        Title = "QuickAnswer 标注";
+        Title = "QuickAnswer 答案浮层";
+
+        _opacity = Math.Clamp(App.Config.OverlayOpacity, 0, 1);
 
         WindowHelper.MakeOverlay(this);
         WindowHelper.EnableTransparency(this);
         WindowHelper.SuppressEraseBackground(this);
 
-        // 恒定穿透：这一层永远不响应鼠标
-        WindowHelper.EnableClickThrough(this, () => true);
+        // 不抢焦点：拖动结束（甚至拖动过程中）焦点仍在题目软件上
+        WindowHelper.NoActivate(this);
 
-        // 故意不调 HideFromSwitcher —— 出问题时用户至少能从 Alt+Tab 找到它
+        // 默认可以拖；设置里开了「点击穿透」就整层交还给下层窗口
+        WindowHelper.EnableClickThrough(this, () => App.Config.StealthClickThrough);
+
+        // 事件挂在最外层 Grid 上：透明度 0 时卡片自己 Background 是 null，
+        // 那一层不参与命中测试，挂在它上面就拖不动了
+        Hit.PointerPressed += OnPointerPressed;
+        Hit.PointerMoved += OnPointerMoved;
+        Hit.PointerReleased += OnPointerReleased;
+        Hit.PointerCaptureLost += (_, _) => _dragging = false;
         Activated += OnFirstActivated;
         AppWindow.Hide();
     }
@@ -59,41 +100,19 @@ public sealed partial class StealthWindow : Window
             WindowHelper.ProtectFromCapture(this);
     }
 
-    public void Render(ParsedQuestion question, AnswerResult result)
-    {
-        Layer.Children.Clear();
+    // ---------------------------------------------------------------- 呈现
 
-        var marks = BuildMarks(question, result);
-        if (marks.Count == 0)
+    public void Render(AnswerResult result)
+    {
+        if (!ApplyContent(result))
         {
-            AppWindow.Hide();
+            Clear();
             return;
         }
 
-        // 标注包围盒（屏幕物理像素）
-        var bounds = ComputeBounds(marks);
+        ApplyOpacity();
+        PlaceWindow();
 
-        // 窗口只盖住这块，不铺满屏幕
-        WindowHelper.MoveToPhysical(this, bounds.X, bounds.Y, bounds.Width, bounds.Height);
-
-        // Canvas 用 DIP，标注是物理像素，换算一下
-        double scale = WindowHelper.ScaleFactor(this);
-        if (scale <= 0)
-            scale = 1.0;
-
-        foreach (var m in marks)
-        {
-            AddText(m.Text,
-                (m.X - bounds.X) / scale,
-                (m.Y - bounds.Y) / scale,
-                m.Size,
-                m.MaxWidth / scale,
-                m.Color,
-                m.Bold);
-        }
-
-        // 尺寸变了要重新声明一次玻璃区，否则新增的那块可能是白的
-        WindowHelper.EnableTransparency(this);
         WindowHelper.ShowNoActivate(this);
 
         if (App.Config.ProtectFromCapture)
@@ -102,185 +121,231 @@ public sealed partial class StealthWindow : Window
 
     public void Clear()
     {
-        Layer.Children.Clear();
+        _dragging = false;
         AppWindow.Hide();
     }
 
-    // ---------------------------------------------------------------- 标注计算
-
-    private List<Mark> BuildMarks(ParsedQuestion question, AnswerResult result)
+    /// <summary>设置页「复位」用：丢掉记忆位置，回到屏幕中央。</summary>
+    public void ResetPosition()
     {
-        var marks = new List<Mark>();
+        App.Config.StealthLeft = -1;
+        App.Config.StealthTop = -1;
+        _placed = false;
 
-        if (result.Letter.Length == 0 && string.IsNullOrWhiteSpace(result.Text))
-            return marks;
-
-        switch (question.Type)
+        if (_logicalW > 0 && AppWindow.Size.Width > 0)
         {
-            case QuestionType.Choice:
-            case QuestionType.Multi:
-                BuildChoiceMarks(question, result, marks);
-                break;
-
-            case QuestionType.Judge:
-                BuildJudgeMarks(question, result, marks);
-                break;
-
-            default:
-                BuildAnswerTextMarks(question, result, marks);
-                break;
-        }
-
-        return marks;
-    }
-
-    private static void BuildChoiceMarks(ParsedQuestion question, AnswerResult result, List<Mark> marks)
-    {
-        var targets = result.TargetOptions
-            .Where(o => o.Rect is { } r && !r.IsEmpty)
-            .ToList();
-
-        if (targets.Count == 0)
-        {
-            BuildAnswerTextMarks(question, result, marks);
-            return;
-        }
-
-        foreach (var opt in targets)
-        {
-            var rect = opt.Rect!.Value;
-
-            // 默认在选项左侧行外；贴左边缘时改到右侧，避免被裁掉
-            double x = rect.X - 20;
-            if (x < 4)
-                x = rect.Right + 6;
-
-            marks.Add(new Mark("\u25C0", x, rect.CenterY - 10, 13, 20, TriColor, true));
-        }
-
-        if (question.Type == QuestionType.Multi)
-        {
-            var first = targets.Min(o => o.Rect!.Value.Y);
-            var left = targets.Min(o => o.Rect!.Value.X);
-            marks.Add(new Mark($"多选 · {targets.Count} 项", Math.Max(4, left - 20), first - 26,
-                11, 200, TriColor, true));
+            PlaceWindow();
+            if (AppWindow.IsVisible)
+                WindowHelper.ShowNoActivate(this);
         }
     }
 
-    private static void BuildJudgeMarks(ParsedQuestion question, AnswerResult result, List<Mark> marks)
+    public void SetOpacity(double opacity)
     {
-        // 有 A/B 选项的判断题：直接标在正确选项旁
-        if (question.Options.Count >= 2 && question.Options.Any(o => o.Rect is { IsEmpty: false }))
-        {
-            BuildChoiceMarks(question, result, marks);
-            return;
-        }
-
-        bool isTrue = result.TargetOptions.Count > 0
-            ? IsTrueText(result.TargetOptions[0].Text)
-            : IsTrueText(result.Text);
-
-        var glyph = isTrue ? "√" : "×";
-
-        if (question.StemRect is { } stem)
-        {
-            marks.Add(new Mark(glyph, stem.Right + 6, stem.Y - 2, 16, 40, JudgeColor, true));
-            return;
-        }
-
-        marks.Add(new Mark(glyph, 40, 40, 18, 40, JudgeColor, true));
+        _opacity = Math.Clamp(opacity, 0, 1);
+        ApplyOpacity();
     }
 
-    private static void BuildAnswerTextMarks(ParsedQuestion question, AnswerResult result, List<Mark> marks)
+    private bool ApplyContent(AnswerResult result)
     {
-        var text = string.IsNullOrWhiteSpace(result.Text) ? result.Letter : result.Text;
-        if (string.IsNullOrWhiteSpace(text))
-            return;
+        var letter = (result.Letter ?? "").Trim();
+        var text = (result.Text ?? "").Trim();
 
-        double x, y;
-        if (question.StemRect is { } stem)
+        if (letter.Length == 0 && text.Length == 0 && string.IsNullOrWhiteSpace(result.Detail))
+            return false;
+
+        bool hasLetter = letter.Length > 0;
+
+        LetterText.Visibility = hasLetter ? Visibility.Visible : Visibility.Collapsed;
+        LetterText.Text = letter;
+        LetterText.FontSize = letter.Length > 1 ? 26 : 40;
+
+        BodyText.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        BodyText.Text = text;
+
+        SourceLabel.Text = string.IsNullOrWhiteSpace(result.Detail)
+            ? (result.Source.Length > 0 ? result.Source : "QuickAnswer")
+            : (result.Source.Length > 0 ? $"{result.Source} · {result.Detail}" : result.Detail);
+
+        Dot.Fill = new SolidColorBrush(result.Source == "题库"
+            ? Windows.UI.Color.FromArgb(255, 74, 222, 128)
+            : Windows.UI.Color.FromArgb(255, 96, 165, 250));
+
+        MeasureCard(hasLetter, letter, text);
+        return true;
+    }
+
+    /// <summary>
+    /// 按内容估算卡片尺寸。窗口大小必须自己算：WinUI 3 的 Window 没有 SizeToContent，
+    /// 而窗口比内容大一圈的话，透明区域虽然看不见，却照样吃鼠标点击。
+    /// </summary>
+    private void MeasureCard(bool hasLetter, string letter, string text)
+    {
+        int letterWidth = hasLetter ? (letter.Length > 1 ? 66 : 40) : 0;
+
+        // 只有字母 → 小卡片；有正文 → 固定 300 宽，太长就换行 + 省略号，
+        // 不让窗口横着铺满屏幕
+        int width = text.Length == 0
+            ? (hasLetter ? LetterCardWidth : MinWidth)
+            : TextCardWidth;
+
+        int textWidth = Math.Max(60, width - SidePadding - (hasLetter ? letterWidth + 12 : 0));
+        int perLine = Math.Max(4, textWidth / 15);
+        int lines = text.Length == 0
+            ? 0
+            : Math.Clamp((text.Length + perLine - 1) / perLine, 1, 6);
+
+        int bodyHeight = text.Length == 0
+            ? (hasLetter ? 46 : 18)
+            : Math.Max(lines * 21, hasLetter ? 46 : 21);
+
+        _logicalW = width;
+        _logicalH = Math.Clamp(ChromeHeight + bodyHeight, MinHeight, MaxHeight);
+    }
+
+    private void ApplyOpacity()
+    {
+        // 0.95 封顶：全不透明既不好看，也没人需要
+        byte alpha = (byte)Math.Round(255 * Math.Clamp(_opacity, 0, 0.95));
+
+        if (alpha == 0)
         {
-            x = stem.X;
-            y = stem.Bottom + 4;
-        }
-        else if (question.BlockRect is { } block)
-        {
-            x = block.X;
-            y = block.Bottom + 4;
+            // 透明度拉到 0 = 没有背景色，只剩文字
+            Card.Background = null;
+            Card.BorderBrush = null;
         }
         else
         {
-            x = 60;
-            y = 60;
+            Card.Background = new SolidColorBrush(
+                Windows.UI.Color.FromArgb(alpha, BgColor.R, BgColor.G, BgColor.B));
+            Card.BorderBrush = new SolidColorBrush(
+                Windows.UI.Color.FromArgb((byte)Math.Min(255, alpha + 50), 255, 255, 255));
         }
 
-        // 简答可能上百字，限宽，避免拉出一个超宽窗口
-        marks.Add(new Mark(text, x, y, 14.5, 560, AnswerColor, true));
+        bool noBg = alpha == 0;
+
+        LetterText.Foreground = new SolidColorBrush(noBg ? LetterColorNoBg : LetterColor);
+        BodyText.Foreground = new SolidColorBrush(noBg ? BodyColorNoBg : BodyColor);
+
+        var minor = new SolidColorBrush(noBg
+            ? Windows.UI.Color.FromArgb(255, 71, 85, 105)
+            : Windows.UI.Color.FromArgb(255, 148, 163, 184));
+        SourceLabel.Foreground = minor;
+        HintLabel.Foreground = minor;
     }
 
-    private static bool IsTrueText(string? t)
+    // ---------------------------------------------------------------- 定位
+
+    private void PlaceWindow()
     {
-        if (string.IsNullOrWhiteSpace(t))
-            return false;
+        int physW = WindowHelper.ToPhysical(this, _logicalW);
+        int physH = WindowHelper.ToPhysical(this, _logicalH);
 
-        return t.Contains('对') || t.Contains("正确") || t.Contains('√')
-               || t.Equals("T", StringComparison.OrdinalIgnoreCase)
-               || t.Equals("True", StringComparison.OrdinalIgnoreCase);
-    }
-
-    // ---------------------------------------------------------------- 几何
-
-    private static ScreenRect ComputeBounds(List<Mark> marks)
-    {
-        double x1 = double.MaxValue, y1 = double.MaxValue;
-        double x2 = double.MinValue, y2 = double.MinValue;
-
-        foreach (var m in marks)
+        if (!_placed)
         {
-            // 粗估尺寸即可：宁可窗口略大，也不要裁掉字
-            double maxW = Math.Max(m.MaxWidth, 1);
-            double approxW = Math.Min(maxW, Math.Max(m.Text.Length, 1) * m.Size * 0.62);
-            int lines = Math.Max(1, (int)Math.Ceiling(m.Text.Length * m.Size * 0.62 / maxW));
-            double approxH = m.Size * 1.6 * lines;
+            var area = TargetWorkArea();
 
-            x1 = Math.Min(x1, m.X);
-            y1 = Math.Min(y1, m.Y);
-            x2 = Math.Max(x2, m.X + approxW);
-            y2 = Math.Max(y2, m.Y + approxH);
+            if (App.Config.StealthLeft >= 0 && App.Config.StealthTop >= 0)
+            {
+                // 上次拖到的位置
+                _left = App.Config.StealthLeft;
+                _top = App.Config.StealthTop;
+            }
+            else
+            {
+                // 默认：屏幕正中间
+                _left = area.X + (area.Width - physW) / 2;
+                _top = area.Y + (area.Height - physH) / 2;
+            }
+
+            _left = ClampX(area, _left, physW);
+            _top = ClampY(area, _top, physH);
+            _placed = true;
         }
 
-        const int pad = 14;
-
-        int left = (int)Math.Floor(x1) - pad;
-        int top = (int)Math.Floor(y1) - pad;
-        int width = (int)Math.Ceiling(x2 - x1) + pad * 2;
-        int height = (int)Math.Ceiling(y2 - y1) + pad * 2;
-
-        // 太小的话 DWM 玻璃可能不生效，给个下限
-        width = Math.Max(width, 120);
-        height = Math.Max(height, 60);
-
-        return new ScreenRect(left, top, width, height);
+        // 后续换题只改内容，不再动位置 —— 这就是「不乱跑」的关键
+        WindowHelper.MoveToPhysical(this, _left, _top, physW, physH);
     }
 
-    // ---------------------------------------------------------------- 绘制
-
-    private void AddText(string text, double x, double y, double fontSize, double maxWidth,
-                         Windows.UI.Color color, bool bold)
+    /// <summary>浮层该落在哪块显示器：框选区域所在那块，没框选就用主屏。</summary>
+    private RectInt32 TargetWorkArea()
     {
-        var tb = new TextBlock
-        {
-            Text = text,
-            FontSize = fontSize,
-            FontWeight = bold ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
-            Foreground = new SolidColorBrush(color),
-            IsHitTestVisible = false,
-            TextWrapping = TextWrapping.Wrap,
-            MaxWidth = Math.Max(40, maxWidth),
-        };
+        if (App.Config.Region is { } r)
+            return WindowHelper.WorkAreaAt(this, r.X + r.Width / 2, r.Y + r.Height / 2);
 
-        Canvas.SetLeft(tb, Math.Max(0, x));
-        Canvas.SetTop(tb, Math.Max(0, y));
-        Layer.Children.Add(tb);
+        var work = WindowHelper.WorkArea(this);
+        return WindowHelper.WorkAreaAt(this, work.X + work.Width / 2, work.Y + work.Height / 2);
+    }
+
+    private static int ClampX(RectInt32 area, int left, int width)
+    {
+        // 至少留 72px 在屏幕里，不然拖出去就找不回来了
+        int min = area.X - width + 72;
+        int max = area.X + area.Width - 72;
+        return min > max ? area.X : Math.Clamp(left, min, max);
+    }
+
+    private static int ClampY(RectInt32 area, int top, int height)
+    {
+        int min = area.Y;
+        int max = area.Y + area.Height - 40;
+        return min > max ? area.Y : Math.Clamp(top, min, max);
+    }
+
+    // ---------------------------------------------------------------- 拖动
+
+    private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (App.Config.StealthClickThrough)
+            return;
+
+        if (!GetCursorPos(out var cursor))
+            return;
+
+        // 用光标绝对坐标算位移：窗口自己在动，用相对坐标会越拖越飘
+        _dragging = true;
+        _dragCursorX = cursor.X;
+        _dragCursorY = cursor.Y;
+        _dragOriginX = AppWindow.Position.X;
+        _dragOriginY = AppWindow.Position.Y;
+
+        Hit.CapturePointer(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_dragging)
+            return;
+
+        if (!GetCursorPos(out var cursor))
+            return;
+
+        int left = _dragOriginX + (cursor.X - _dragCursorX);
+        int top = _dragOriginY + (cursor.Y - _dragCursorY);
+
+        var area = WindowHelper.WorkAreaAt(this, cursor.X, cursor.Y);
+        var size = AppWindow.Size;
+
+        _left = ClampX(area, left, size.Width);
+        _top = ClampY(area, top, size.Height);
+
+        WindowHelper.MoveToPhysical(this, _left, _top, size.Width, size.Height);
+        e.Handled = true;
+    }
+
+    private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_dragging)
+            return;
+
+        _dragging = false;
+        Hit.ReleasePointerCapture(e.Pointer);
+
+        App.Config.StealthLeft = _left;
+        App.Config.StealthTop = _top;
+        App.Config.Save();
+
+        e.Handled = true;
     }
 }

@@ -237,6 +237,49 @@ public static class WindowHelper
     }
 
     /// <summary>
+    /// 指定屏幕坐标点所在显示器的可用区域。多屏 + 不同缩放时，
+    /// 浮层要落在题目所在那块屏上，用主屏的 WorkArea 会把它甩到另一块屏去。
+    /// </summary>
+    public static RectInt32 WorkAreaAt(Window window, int x, int y)
+    {
+        try
+        {
+            var area = DisplayArea.GetFromPoint(new PointInt32(x, y), DisplayAreaFallback.Nearest);
+            return area.WorkArea;
+        }
+        catch
+        {
+            return WorkArea(window);
+        }
+    }
+
+    /// <summary>
+    /// 点击不激活窗口。浮层要能拖动，但拖动不能把键盘焦点从题目软件抢走 ——
+    /// 否则用户刚拖一下浮层，再回到题目里打字就没反应了。
+    ///
+    /// 拦 WM_MOUSEACTIVATE 返回 MA_NOACTIVATE，而不是加 WS_EX_NOACTIVATE：
+    /// 前者照样把鼠标消息交给窗口，只是不激活；后者在 WinUI 3 里
+    /// 有概率连指针事件一起丢掉，那就彻底拖不动了。
+    /// </summary>
+    public static void NoActivate(Window window)
+    {
+        var hwnd = Hwnd(window);
+        if (hwnd == IntPtr.Zero)
+            return;
+
+        SubclassProc proc = (h, msg, w, l, id, data) =>
+        {
+            if (msg == WM_MOUSEACTIVATE)
+                return new IntPtr(MA_NOACTIVATE);
+
+            return DefSubclassProc(h, msg, w, l);
+        };
+
+        _subclassProcs.Add(proc);
+        SetWindowSubclass(hwnd, proc, (UIntPtr)9, IntPtr.Zero);
+    }
+
+    /// <summary>
     /// 让窗口对鼠标完全透明 —— 鼠标点下去会落到下面的题目软件上。
     ///
     /// 不能用 WS_EX_TRANSPARENT：WinUI 3 的内容走 DirectComposition 合成，

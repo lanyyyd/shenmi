@@ -7,7 +7,42 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <!-- 整层透明，只画标注。背景必须是 Transparent 而不是 null，
-         否则整块区域不参与命中测试，虽然我们本来就返回 HTTRANSPARENT。 -->
-    <Canvas x:Name="Layer" Background="Transparent" />
+    <!-- 窗口尺寸 = 卡片尺寸（在 Render 里按内容算出来），所以这层 Grid 就等于整张卡片。
+         最外面这层 Background="Transparent" 是必须的：边框/面板一旦 Background 为 null
+         就不参与命中测试，透明度调到 0（背景为 null）时拖动会直接失效。 -->
+    <Grid x:Name="Hit" Background="Transparent">
+        <!-- 背景色不写在 XAML 里：由「透明度」设置在运行时改，0 = 完全不画背景，只剩文字。 -->
+        <Border x:Name="Card" CornerRadius="14" BorderThickness="1" Padding="16,11">
+            <StackPanel Spacing="7">
+
+                <!-- 抬头：来源 / 拖动提示 -->
+                <Grid>
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Ellipse x:Name="Dot" Width="6" Height="6" Fill="#FF4ADE80" VerticalAlignment="Center" />
+                        <TextBlock x:Name="SourceLabel" Text="待命" FontSize="9.5" Foreground="#FF94A3B8"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+
+                    <TextBlock x:Name="HintLabel" Text="按住拖动" FontSize="9" Foreground="#FF94A3B8"
+                               HorizontalAlignment="Right" VerticalAlignment="Center" />
+                </Grid>
+
+                <!-- 主体：字母 + 答案文本 -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock x:Name="LetterText" Grid.Column="0" Text="" FontSize="40" FontWeight="Bold"
+                               Foreground="#FF4ADE80" VerticalAlignment="Center" Margin="0,0,12,0"
+                               Visibility="Collapsed" />
+
+                    <TextBlock x:Name="BodyText" Grid.Column="1" Text="" FontSize="14.5" MaxLines="6"
+                               Foreground="#FFF1F5F9" TextWrapping="Wrap" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </Grid>
+            </StackPanel>
+        </Border>
+    </Grid>
 </Window>

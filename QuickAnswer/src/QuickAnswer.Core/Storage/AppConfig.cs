@@ -52,6 +52,13 @@ public sealed class AppConfig
 
     public bool ClickThrough { get; set; } = true;
 
+    /// <summary>隐蔽模式浮层的记忆位置（物理像素）。-1 = 屏幕中央。</summary>
+    public int StealthLeft { get; set; } = -1;
+    public int StealthTop { get; set; } = -1;
+
+    /// <summary>隐蔽模式浮层点击穿透。开着就不能拖动（只能从设置页复位位置）。</summary>
+    public bool StealthClickThrough { get; set; }
+
     /// <summary>窗口从屏幕捕获中排除。关掉它才能被 OBS/极域录到。</summary>
     public bool ProtectFromCapture { get; set; } = true;
 

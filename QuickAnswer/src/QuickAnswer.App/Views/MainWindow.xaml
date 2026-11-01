@@ -88,9 +88,9 @@
                                VerticalAlignment="Center" />
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10"
                                 VerticalAlignment="Center">
-                        <Slider x:Name="OpacitySlider" Width="176" Minimum="10" Maximum="100" Value="30"
+                        <Slider x:Name="OpacitySlider" Width="168" Minimum="0" Maximum="100" Value="30"
                                 StepFrequency="5" ValueChanged="OnOpacityChanged" />
-                        <TextBlock x:Name="OpacityLabel" Text="30%" FontSize="11" Width="36"
+                        <TextBlock x:Name="OpacityLabel" Text="30%" FontSize="11" MinWidth="76"
                                    TextAlignment="Right" Foreground="{StaticResource QaTextBrush}" />
                     </StackPanel>
                 </Grid>
@@ -106,7 +106,7 @@
                     <Grid>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="隐蔽模式" FontSize="12" Foreground="{StaticResource QaTextBrush}" />
-                            <TextBlock Text="不显示悬浮窗，答案直接标在题目上" FontSize="9.5"
+                            <TextBlock Text="答案浮在屏幕中央，按住可拖动" FontSize="9.5"
                                        Foreground="{StaticResource QaMutedBrush}" />
                         </StackPanel>
                         <ToggleSwitch x:Name="StealthSwitch" HorizontalAlignment="Right" OnContent=""
