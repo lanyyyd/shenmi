@@ -77,6 +77,67 @@ def solve(payload: dict = Body(...), user: dict = Depends(get_current_user)):
         raise HTTPException(500, f"提示词读取失败：{exc}")
     messages = [{"role": "user", "content": prompt}]
 
+    return _stream_answer(model, messages, options if isinstance(options, list) else [])
+
+
+# ============================================================ AI 求解（视觉）
+
+# base64 串长度上限。8MB 约等于 6MB 原图，客户端会先缩到 1600px，正常只有几百 KB。
+_IMAGE_MAX_CHARS = 8 * 1024 * 1024
+
+
+@router.post("/solve-image")
+def solve_image(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    """整块截图直接交给多模态模型，跳过 OCR。
+
+    客户端把 PNG 编成 data URL 内联在 image 里；也接受公网 image_url。
+    图片不落盘、不入库，只在这一次请求的内存里过一遍。
+    """
+    image = str(payload.get("image") or "").strip()
+    image_url = str(payload.get("image_url") or "").strip()
+    model_id = payload.get("model_id")
+
+    if not image and not image_url:
+        raise HTTPException(400, "缺少图片")
+
+    if len(image) > _IMAGE_MAX_CHARS:
+        raise HTTPException(413, "图片太大：客户端应先缩到 1600px 以内")
+
+    url = image_url or image
+
+    if not (url.startswith("data:image/") or url.startswith("http://") or url.startswith("https://")):
+        raise HTTPException(400, "image 必须是 data:image/... 或 http(s) 地址")
+
+    try:
+        model = QA.get_model(model_id)
+    except Exception as exc:                              # noqa: BLE001
+        log.warning("读取模型配置失败：%s", exc)
+        raise HTTPException(500, f"题库模块未就绪：{exc}")
+
+    if not model:
+        raise HTTPException(503, "后台还没有配置可用的 AI 模型，请管理员在 /admin-qa.html 添加")
+
+    try:
+        prompt = QA.build_vision_prompt()
+    except Exception as exc:                              # noqa: BLE001
+        log.warning("构建视觉提示词失败：%s", exc)
+        raise HTTPException(500, f"提示词读取失败：{exc}")
+
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": url}},
+        ],
+    }]
+
+    # 视觉模式拿不到客户端的选项表，校验只能留空 —— _sanitize 在 keys 为空时原样放行
+    return _stream_answer(model, messages, [])
+
+
+def _stream_answer(model: dict, messages: list[dict], options: list[dict]) -> StreamingResponse:
+    """SSE 输出。solve 与 solve-image 共用这一份，两种模式的结果格式必须完全一致。"""
+
     def event(payload_obj: dict) -> str:
         return "data: " + json.dumps(payload_obj, ensure_ascii=False) + "\n\n"
 
@@ -111,7 +172,7 @@ def solve(payload: dict = Body(...), user: dict = Depends(get_current_user)):
 
         # 校验：字母必须在选项里，且与 answer_text 对得上
         # 不通过就让客户端走「失败」分支，宁可不给答案，也不给一个对不上的字母。
-        result = _sanitize(parsed, options if isinstance(options, list) else [])
+        result = _sanitize(parsed, options)
         if result is None:
             yield event({
                 "done": True,

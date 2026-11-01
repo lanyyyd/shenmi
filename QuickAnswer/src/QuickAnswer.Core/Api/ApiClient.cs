@@ -172,6 +172,42 @@ public sealed class ApiClient : IDisposable
             throw new ApiException(resp.StatusCode, ExtractDetail(err, resp.StatusCode));
         }
 
+        return await ReadSolveStreamAsync(resp, onDelta, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 视觉模式：整块截图直接交给多模态模型，跳过 OCR。
+    ///
+    /// 图片以 base64 data URL 内联在请求里，不要求客户端能提供一个公网可访问的 URL ——
+    /// 内网环境、服务端没开静态目录时，公网 URL 那条路根本走不通。
+    /// 服务端收到后原样塞进 OpenAI 兼容的 image_url 内容块。
+    /// </summary>
+    public async Task<SolveResponse?> SolveImageAsync(
+        string dataUrl, string? modelId, Action<string>? onDelta, CancellationToken ct = default)
+    {
+        using var req = Request(HttpMethod.Post, "/api/v1/qa/solve-image");
+        req.Content = JsonContent.Create(new
+        {
+            image = dataUrl,
+            model_id = modelId,
+        }, options: JsonOpts);
+
+        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct)
+            .ConfigureAwait(false);
+
+        if (!resp.IsSuccessStatusCode)
+        {
+            var err = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            throw new ApiException(resp.StatusCode, ExtractDetail(err, resp.StatusCode));
+        }
+
+        return await ReadSolveStreamAsync(resp, onDelta, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>解 SSE。solve 与 solve-image 共用，别写两份 —— 半行 JSON、整包返回这些坑只该踩一次。</summary>
+    private async Task<SolveResponse?> ReadSolveStreamAsync(
+        HttpResponseMessage resp, Action<string>? onDelta, CancellationToken ct)
+    {
         await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         using var reader = new StreamReader(stream, Encoding.UTF8);
 

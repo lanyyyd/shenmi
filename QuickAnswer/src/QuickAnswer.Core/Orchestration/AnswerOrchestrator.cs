@@ -132,6 +132,97 @@ public sealed class AnswerOrchestrator
         return result;
     }
 
+    /// <summary>
+    /// 视觉模式：不 OCR，整块截图直发多模态模型。
+    ///
+    /// 两个刻意的取舍：
+    ///   · 不走题库。没有 OCR 文本就没有题干/选项，题库检索无从谈起；
+    ///   · 不上报。服务端要求题干非空，硬塞一张图进去只会污染题库。
+    /// 所以这条路的 Source 是「视觉」，和题库命中的高置信度答案区分开。
+    /// </summary>
+    public async Task<AnswerResult> ProcessImageAsync(string dataUrl, CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+        StatusChanged?.Invoke("AI 识图中…");
+
+        SolveResponse? solve;
+        try
+        {
+            solve = await _api.SolveImageAsync(dataUrl, _config.ModelId,
+                t => DeltaReceived?.Invoke(t), ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var fail = AnswerResult.Fail(DescribeVisionError(ex));
+            AnswerReady?.Invoke(fail);
+            return fail;
+        }
+
+        if (solve?.Result is null)
+        {
+            var fail = AnswerResult.Fail("模型没有返回可用答案");
+            AnswerReady?.Invoke(fail);
+            return fail;
+        }
+
+        var dto = solve.Result;
+        var letter = (dto.AnswerLetter ?? "").Trim().ToUpperInvariant();
+
+        // 「AC」这种没分隔符的多选，在没有选项表可对照时只能按长度猜
+        if (letter.Length > 1 && letter.All(char.IsLetter) && !letter.Contains(','))
+            letter = string.Join(",", letter.ToCharArray());
+
+        var result = new AnswerResult
+        {
+            Type = ParseType(dto.Type),
+            Letter = letter,
+            Text = dto.AnswerText ?? "",
+            Confidence = dto.Confidence,
+            Source = "视觉",
+            Detail = $"{solve.Model ?? "视觉模型"} · {(solve.ElapsedMs > 0 ? solve.ElapsedMs : sw.ElapsedMilliseconds)}ms",
+            ElapsedMs = sw.ElapsedMilliseconds,
+            LowConfidence = dto.Confidence < 0.6,
+        };
+
+        if (result.Text.Length == 0 && letter.Length > 0)
+            result.Text = letter;
+
+        _config.TodayCount++;
+        AnswerReady?.Invoke(result);
+        return result;
+    }
+
+    /// <summary>
+    /// 404 / 405 基本只有一个原因：服务端还是老版本，没有 /solve-image 这条路。
+    /// 直接说清楚要做什么，比让用户对着「请求失败」发呆强。
+    /// </summary>
+    private static string DescribeVisionError(Exception ex)
+    {
+        if (ex is ApiException api)
+        {
+            if (api.Status is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.MethodNotAllowed)
+                return "服务端还没有 /solve-image 接口，先把 server/install.py 重跑一次";
+
+            return api.Message;
+        }
+
+        return ex.Message;
+    }
+
+    private static QuestionType ParseType(string? type) => (type ?? "").ToLowerInvariant() switch
+    {
+        "choice" => QuestionType.Choice,
+        "multi" => QuestionType.Multi,
+        "judge" => QuestionType.Judge,
+        "fill" => QuestionType.Fill,
+        "short" => QuestionType.Short,
+        _ => QuestionType.Unknown,
+    };
+
     private static AnswerResult BuildFromDb(ParsedQuestion q, SearchResponse sr, Stopwatch sw)
     {
         var letter = sr.AnswerLetter ?? "";

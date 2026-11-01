@@ -117,6 +117,20 @@
                     </Grid>
                 </StackPanel>
 
+                <!-- 工作模式 -->
+                <Grid>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="工作模式" FontSize="11" Foreground="{StaticResource QaSubBrush}" />
+                        <TextBlock Text="OCR 省流量能命中题库；识图不看排版但每次都走模型" FontSize="9"
+                                   Foreground="{StaticResource QaMutedBrush}" TextWrapping="Wrap" Width="230" />
+                    </StackPanel>
+                    <ComboBox x:Name="ModeBox" Width="164" Height="34" HorizontalAlignment="Right"
+                              VerticalAlignment="Center" SelectionChanged="OnModeChanged">
+                        <ComboBoxItem Content="OCR 识别" Tag="ocr" />
+                        <ComboBoxItem Content="AI 识图（多模态）" Tag="vision" />
+                    </ComboBox>
+                </Grid>
+
                 <!-- 操作按钮 -->
                 <Grid ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
@@ -137,8 +151,19 @@
                             Click="OnRecognizeClick" />
                 </Grid>
 
-                <Button Content="框选题目区域" Height="38" HorizontalAlignment="Stretch"
-                        Click="OnSelectRegionClick" />
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="112" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button Grid.Column="0" Content="框选题目区域" Height="38" HorizontalAlignment="Stretch"
+                            Click="OnSelectRegionClick" />
+
+                    <Button Grid.Column="1" Content="测试识别" Height="38" HorizontalAlignment="Stretch"
+                            Click="OnTestClick"
+                            ToolTipService.ToolTip="截一块图，分别试 OCR 和 AI 识图，看哪个认得准" />
+                </Grid>
 
                 <!-- 底部统计 -->
                 <Grid Margin="0,4,0,0">

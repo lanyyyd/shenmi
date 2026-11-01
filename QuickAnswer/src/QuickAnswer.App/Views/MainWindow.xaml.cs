@@ -6,16 +6,22 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using QuickAnswer.App.Interop;
 using QuickAnswer.App.Services;
+using QuickAnswer.Core.Api;
 using QuickAnswer.Core.Capture;
 using QuickAnswer.Core.Detect;
 using QuickAnswer.Core.Diagnostics;
+using QuickAnswer.Core.Imaging;
 using QuickAnswer.Core.Match;
 using QuickAnswer.Core.Models;
 using QuickAnswer.Core.Ocr;
 using QuickAnswer.Core.Orchestration;
 using QuickAnswer.Core.Parse;
+using QuickAnswer.Core.Storage;
+using Windows.Graphics.Imaging;
+using Windows.Security.Cryptography;
 using static QuickAnswer.App.Interop.NativeMethods;
 
 namespace QuickAnswer.App.Views;
@@ -26,6 +32,9 @@ public sealed partial class MainWindow : Window
     private const int HotkeyLoop = 2;
     private const int HotkeyStealth = 3;
     private const int HotkeyPanic = 4;
+
+    /// <summary>视觉模式下截图缩到这个最长边再发出去。再大模型自己也会缩，白花 token。</summary>
+    private const int VisionMaxSide = 1600;
 
     private readonly WinRtOcrEngine _ocr;
     private readonly OcrPipeline _pipeline;
@@ -125,6 +134,9 @@ public sealed partial class MainWindow : Window
 
         OpacitySlider.Value = Math.Clamp(cfg.OverlayOpacity * 100, 0, 100);
         OpacityLabel.Text = DescribeOpacity(OpacitySlider.Value);
+
+        // 直接改 SelectedIndex 会触发 OnModeChanged，那里再写一次配置也无害（值没变）
+        ModeBox.SelectedIndex = cfg.Mode == WorkMode.Vision ? 1 : 0;
 
         UpdateRegionLabel();
         UpdateStats();
@@ -348,6 +360,14 @@ public sealed partial class MainWindow : Window
 
         try
         {
+            // 视觉模式不 OCR：整块图直接给多模态模型。换题判定靠上面的帧差，
+            // 所以这里不需要（也没有）文字指纹。
+            if (App.Config.Mode == WorkMode.Vision)
+            {
+                await RecognizeByVisionAsync(region, ct).ConfigureAwait(false);
+                return;
+            }
+
             var outcome = await _pipeline.RunAsync(region, App.Config.OcrScale, ct).ConfigureAwait(false);
             if (outcome is null || outcome.Lines.Count == 0 || ct.IsCancellationRequested)
                 return;
@@ -411,9 +431,284 @@ public sealed partial class MainWindow : Window
             Post(() =>
             {
                 BusyBar.Visibility = Visibility.Collapsed;
-                if (StatusLabel.Text is "识别中…" or "查题库…" or "问 AI…")
+                if (StatusLabel.Text is "识别中…" or "查题库…" or "问 AI…" or "AI 识图中…")
                     SetStatus("监听中", "#FF166534");
             });
+        }
+    }
+
+    /// <summary>
+    /// 视觉模式的一次识别：截图 → 缩到模型舒服的尺寸 → PNG → base64 → 模型。
+    ///
+    /// 不做灰度/二值化那套预处理 —— 那是给 OCR 引擎打工的，多模态模型看的本来就是
+    /// 彩色原图，反倒要靠颜色分辨"红笔标出的正确选项"这类信息。
+    /// </summary>
+    private async Task RecognizeByVisionAsync(ScreenRect region, CancellationToken ct)
+    {
+        var shot = ScreenCapturer.Capture(region);
+        if (shot is null)
+            return;
+
+        var fit = ImageCodec.Fit(shot, VisionMaxSide);
+        var png = await ImageCodec.EncodePngAsync(fit).ConfigureAwait(false);
+        if (png is null || ct.IsCancellationRequested)
+            return;
+
+        _lastTriggerUtc = DateTime.UtcNow;
+
+        var result = await _orchestrator.ProcessImageAsync(ImageCodec.ToDataUrl(png), ct).ConfigureAwait(false);
+        if (ct.IsCancellationRequested)
+            return;
+
+        // 视觉模式没有题干和选项，伪造一个空壳只是为了复用 Render 的呈现逻辑
+        var shell = new ParsedQuestion
+        {
+            Type = result.Type,
+            Stem = "",
+            RawOcr = "",
+        };
+
+        Post(() => Render(shell, result));
+    }
+
+    // ---------------------------------------------------------------- 工作模式 / 测试
+
+    private void OnModeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ModeBox is null)
+            return;
+
+        var mode = ModeBox.SelectedIndex == 1 ? WorkMode.Vision : WorkMode.Ocr;
+        if (App.Config.Mode != mode)
+        {
+            App.Config.Mode = mode;
+            App.Config.Save();
+        }
+
+        // 两种模式的"上一帧"含义不同，切换时清掉，免得新题被当成旧题吞掉
+        _lastFrame = null;
+        _lastFingerprint = "";
+        _sameFrameTicks = 0;
+
+        if (_ready)
+            SetStatus(mode == WorkMode.Vision ? "已切到 AI 识图" : "已切到 OCR 识别", "#FF166534");
+    }
+
+    private async void OnTestClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await ShowTestDialogAsync();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("MainWindow.Test", ex);
+            SetStatus("测试失败：" + ex.Message, "#FFDC2626");
+        }
+    }
+
+    /// <summary>
+    /// 框一块区域，分别试 OCR 和 AI 识图，把结果摊开给你看。
+    ///
+    /// 存在的理由很具体：识别不准时，用户只能描述成"感觉不对"，而这个窗口能同时给出
+    /// 框的原图、OCR 实际看到的那张处理图、质量分、以及模型的原话。
+    /// 200% 缩放框歪的那种问题，看一眼预览就知道。
+    /// </summary>
+    private async Task ShowTestDialogAsync()
+    {
+        if (App.Config.Region is not { } region || region.IsEmpty)
+        {
+            SetStatus("先框选题目区域再测试", "#FFD97706");
+            return;
+        }
+
+        var muted = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 107, 114, 128));
+
+        var preview = new Image
+        {
+            Height = 180,
+            Stretch = Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+
+        var meta = new TextBlock
+        {
+            Text = $"{region.Width} × {region.Height} px  ·  左上角 {region.X}, {region.Y}",
+            FontSize = 10.5,
+            Foreground = muted,
+            TextWrapping = TextWrapping.Wrap,
+        };
+
+        var output = new TextBlock
+        {
+            Text = "点下面任一按钮开始。先看预览图对不对得上你想框的地方。",
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+        };
+
+        var scroller = new ScrollViewer
+        {
+            Content = output,
+            MaxHeight = 240,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
+
+        var btnOcr = new Button { Content = "测试 OCR" };
+        var btnVision = new Button { Content = "测试 AI 识图" };
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        buttons.Children.Add(btnOcr);
+        buttons.Children.Add(btnVision);
+
+        var panel = new StackPanel { Spacing = 10, Width = 470 };
+        panel.Children.Add(preview);
+        panel.Children.Add(meta);
+        panel.Children.Add(buttons);
+        panel.Children.Add(scroller);
+
+        var dialog = new ContentDialog
+        {
+            Title = "测试识别效果",
+            Content = panel,
+            CloseButtonText = "关闭",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = Content.XamlRoot,
+        };
+
+        void Busy(bool busy)
+        {
+            btnOcr.IsEnabled = !busy;
+            btnVision.IsEnabled = !busy;
+        }
+
+        // 先铺一张原图。预览和坐标并列显示，框歪了一眼就能看出来。
+        var shot = ScreenCapturer.Capture(region);
+        if (shot is not null)
+            preview.Source = await ToSourceAsync(shot);
+
+        btnOcr.Click += async (_, _) =>
+        {
+            Busy(true);
+            output.Text = "OCR 识别中…";
+            try
+            {
+                var outcome = await _pipeline.RunAsync(region, App.Config.OcrScale, CancellationToken.None);
+                if (outcome is null)
+                {
+                    output.Text = "OCR 不可用（系统缺少中文 OCR 语言包）";
+                    return;
+                }
+
+                // 换成"实际送进引擎的那张图"—— 这才是 OCR 眼里的世界
+                if (outcome.Image is not null)
+                    preview.Source = await ToSourceAsync(outcome.Image);
+
+                var q = QuestionParser.Parse(outcome.Lines);
+
+                var sb = new StringBuilder();
+                sb.AppendLine($"质量分 {outcome.Quality.Score:0.00}   {outcome.Variant} · {outcome.Scale:0.0}x · 第 {outcome.Attempts} 次 · {outcome.ElapsedMs}ms");
+                sb.AppendLine($"字数 {outcome.Quality.Chars} · 行 {outcome.Quality.Lines} · 中文 {outcome.Quality.ChineseRatio:P0} · 行高 {outcome.Quality.MedianLineHeight:0}px");
+                sb.AppendLine();
+                sb.AppendLine($"题型 {q.Type}    选项 {q.Options.Count}");
+                sb.AppendLine("题干：" + q.Stem.Replace("\n", " / "));
+                foreach (var o in q.Options)
+                    sb.AppendLine($"    {o.Key}. {o.Text}");
+                sb.AppendLine();
+                sb.AppendLine("---- OCR 原始行 ----");
+                foreach (var line in outcome.Lines)
+                    sb.AppendLine(line.Text);
+
+                output.Text = sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                output.Text = "OCR 测试失败：" + ex.Message;
+            }
+            finally
+            {
+                Busy(false);
+            }
+        };
+
+        btnVision.Click += async (_, _) =>
+        {
+            Busy(true);
+            output.Text = "请求视觉模型…";
+
+            try
+            {
+                var s2 = ScreenCapturer.Capture(region);
+                if (s2 is null)
+                {
+                    output.Text = "截图失败";
+                    return;
+                }
+
+                var fit = ImageCodec.Fit(s2, VisionMaxSide);
+                var png = await ImageCodec.EncodePngAsync(fit);
+                if (png is null)
+                {
+                    output.Text = "PNG 编码失败";
+                    return;
+                }
+
+                preview.Source = await ToSourceAsync(fit);
+
+                var sw = Stopwatch.StartNew();
+                var resp = await App.Api.SolveImageAsync(ImageCodec.ToDataUrl(png), App.Config.ModelId, null);
+                sw.Stop();
+
+                var dto = resp?.Result;
+                if (dto is null)
+                {
+                    output.Text = $"模型没有返回可用答案（{sw.ElapsedMilliseconds}ms）";
+                    return;
+                }
+                var sb = new StringBuilder();
+                sb.AppendLine($"模型 {resp.Model ?? "?"} · 请求 {sw.ElapsedMilliseconds}ms · 服务端 {resp.ElapsedMs}ms");
+                sb.AppendLine($"图片 {fit.Width}×{fit.Height} · PNG {png.Length / 1024} KB · base64 约 {png.Length * 4 / 3 / 1024} KB");
+                sb.AppendLine();
+                sb.AppendLine($"type       {dto.Type}");
+                sb.AppendLine($"letter     {dto.AnswerLetter}");
+                sb.AppendLine($"text       {dto.AnswerText}");
+                sb.AppendLine($"confidence {dto.Confidence:0.00}");
+                sb.AppendLine($"explain    {dto.Explain}");
+
+                output.Text = sb.ToString();
+            }
+            catch (ApiException apiEx)
+            {
+                output.Text = $"请求失败（HTTP {(int)apiEx.Status}）：{apiEx.Message}";
+            }
+            catch (Exception ex)
+            {
+                output.Text = "识图测试失败：" + ex.Message;
+            }
+            finally
+            {
+                Busy(false);
+            }
+        };
+
+        await dialog.ShowAsync();
+    }
+
+    private static async Task<SoftwareBitmapSource?> ToSourceAsync(CapturedImage image)
+    {
+        try
+        {
+            var buffer = CryptographicBuffer.CreateFromByteArray(image.Bgra);
+            var bitmap = SoftwareBitmap.CreateCopyFromBuffer(
+                buffer, BitmapPixelFormat.Bgra8, image.Width, image.Height, BitmapAlphaMode.Ignore);
+
+            var source = new SoftwareBitmapSource();
+            await source.SetBitmapAsync(bitmap);
+            return source;
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -443,10 +738,11 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        bool isChoiceLike = question.Options.Count > 0;
-        PreviewLetter.Text = isChoiceLike
-            ? (result.Letter.Length > 0 ? result.Letter : "?")
-            : (question.Type == QuestionType.Judge ? Truncate(result.Text, 1) : "A");
+        // 视觉模式下拿不到选项表，只能凭答案自带的字母判断；再用 question.Options.Count
+        // 当依据的话，识图模式会永远显示一个假的 "A"。
+        PreviewLetter.Text = result.Letter.Length > 0
+            ? result.Letter
+            : (question.Type == QuestionType.Judge ? Truncate(result.Text, 1) : "—");
 
         PreviewAnswer.Text = Truncate(result.Text, 30);
         PreviewDetail.Text = result.Detail;
@@ -530,6 +826,9 @@ public sealed partial class MainWindow : Window
 
         UpdateRegionLabel();
         SetStatus("监听中", "#FF166534");
+
+        // 框完立刻验一眼：框歪了、缩放算错了，看预览就知道，不用等它认错题才发现
+        await ShowTestDialogAsync();
     }
 
     private async void OnRecognizeClick(object sender, RoutedEventArgs e) => await RecognizeOnceAsync();

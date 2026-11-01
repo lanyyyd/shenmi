@@ -571,7 +571,25 @@ def _aggregate(qid: int) -> None:
 
 # ============================================================ AI 提示词
 
+DEFAULT_VISION_PROMPT = (
+    "你是答题助手。图片是一道题的截图，里面可能混着与题目无关的内容"
+    "（导航栏、广告、温馨提示、版权声明、聊天消息、水印）。\n"
+    "请自己找出题目与选项，给出正确答案。\n\n"
+    "要求：\n"
+    "1. 只输出 JSON，不要 markdown 代码块，不要任何前后缀解释。\n"
+    '2. 格式：{"type":"choice|multi|judge|fill|short","answer_letter":"A","answer_text":"...",'
+    '"explain":"不超过40字","confidence":0.0-1.0}\n'
+    "3. 只回答图片里真正的那道题，忽略提示语、广告、页码、按钮文字。\n"
+    "4. 选择题：answer_letter 用图片里选项的字母；字母看不清时 answer_text 给正确选项的文字。\n"
+    '5. 多选题：answer_letter 用英文逗号分隔，如 "A,C"。\n'
+    '6. 判断题：answer_letter 固定为 "T" 或 "F"，answer_text 为 "正确" 或 "错误"。\n'
+    "7. 填空题/简答题：answer_letter 留空，answer_text 只给答案本身。\n"
+    "8. 图片里没有题目时，confidence 给 0，answer_text 写「未识别到题目」。"
+)
+
+
 DEFAULT_PROMPTS: dict[str, str] = {
+    "vision": DEFAULT_VISION_PROMPT,
     "default": (
         "你是答题助手。根据题目给出最可能的正确答案。\n\n"
         "题目类型：{{type}}\n题干：{{stem}}\n选项：{{options}}\n\n"
@@ -610,6 +628,25 @@ def build_prompt(qtype: str, stem: str, options: list[dict]) -> str:
             .replace("{{type}}", qtype)
             .replace("{{stem}}", stem)
             .replace("{{options}}", opt_text))
+
+
+def build_vision_prompt() -> str:
+    """视觉模式的提示词。
+
+    没有走 build_prompt：那条路要题干/选项去填空，而这里根本没有文本。
+    老库里的 qa_prompts 不会有 vision 这一行（_seed_defaults 只在建表时跑一次），
+    所以取不到就回落到代码里的 DEFAULT_VISION_PROMPT，保证升级后立刻能用。
+    """
+    ensure_schema()
+
+    row = query_one(
+        "SELECT template FROM qa_prompts WHERE type = 'vision' AND enabled = 1 "
+        "ORDER BY version DESC LIMIT 1"
+    )
+    if row and str(row["template"] or "").strip():
+        return str(row["template"])
+
+    return DEFAULT_VISION_PROMPT
 
 
 # ============================================================ 模型配置

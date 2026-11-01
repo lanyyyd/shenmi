@@ -10,6 +10,7 @@ using Windows.Foundation;
 using Windows.Graphics.Imaging;
 using Windows.Security.Cryptography;
 using Windows.System;
+using static QuickAnswer.App.Interop.NativeMethods;
 
 namespace QuickAnswer.App.Views;
 
@@ -25,6 +26,9 @@ public sealed partial class RegionSelectorWindow : Window
     private Point _start;
     private bool _dragging;
     private bool _done;
+
+    /// <summary>DIP → 物理像素的比值。按下时量一次，整次框选用同一个值。</summary>
+    private double _scale = 1.0;
 
     public RegionSelectorWindow()
     {
@@ -87,6 +91,7 @@ public sealed partial class RegionSelectorWindow : Window
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
         _start = e.GetCurrentPoint(Root).Position;
+        _scale = DipToPixel();
         _dragging = true;
 
         Root.CapturePointer(e.Pointer);
@@ -115,7 +120,7 @@ public sealed partial class RegionSelectorWindow : Window
         SelRect.Width = w;
         SelRect.Height = h;
 
-        SizeText.Text = $"{(int)w} × {(int)h}";
+        SizeText.Text = $"{(int)Math.Round(w * _scale)} × {(int)Math.Round(h * _scale)}";
 
         // 提示框放在选框上方，靠近顶部时改放下方
         double hintTop = y - 30;
@@ -137,10 +142,15 @@ public sealed partial class RegionSelectorWindow : Window
 
         var p = e.GetCurrentPoint(Root).Position;
 
-        int x = (int)Math.Round(Math.Min(_start.X, p.X)) + _virtualScreen.X;
-        int y = (int)Math.Round(Math.Min(_start.Y, p.Y)) + _virtualScreen.Y;
-        int w = (int)Math.Round(Math.Abs(p.X - _start.X));
-        int h = (int)Math.Round(Math.Abs(p.Y - _start.Y));
+        // 鼠标位置是 DIP，屏幕坐标是物理像素 —— 这里必须换算。
+        // 150%/200% 缩放下直接拿 DIP 当物理用，框出来的矩形会缩到左上角一半大小，
+        // 用户框的是这道题，截出来的是隔壁的"温馨提示"，看起来就像彻底错位。
+        double k = _scale > 0 ? _scale : DipToPixel();
+
+        int x = (int)Math.Round(Math.Min(_start.X, p.X) * k) + _virtualScreen.X;
+        int y = (int)Math.Round(Math.Min(_start.Y, p.Y) * k) + _virtualScreen.Y;
+        int w = (int)Math.Round(Math.Abs(p.X - _start.X) * k);
+        int h = (int)Math.Round(Math.Abs(p.Y - _start.Y) * k);
 
         // 太小说明是误点，不当成框选
         if (w < 40 || h < 24)
@@ -157,6 +167,61 @@ public sealed partial class RegionSelectorWindow : Window
     {
         if (e.Key == VirtualKey.Escape)
             Finish(null);
+    }
+
+    /// <summary>
+    /// DIP → 物理像素的比值。
+    ///
+    /// 优先量「窗口客户端物理宽度 / XAML 根元素 DIP 宽度」：这个比值就是内容实际被
+    /// 拉伸的倍数，多屏不同缩放时也比 GetDpiForWindow 可靠（WinUI 3 的窗口横跨多屏
+    /// 时只按它所在那块屏的 DPI 缩放全部内容）。
+    /// 量不到再退回 GetDpiForWindow/96，最后兜底 1.0。
+    /// </summary>
+    private double DipToPixel()
+    {
+        try
+        {
+            double dipW = Root.ActualWidth;
+            double physW = 0;
+
+            try
+            {
+                physW = WindowHelper.AppWindowOf(this).ClientSize.Width;
+            }
+            catch
+            {
+                physW = _virtualScreen.Width;
+            }
+
+            if (physW <= 1)
+                physW = _virtualScreen.Width;
+
+            if (dipW > 1 && physW > 1)
+            {
+                double ratio = physW / dipW;
+                if (ratio is > 0.5 and < 4)
+                    return ratio;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var hwnd = WindowHelper.Hwnd(this);
+            if (hwnd != IntPtr.Zero)
+            {
+                uint dpi = GetDpiForWindow(hwnd);
+                if (dpi >= 48)
+                    return dpi / 96.0;
+            }
+        }
+        catch
+        {
+        }
+
+        return 1.0;
     }
 
     private void Finish(ScreenRect? rect)

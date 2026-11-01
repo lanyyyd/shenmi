@@ -1,11 +1,10 @@
 using System.Text;
 using QuickAnswer.Core.Capture;
+using QuickAnswer.Core.Imaging;
 using QuickAnswer.Core.Models;
 using QuickAnswer.Core.Ocr;
 using QuickAnswer.Core.Parse;
 using QuickAnswer.Core.Storage;
-using Windows.Graphics.Imaging;
-using Windows.Storage.Streams;
 
 namespace QuickAnswer.Core.Diagnostics;
 
@@ -45,7 +44,7 @@ public static class OcrDiagnostics
 
             if (outcome.Image is { } img)
             {
-                var png = await EncodePngAsync(img).ConfigureAwait(false);
+                var png = await ImageCodec.EncodePngAsync(img).ConfigureAwait(false);
                 if (png is not null)
                     await File.WriteAllBytesAsync(Path.Combine(Dir, name + ".png"), png).ConfigureAwait(false);
             }
@@ -86,40 +85,6 @@ public static class OcrDiagnostics
             sb.AppendLine($"[{line.Rect.X},{line.Rect.Y} {line.Rect.Width}×{line.Rect.Height}] {line.Text}");
 
         return sb.ToString();
-    }
-
-    private static async Task<byte[]?> EncodePngAsync(CapturedImage image)
-    {
-        try
-        {
-            using var stream = new InMemoryRandomAccessStream();
-
-            var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
-            encoder.SetPixelData(
-                BitmapPixelFormat.Bgra8,
-                BitmapAlphaMode.Ignore,
-                (uint)image.Width,
-                (uint)image.Height,
-                96, 96,
-                image.Bgra);
-
-            await encoder.FlushAsync();
-
-            var size = (int)stream.Size;
-            if (size <= 0)
-                return null;
-
-            var bytes = new byte[size];
-            using var reader = new DataReader(stream.GetInputStreamAt(0));
-            await reader.LoadAsync((uint)size);
-            reader.ReadBytes(bytes);
-
-            return bytes;
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private static void Prune()

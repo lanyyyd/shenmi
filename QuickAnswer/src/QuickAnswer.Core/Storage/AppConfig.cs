@@ -4,6 +4,16 @@ using QuickAnswer.Core.Models;
 
 namespace QuickAnswer.Core.Storage;
 
+/// <summary>识别方式。</summary>
+public enum WorkMode
+{
+    /// <summary>截图 → OCR → 题库/AI。省流量、能命中题库，但受 OCR 准确率拖累。</summary>
+    Ocr = 0,
+
+    /// <summary>截图直接交给多模态模型。排版再乱也能读，代价是每次都走模型、更慢。</summary>
+    Vision = 1,
+}
+
 /// <summary>
 /// 本地配置。存放于 %LOCALAPPDATA%\QuickAnswer\config.json。
 ///
@@ -31,6 +41,9 @@ public sealed class AppConfig
 
     // ---- 识别 ----
     public ScreenRect? Region { get; set; }
+
+    /// <summary>工作模式：走 OCR，还是把截图直接喂给多模态模型。</summary>
+    public WorkMode Mode { get; set; } = WorkMode.Ocr;
 
     /// <summary>检测间隔（毫秒）。200–5000。</summary>
     public int IntervalMs { get; set; } = 1000;
