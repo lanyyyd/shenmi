@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-mode="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>搜题题库 · 管理后台</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+body{overflow:auto}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:26px 18px 60px}
+.top{display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.top h1{font-size:21px;font-weight:800;letter-spacing:-.3px}
+.top .spacer{flex:1}
+.btn{padding:8px 14px;border-radius:10px;font-size:13px;font-weight:600;transition:.2s;
+  background:var(--panel);border:1px solid var(--line);color:var(--text);cursor:pointer}
+html[data-theme="light"] .btn:not(.pri){background:#fff}
+.btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn.pri{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;border:none}
+.btn.pri:hover{filter:brightness(1.08);color:#fff}
+.btn.danger{color:#EF4444}
+.btn.danger:hover{border-color:#EF4444}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;margin-bottom:18px}
+html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
+.card-h{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.card-h h2{font-size:15px;font-weight:700}
+.card-h .spacer{flex:1}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
+.deny{text-align:center;padding:80px 20px}.deny h2{font-size:19px;margin-bottom:10px}
+.deny p{color:var(--muted);font-size:13.5px;margin-bottom:20px}
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(20px);z-index:300;
+  padding:11px 20px;border-radius:11px;font-size:13.5px;font-weight:600;color:#fff;
+  background:linear-gradient(135deg,var(--primary),var(--primary-2));opacity:0;pointer-events:none;transition:.25s}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.form{padding:16px 18px}
+.fld{margin-bottom:14px}
+.fld>label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:7px}
+.fld input,.fld textarea,.fld select{width:100%;padding:10px 13px;border-radius:10px;font-size:13.5px;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+.fld input:focus,.fld textarea:focus,.fld select:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-l);outline:none}
+.fld textarea{resize:vertical;line-height:1.7;font-family:inherit}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.hint{font-size:12px;color:var(--hint);margin-top:6px;line-height:1.7}
+.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:4px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:14px;margin-bottom:18px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+html[data-theme="light"] .stat{background:#fff;box-shadow:var(--shadow)}
+.stat .n{font-size:26px;font-weight:800;letter-spacing:-.5px}
+.stat .l{font-size:12px;color:var(--muted);margin-top:2px}
+.tabs{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap}
+.tab{padding:9px 18px;border-radius:10px;font-size:13.5px;font-weight:600;cursor:pointer;
+  background:transparent;border:1px solid transparent;color:var(--muted)}
+.tab.on{background:var(--primary);color:#fff}
+.pane{display:none}.pane.on{display:block}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 12px;font-size:12px;color:var(--muted);font-weight:600;
+  border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+.pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700}
+.pill.verified{background:#DCFCE7;color:#15803D}
+.pill.pending{background:#FEF3C7;color:#B45309}
+.pill.conflict{background:#FEE2E2;color:#B91C1C}
+.pill.rejected{background:#E5E7EB;color:#4B5563}
+.opt{color:var(--muted);font-size:12px;line-height:1.6}
+.empty{padding:40px;text-align:center;color:var(--muted);font-size:13.5px}
+.warn{background:#FEF3C7;border:1px solid #FDE68A;color:#92400E;padding:12px 16px;border-radius:12px;
+  font-size:13px;line-height:1.7;margin-bottom:18px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <h1>📚 搜题题库</h1>
+    <span id="whoami" class="mono"></span>
+    <div class="spacer"></div>
+    <button class="btn" onclick="location.href='/admin.html'">← 返回后台</button>
+    <button class="btn" onclick="loadAll()">刷新</button>
+    <button class="btn" onclick="logout()">退出</button>
+  </div>
+
+  <div id="deny" class="deny" style="display:none">
+    <h2>需要管理员权限</h2>
+    <p>请用管理员账号登录后台后再访问此页。</p>
+    <a class="btn pri" href="/">回到首页</a>
+  </div>
+
+  <div id="main" style="display:none">
+
+    <div class="stats">
+      <div class="stat"><div class="n" id="s-total">0</div><div class="l">题目总数</div></div>
+      <div class="stat"><div class="n" id="s-verified">0</div><div class="l">已验证</div></div>
+      <div class="stat"><div class="n" id="s-pending">0</div><div class="l">待验证</div></div>
+      <div class="stat"><div class="n" id="s-conflict">0</div><div class="l">答案冲突</div></div>
+      <div class="stat"><div class="n" id="s-hits">0</div><div class="l">累计命中次数</div></div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab on" data-pane="models">AI 模型</button>
+      <button class="tab" data-pane="questions">题库</button>
+      <button class="tab" data-pane="prompts">提示词</button>
+    </div>
+
+    <!-- ===== 模型 ===== -->
+    <div class="pane on" id="pane-models">
+      <div class="warn">
+        API Key 存在服务端数据库，客户端永远拿不到。客户端选模型时只传一个 id。
+        <b>base_url 要填到域名级别</b>（如 <code>https://api.deepseek.com</code>），程序会自动拼 <code>/chat/completions</code>。
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>已配置的模型</h2></div>
+        <div id="model-list"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>新增 / 修改模型</h2></div>
+        <div class="form">
+          <div class="grid2">
+            <div class="fld"><label>模型 ID（客户端下拉框用它）</label>
+              <input id="m-id" placeholder="deepseek-chat"></div>
+            <div class="fld"><label>显示名称</label>
+              <input id="m-name" placeholder="DeepSeek 对话"></div>
+            <div class="fld"><label>接口地址 base_url</label>
+              <input id="m-base" placeholder="https://api.deepseek.com"></div>
+            <div class="fld"><label>模型名（请求体里的 model）</label>
+              <input id="m-model" placeholder="deepseek-chat"></div>
+            <div class="fld"><label>API Key</label>
+              <input id="m-key" type="password" placeholder="sk-..."></div>
+            <div class="fld"><label>排序（越小越靠前）</label>
+              <input id="m-sort" type="number" value="0"></div>
+          </div>
+          <div class="fld" style="margin-top:14px">
+            <label>启用</label>
+            <input id="m-enabled" type="checkbox" checked style="width:auto">
+          </div>
+          <div class="actions">
+            <button class="btn pri" onclick="saveModel()">保存模型</button>
+            <span class="hint">保存后客户端在「模型」下拉框里选一次即可。留空 id 会报错。</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 题库 ===== -->
+    <div class="pane" id="pane-questions">
+      <div class="card">
+        <div class="card-h">
+          <h2>题目列表</h2>
+          <div class="spacer"></div>
+          <select id="q-filter" onchange="loadQuestions()" style="padding:7px 12px;border-radius:9px;
+            border:1.5px solid var(--line);background:var(--input-bg);color:var(--text);font-size:13px">
+            <option value="">全部</option>
+            <option value="pending">待验证</option>
+            <option value="verified">已验证</option>
+            <option value="conflict">答案冲突</option>
+            <option value="rejected">已剔除</option>
+          </select>
+        </div>
+        <div id="q-list"></div>
+      </div>
+    </div>
+
+    <!-- ===== 提示词 ===== -->
+    <div class="pane" id="pane-prompts">
+      <div class="warn">
+        提示词由服务端统一管理，客户端不可修改 —— 用户把提示词改坏了会直接产生脏题库。
+        可用占位符：<code>{{type}}</code> <code>{{stem}}</code> <code>{{options}}</code>。
+        要求模型只输出 JSON，程序会解析并按选项做校验。
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>当前提示词</h2></div>
+        <div id="prompt-list"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>新增版本</h2></div>
+        <div class="form">
+          <div class="fld"><label>适用题型</label>
+            <select id="p-type">
+              <option value="default">default（所有题型兜底）</option>
+              <option value="choice">choice（单选）</option>
+              <option value="multi">multi（多选）</option>
+              <option value="judge">judge（判断）</option>
+              <option value="fill">fill（填空）</option>
+              <option value="short">short（简答）</option>
+            </select>
+          </div>
+          <div class="fld"><label>模板内容</label>
+            <textarea id="p-template" rows="14" placeholder="你是答题助手…"></textarea>
+          </div>
+          <div class="actions">
+            <button class="btn pri" onclick="savePrompt()">保存为新版本</button>
+            <span class="hint">保存后立即生效（取该题型版本号最大的那条）。</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function toast(msg){
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('on');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('on'), 2200);
+}
+
+async function api(url, opts){
+  const r = await fetch(url, Object.assign({credentials:'same-origin'}, opts || {}));
+  if (r.status === 401 || r.status === 403) throw new Error('NO_AUTH');
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+  return d;
+}
+
+async function logout(){
+  try { await fetch('/api/logout', {method:'POST'}); } catch(e){}
+  location.href = '/';
+}
+
+// ---------------------------------------------------------------- 初始化
+
+(async function init(){
+  try {
+    const me = await api('/api/me');
+    const u = me.user || me;
+    $('whoami').textContent = (u.nickname || u.username || '') + (u.isAdmin ? ' · 管理员' : '');
+    if (!u.isAdmin) { $('deny').style.display = 'block'; return; }
+    $('main').style.display = 'block';
+    await loadAll();
+  } catch (e) {
+    $('deny').style.display = 'block';
+  }
+})();
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+    document.querySelectorAll('.pane').forEach(p => p.classList.remove('on'));
+    tab.classList.add('on');
+    $('pane-' + tab.dataset.pane).classList.add('on');
+  };
+});
+
+async function loadAll(){
+  await Promise.all([loadStats(), loadModels(), loadQuestions(), loadPrompts()]);
+}
+
+// ---------------------------------------------------------------- 统计
+
+async function loadStats(){
+  try {
+    const d = await api('/api/v1/qa/admin/stats');
+    $('s-total').textContent = d.total;
+    $('s-verified').textContent = d.verified;
+    $('s-pending').textContent = d.pending;
+    $('s-conflict').textContent = d.conflict;
+    $('s-hits').textContent = d.hits;
+  } catch (e) { if (e.message === 'NO_AUTH') location.href = '/'; }
+}
+
+// ---------------------------------------------------------------- 模型
+
+async function loadModels(){
+  try {
+    const d = await api('/api/v1/qa/admin/models');
+    const box = $('model-list');
+
+    if (!d.items.length) {
+      box.innerHTML = '<div class="empty">还没有配置模型。填下面的表单添加一个，否则搜题只会查题库、不会问 AI。</div>';
+      return;
+    }
+
+    box.innerHTML = '<table><thead><tr><th>ID</th><th>名称</th><th>地址</th><th>模型</th><th>Key</th><th>状态</th><th></th></tr></thead><tbody>' +
+      d.items.map(m => `<tr>
+        <td class="mono">${esc(m.id)}</td>
+        <td>${esc(m.name)}</td>
+        <td class="mono">${esc(m.base_url)}</td>
+        <td class="mono">${esc(m.model_name)}</td>
+        <td class="mono">${m.api_key ? '••••' + esc(String(m.api_key).slice(-4)) : '<span style="color:#EF4444">未填</span>'}</td>
+        <td>${m.enabled ? '✅' : '⛔'}</td>
+        <td style="white-space:nowrap">
+          <button class="btn" onclick='editModel(${JSON.stringify(m).replace(/'/g, "&#39;")})'>编辑</button>
+          <button class="btn danger" onclick="delModel('${esc(m.id)}')">删除</button>
+        </td>
+      </tr>`).join('') + '</tbody></table>';
+  } catch (e) {}
+}
+
+function editModel(m){
+  $('m-id').value = m.id;
+  $('m-name').value = m.name;
+  $('m-base').value = m.base_url;
+  $('m-model').value = m.model_name;
+  $('m-key').value = m.api_key || '';
+  $('m-enabled').checked = !!m.enabled;
+  $('m-sort').value = m.sort || 0;
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+async function saveModel(){
+  const id = $('m-id').value.trim();
+  if (!id) return toast('模型 ID 不能为空');
+
+  try {
+    await api('/api/v1/qa/admin/models', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        id: id,
+        name: $('m-name').value.trim() || id,
+        base_url: $('m-base').value.trim(),
+        model_name: $('m-model').value.trim() || id,
+        api_key: $('m-key').value.trim(),
+        enabled: $('m-enabled').checked,
+        sort: parseInt($('m-sort').value || '0', 10),
+      })
+    });
+    toast('已保存');
+    loadModels(); loadStats();
+  } catch (e) { toast('保存失败：' + e.message); }
+}
+
+async function delModel(id){
+  if (!confirm('确定删除模型 ' + id + '？')) return;
+  try {
+    await api('/api/v1/qa/admin/models/' + encodeURIComponent(id), {method: 'DELETE'});
+    toast('已删除');
+    loadModels();
+  } catch (e) { toast('删除失败：' + e.message); }
+}
+
+// ---------------------------------------------------------------- 题库
+
+async function loadQuestions(){
+  try {
+    const st = $('q-filter').value;
+    const d = await api('/api/v1/qa/admin/questions?limit=200' + (st ? '&status=' + st : ''));
+    const box = $('q-list');
+
+    if (!d.items.length) {
+      box.innerHTML = '<div class="empty">题库还是空的。用户在客户端搜到新题后，会自动落到这里（状态为「待验证」）。</div>';
+      return;
+    }
+
+    box.innerHTML = '<table><thead><tr><th style="width:34%">题干</th><th>选项</th><th>答案</th><th>状态</th><th>命中</th><th></th></tr></thead><tbody>' +
+      d.items.map(q => `<tr>
+        <td>${esc(q.stem)}</td>
+        <td class="opt">${(q.options || []).map(o => esc(o.key + '. ' + o.text)).join('<br>') || '—'}</td>
+        <td><b>${esc(q.answer_letter || '')}</b> ${esc(q.answer_text || '')}</td>
+        <td><span class="pill ${q.status}">${labelOf(q.status)}</span></td>
+        <td class="mono">${q.hit_count}</td>
+        <td style="white-space:nowrap">
+          ${q.status !== 'verified' ? `<button class="btn" onclick="setStatus(${q.id},'verified')">通过</button>` : ''}
+          ${q.status !== 'rejected' ? `<button class="btn" onclick="setStatus(${q.id},'rejected')">剔除</button>` : ''}
+          <button class="btn danger" onclick="delQuestion(${q.id})">删除</button>
+        </td>
+      </tr>`).join('') + '</tbody></table>';
+  } catch (e) {}
+}
+
+function labelOf(s){
+  return {verified:'已验证', pending:'待验证', conflict:'答案冲突', rejected:'已剔除'}[s] || s;
+}
+
+async function setStatus(id, status){
+  try {
+    await api('/api/v1/qa/admin/questions/' + id + '/status', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({status})
+    });
+    toast('已更新');
+    loadQuestions(); loadStats();
+  } catch (e) { toast('失败：' + e.message); }
+}
+
+async function delQuestion(id){
+  if (!confirm('确定删除这道题？相关投票也会一起删掉。')) return;
+  try {
+    await api('/api/v1/qa/admin/questions/' + id, {method: 'DELETE'});
+    toast('已删除');
+    loadQuestions(); loadStats();
+  } catch (e) { toast('失败：' + e.message); }
+}
+
+// ---------------------------------------------------------------- 提示词
+
+async function loadPrompts(){
+  try {
+    const d = await api('/api/v1/qa/admin/prompts');
+    const box = $('prompt-list');
+
+    if (!d.items.length) {
+      box.innerHTML = '<div class="empty">还没有自定义提示词，正在使用内置默认模板。</div>';
+      return;
+    }
+
+    box.innerHTML = d.items.map(p => `<div class="form" style="border-bottom:1px solid var(--line)">
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+        <b>${esc(p.type)}</b>
+        <span class="mono">v${p.version}</span>
+        <span class="mono">${p.enabled ? '启用' : '停用'}</span>
+      </div>
+      <pre class="mono" style="white-space:pre-wrap;line-height:1.7;max-height:220px;overflow:auto">${esc(p.template)}</pre>
+    </div>`).join('');
+  } catch (e) {}
+}
+
+async function savePrompt(){
+  const tpl = $('p-template').value.trim();
+  if (!tpl) return toast('模板不能为空');
+
+  try {
+    const d = await api('/api/v1/qa/admin/prompts', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({type: $('p-type').value, template: tpl})
+    });
+    toast('已保存为 v' + d.version);
+    loadPrompts();
+  } catch (e) { toast('保存失败：' + e.message); }
+}
+
+// ---------------------------------------------------------------- 工具
+
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+</script>
+</body>
+</html>

@@ -49,7 +49,7 @@ function cycleTheme() {
 
 /* ---------------- 状态 ---------------- */
 const COLORS = ['#10B981','#3B82F6','#F59E0B','#EF4444','#8B5CF6','#EC4899','#06B6D4','#84CC16','#F97316','#14B8A6'];
-const PAGE_SIZE = 500;       // 每页消息数（首屏 500 条，上滑到顶再加载更早的 500 条）
+const PAGE_SIZE = 100;       // 每页消息数（首屏 100 条，上滑到顶再加载更早的 100 条）
 let ME = null;
 let WS = null;
 let onlineUsers = [];
@@ -1243,9 +1243,9 @@ function buildMsgEl(m) {
   if (isPlayableVideo(m)) {
     inner = `<div class="bubble" style="padding:6px"><video class="bubble-video" src="${esc(m.filePath)}" controls preload="metadata" playsinline onloadedmetadata="onImgLoad()"></video></div>`;
   } else if (mtype === 'image' && m.filePath) {
-    inner = `<div class="bubble" style="padding:6px"><img src="${esc(m.filePath)}" alt="" onload="onImgLoad()" onclick="showImg('${esc(m.filePath)}')"></div>`;
+    inner = `<div class="bubble" style="padding:6px"><img src="${esc(m.filePath)}" alt="" loading="lazy" onload="onImgLoad()" onclick="showImg('${esc(m.filePath)}')"></div>`;
   } else if (mtype === 'sticker' && m.filePath) {
-    inner = `<div class="sticker-bubble"><img src="${esc(m.filePath)}" alt="" onload="onImgLoad()"></div>`;
+    inner = `<div class="sticker-bubble"><img src="${esc(m.filePath)}" alt="" loading="lazy" onload="onImgLoad()"></div>`;
   } else if (mtype === 'file' && m.filePath) {
     inner = `<a class="bubble file-bubble" href="${esc(m.filePath)}" download="${esc(m.fileName || '')}" target="_blank">
       <div class="file-ico"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 7V3.5L18.5 9H13z"/></svg></div>
