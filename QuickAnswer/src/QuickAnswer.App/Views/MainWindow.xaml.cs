@@ -751,9 +751,24 @@ public sealed partial class MainWindow : Window
 
         // 隐蔽模式让浮层自己打一句「已复制」，两处提示只留一处
         if (App.Config.StealthMode)
+        {
             _stealth?.NotifyCopied(ok);
-        else if (ok)
-            SetStatus("答案已复制到剪贴板", "#FF166534");
+            return;
+        }
+
+        if (!ok)
+            return;
+
+        const string Copied = "答案已复制到剪贴板";
+        SetStatus(Copied, "#FF166534");
+
+        // 状态栏上这句挂着会让人以为程序卡在这一步，2 秒后自动收回
+        _ = DispatcherQueue.TryEnqueue(async () =>
+        {
+            await Task.Delay(2000);
+            if (StatusLabel.Text == Copied)
+                SetStatus("监听中", "#FF166534");
+        });
     }
 
     private void UpdatePreview(ParsedQuestion question, AnswerResult result)
