@@ -189,13 +189,27 @@ data class CloudAccountDto(
     @SerialName("checked_at") val checkedAt: Long? = null,
     @SerialName("updated_at") val updatedAt: Long? = null,
     @SerialName("free_duration") val freeDuration: Int? = null,
-    @SerialName("total_duration") val totalDuration: Int? = null
+    @SerialName("total_duration") val totalDuration: Int? = null,
+    /** 最近一次自动续期时间（Unix 秒）；0 表示还没续过。 */
+    @SerialName("refresh_at") val refreshAt: Long = 0,
+    /** 1 成功、0 失败、null 未续期。 */
+    @SerialName("refresh_ok") val refreshOk: Int? = null,
+    @SerialName("refresh_msg") val refreshMsg: String = ""
 ) {
     val displayName: String get() = gameName.ifBlank { game }
     val statusText: String get() = when (valid) {
         1 -> "有效"
         0 -> "已失效"
         else -> "未检测"
+    }
+
+    /** 服务端用 stoken 换票后的续期状态，直接在卡片上展示。 */
+    val renewalText: String get() {
+        if (refreshAt <= 0) return ""
+        val whenText = java.time.Instant.ofEpochSecond(refreshAt)
+            .atZone(java.time.ZoneId.systemDefault())
+            .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"))
+        return if (refreshMsg.isBlank()) "自动续期 $whenText" else "自动续期 $whenText（$refreshMsg）"
     }
 }
 
@@ -222,7 +236,10 @@ data class CloudCheckDto(
     val msg: String = "",
     val nickname: String = "",
     @SerialName("game_uid") val gameUid: String = "",
-    @SerialName("free_duration") val freeDuration: Int? = null
+    @SerialName("free_duration") val freeDuration: Int? = null,
+    /** 米哈游游戏上传后服务端立刻换票的结果；null 表示该游戏不支持自动续期。 */
+    @SerialName("refresh_ok") val refreshOk: Boolean? = null,
+    @SerialName("refresh_msg") val refreshMsg: String = ""
 )
 
 /** 上传用的 Cookie 项；服务端只用 name/value，domain 放宽即可。 */

@@ -111,6 +111,11 @@ fun CloudScreen(
                     if (result.nickname.isNotBlank()) append("\n账号：${result.nickname}")
                     if (result.gameUid.isNotBlank()) append("\nUID：${result.gameUid}")
                     append("\n有效性：").append(if (result.valid == true) "通过" else "未通过（${result.msg}）")
+                    when {
+                        result.refreshOk == true -> append("\n自动续期：已开启（stoken 换票）")
+                        result.refreshOk == false && result.refreshMsg.isNotBlank() ->
+                            append("\n自动续期失败：${result.refreshMsg}")
+                    }
                 }
                 dialog = "抓取完成" to detail
                 reload()
@@ -218,6 +223,7 @@ fun CloudScreen(
                                         if (result.nickname.isNotBlank()) append("\n昵称：${result.nickname}")
                                         result.freeDuration?.let { append("\n剩余：$it 分钟") }
                                         if (result.msg.isNotBlank()) append("\n").append(result.msg)
+                                        if (result.refreshMsg.isNotBlank()) append("\n").append(result.refreshMsg)
                                     }
                                     reload()
                                 } catch (e: Exception) {
@@ -358,6 +364,15 @@ private fun AccountCard(
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            if (account.renewalText.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    account.renewalText,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             Spacer(Modifier.height(4.dp))
 

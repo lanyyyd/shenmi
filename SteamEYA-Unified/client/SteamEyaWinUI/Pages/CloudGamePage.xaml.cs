@@ -237,8 +237,17 @@ public sealed partial class CloudGamePage : Page
             }
 
             var loggedIn = TryGetBool(body, "logged_in");
-            ShowInfo(loggedIn ? "登录成功，浏览器已打开" : "已注入 Cookie，请在浏览器确认登录状态",
-                loggedIn ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
+            // 米哈游账号：服务端在下载前已用 stoken 换过票，这里把结果一并告诉用户。
+            var refreshNote = data.RefreshOk switch
+            {
+                true => "，已自动续期 Cookie",
+                false when !string.IsNullOrWhiteSpace(data.RefreshMsg)
+                    => $"，自动续期失败：{data.RefreshMsg}（建议重新抓取）",
+                _ => string.Empty
+            };
+            var failedRefresh = data.RefreshOk == false;
+            ShowInfo((loggedIn ? "登录成功，浏览器已打开" : "已注入 Cookie，请在浏览器确认登录状态") + refreshNote,
+                failedRefresh ? InfoBarSeverity.Warning : (loggedIn ? InfoBarSeverity.Success : InfoBarSeverity.Warning));
             await _cloud.ReportLoginAsync(game);
         }
         finally
@@ -272,8 +281,14 @@ public sealed partial class CloudGamePage : Page
 
         var combo = TryGetString(body, "combo_token") ?? string.Empty;
         var result = await _cloud.UploadAsync(game, cookies, combo);
-        ShowInfo(result.Ok ? $"已上传（检测：{result.Detail}）" : (result.Msg ?? "上传失败"),
-            result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Error);
+        var refreshNote = result.RefreshOk switch
+        {
+            true => "，stoken 自动续期已开启",
+            false when !string.IsNullOrWhiteSpace(result.RefreshMsg) => $"（自动续期失败：{result.RefreshMsg}）",
+            _ => string.Empty
+        };
+        ShowInfo(result.Ok ? $"已上传（检测：{result.Detail}{refreshNote}）" : (result.Msg ?? "上传失败"),
+            result.Ok && result.RefreshOk != false ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
         await RefreshStatusAsync();
     }
 
@@ -284,6 +299,11 @@ public sealed partial class CloudGamePage : Page
         var text = result.Ok
             ? (result.Msg ?? result.Detail ?? "检测完成")
             : (result.Msg ?? result.Detail ?? "检测失败");
+        // 服务端检测到失效时会先用 stoken 续期再复检，把这一步的结果告诉用户。
+        if (!string.IsNullOrWhiteSpace(result.RefreshMsg))
+        {
+            text += $"\n{result.RefreshMsg}";
+        }
         ShowInfo(text, result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Error);
         await RefreshStatusAsync();
     }

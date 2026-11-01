@@ -86,6 +86,17 @@ internal sealed class CloudGameItem
     [JsonPropertyName("game_name")]
     public string GameNameFromServer { get; set; } = string.Empty;
 
+    /// <summary>最近一次自动续期时间（Unix 秒）；0 表示还没续过。</summary>
+    [JsonPropertyName("refresh_at")]
+    public long RefreshAt { get; set; }
+
+    /// <summary>最近一次自动续期结果：1 成功、0 失败、null 未续期。</summary>
+    [JsonPropertyName("refresh_ok")]
+    public int? RefreshOk { get; set; }
+
+    [JsonPropertyName("refresh_msg")]
+    public string RefreshMsg { get; set; } = string.Empty;
+
     /// <summary>
     /// 显示名优先级：服务端 → 客户端已知列表（/api/cloud/games 拉到的）→ 内置硬编码 → key。
     /// 之前只有内置 switch，自定义游戏（key 形如 custom_xxxxxxxx）会直接把 key 显示给用户。
@@ -108,6 +119,24 @@ internal sealed class CloudGameItem
     public string DurationText => FreeDuration is not null
         ? $"剩余免费 {FreeDuration} 分钟"
         : (TotalDuration is not null ? $"剩余时长 {TotalDuration} 分钟" : string.Empty);
+
+    /// <summary>自动续期状态：米哈游账号由服务端用 stoken 定期换票，这里只做展示。</summary>
+    public string RenewalText
+    {
+        get
+        {
+            if (RefreshAt <= 0)
+            {
+                return string.Empty;
+            }
+            var when = System.DateTimeOffset.FromUnixTimeSeconds(RefreshAt)
+                .ToLocalTime()
+                .ToString("MM-dd HH:mm");
+            return string.IsNullOrWhiteSpace(RefreshMsg)
+                ? $"自动续期 {when}"
+                : $"自动续期 {when}（{RefreshMsg}）";
+        }
+    }
 }
 
 internal sealed class CloudMyDto
@@ -123,6 +152,13 @@ internal sealed class CloudDownloadDto
 
     [JsonPropertyName("combo_token")]
     public string? ComboToken { get; set; }
+
+    /// <summary>本次下载前是否做过自动续期（成功为 true）。</summary>
+    [JsonPropertyName("refresh_ok")]
+    public bool? RefreshOk { get; set; }
+
+    [JsonPropertyName("refresh_msg")]
+    public string? RefreshMsg { get; set; }
 
     public string? Msg { get; set; }
 }
@@ -141,6 +177,13 @@ internal sealed class CloudActionResultDto
 
     [JsonPropertyName("total_duration")]
     public int? TotalDuration { get; set; }
+
+    /// <summary>上传后立即做的一次 stoken 换票结果；null 表示该游戏不支持自动续期。</summary>
+    [JsonPropertyName("refresh_ok")]
+    public bool? RefreshOk { get; set; }
+
+    [JsonPropertyName("refresh_msg")]
+    public string? RefreshMsg { get; set; }
 }
 
 /// <summary>

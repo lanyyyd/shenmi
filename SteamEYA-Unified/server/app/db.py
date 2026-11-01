@@ -154,6 +154,9 @@ CREATE TABLE IF NOT EXISTS cloud_cookies (
     nickname      TEXT,
     free_duration INTEGER,
     total_duration INTEGER,
+    refresh_at    INTEGER,
+    refresh_ok    INTEGER,
+    refresh_msg   TEXT,
     UNIQUE(user_id, game, game_uid)
 );
 
@@ -665,6 +668,17 @@ def init_db() -> None:
                 DROP TABLE cloud_cookies_old;
                 COMMIT;
             """)
+
+    # 兼容旧库：云游戏 Cookie 自动续期状态（refresh_at / refresh_ok / refresh_msg）。
+    cloud_cols = {row["name"] for row in query_all("PRAGMA table_info(cloud_cookies)")}
+    for col, ddl in (
+        ("refresh_at", "ALTER TABLE cloud_cookies ADD COLUMN refresh_at INTEGER"),
+        ("refresh_ok", "ALTER TABLE cloud_cookies ADD COLUMN refresh_ok INTEGER"),
+        ("refresh_msg", "ALTER TABLE cloud_cookies ADD COLUMN refresh_msg TEXT"),
+    ):
+        if cloud_cols and col not in cloud_cols:
+            with cursor() as cur:
+                cur.execute(ddl)
 
     from .config import ADMIN_USERNAME, ADMIN_PASSWORD, INVITE_REQUIRED_DEFAULT
     from . import security

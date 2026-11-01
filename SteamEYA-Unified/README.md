@@ -69,6 +69,9 @@ pip install -r requirements.txt selenium
 python local_service.py --port 6971
 ```
 - 数据（浏览器 profile / Cookie）默认落在脚本同级目录，可用 `EYA_ENGINE_DATA` 指到非 C 盘。
+- Cookie 自动续期：服务端用 stoken 换新的 ltoken / cookie_token（与 MiyoQian 同机制），
+  上号前超过 12 小时会自动续期，检测到失效会先续期再复检，后台每天还会兜底巡检一次；
+  异环 / 哔哩哔哩是会话型 Cookie，不支持无感续期，仍需手动重抓。
 
 ### 3) 客户端（Windows + .NET 10 SDK + VS C++ 工具链）
 ```bash

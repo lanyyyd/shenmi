@@ -14,6 +14,7 @@ import requests
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from .. import security
+from .. import cloud_refresh
 from ..config import DATA_DIR
 from ..db import execute, execute_update, query_all, query_one
 from ..deps import get_current_user, require_admin
@@ -373,9 +374,19 @@ def upload(payload: dict = Body(...), user: dict = Depends(get_current_user)):
     # 自定义游戏：首个成功上传的人让它对所有人可见，其他人就不用再自己建一遍。
     execute_update("UPDATE cloud_games SET visible=1 WHERE game_key=? AND visible=0", (game,))
 
+    # 米哈游账号：上传后立刻用 stoken 换一次票，验证「以后能长期无感续期」。
+    # 会话型游戏（异环/哔哩哔哩）没有可换的票，refresh_ok 返回 null，客户端不提示。
+    if game in cloud_refresh.MIHOYO_GAMES:
+        refreshed = cloud_refresh.refresh_stored(user["id"], game, game_uid, force=True)
+        refresh_ok = refreshed.get("ok")
+        refresh_msg = refreshed.get("msg") or ""
+    else:
+        refresh_ok = None
+        refresh_msg = ""
     return {"ok": True, "msg": "上传成功", "valid": result.get("valid"),
             "nickname": result.get("nickname", ""), "uid": game_uid,
-            "detail": result.get("msg")}
+            "detail": result.get("msg"),
+            "refresh_ok": refresh_ok, "refresh_msg": refresh_msg}
 
 
 # ---------------- 内部转发：让旧 6966 上号器服务跨库同步 ----------------
@@ -455,13 +466,20 @@ def internal_relay(request: Request, payload: dict = Body(...)):
 
 @router.get("/download")
 def download(game: str = "genshin", uid: str = "", user: dict = Depends(get_current_user)):
-    """下载 Cookie；传 uid 指定账号，缺省取最近上传的那个。"""
+    """下载 Cookie；传 uid 指定账号，缺省取最近上传的那个。
+
+    米哈游账号超过 12 小时没续期会先自动换票，客户端拿到的就是新鲜 Cookie，
+    用户完全无感；换票失败不影响返回旧 Cookie，但会带上失败原因。
+    """
+    cloud_refresh.refresh_stored(user["id"], game, uid, force=False)
     if uid:
-        row = query_one("SELECT data, combo_token, updated_at, game_uid FROM cloud_cookies "
-                        "WHERE user_id=? AND game=? AND game_uid=?", (user["id"], game, uid))
+        row = query_one("SELECT data, combo_token, updated_at, game_uid, refresh_at, refresh_ok, refresh_msg "
+                        "FROM cloud_cookies WHERE user_id=? AND game=? AND game_uid=?",
+                        (user["id"], game, uid))
     else:
-        row = query_one("SELECT data, combo_token, updated_at, game_uid FROM cloud_cookies "
-                        "WHERE user_id=? AND game=? ORDER BY updated_at DESC, id DESC LIMIT 1", (user["id"], game))
+        row = query_one("SELECT data, combo_token, updated_at, game_uid, refresh_at, refresh_ok, refresh_msg "
+                        "FROM cloud_cookies WHERE user_id=? AND game=? "
+                        "ORDER BY updated_at DESC, id DESC LIMIT 1", (user["id"], game))
     if not row:
         raise HTTPException(404, "该账号尚未上传该游戏的 Cookie")
     try:
@@ -469,7 +487,10 @@ def download(game: str = "genshin", uid: str = "", user: dict = Depends(get_curr
     except Exception:
         raise HTTPException(500, "数据解密失败")
     return {"ok": True, "cookies": cookies, "combo_token": row["combo_token"] or "",
-            "game_uid": row["game_uid"] or "", "updated_at": row["updated_at"]}
+            "game_uid": row["game_uid"] or "", "updated_at": row["updated_at"],
+            "refresh_at": row["refresh_at"],
+            "refresh_ok": None if row["refresh_ok"] is None else bool(row["refresh_ok"]),
+            "refresh_msg": row["refresh_msg"] or ""}
 
 
 @router.post("/report_login")
@@ -495,29 +516,46 @@ def check(payload: dict = Body(...), user: dict = Depends(get_current_user)):
                         "WHERE user_id=? AND game=? ORDER BY updated_at DESC, id DESC LIMIT 1", (user["id"], game))
     if not row:
         raise HTTPException(404, "尚未上传该游戏 Cookie")
+    row_id = row["id"]
     cookies = security.decrypt_blob(row["data"])
     result = check_cookie_valid(cookies, game, row["combo_token"] or "")
+    refresh_msg = ""
+    if result.get("valid") is False and game in cloud_refresh.MIHOYO_GAMES:
+        # 检测到失效先尝试 stoken 换票，再复检一次：很多「失效」只是短期 token 到期。
+        rr = cloud_refresh.refresh_stored(user["id"], game, row["game_uid"] or "", force=True)
+        if rr.get("ok"):
+            fresh = query_one("SELECT data, combo_token, game_uid, nickname FROM cloud_cookies WHERE id=?",
+                              (row["id"],))
+            if fresh:
+                cookies = security.decrypt_blob(fresh["data"])
+                result = check_cookie_valid(cookies, game, fresh["combo_token"] or "")
+                row = fresh
+                refresh_msg = "检测前已自动续期"
+        elif rr.get("refreshed"):
+            refresh_msg = rr.get("msg") or "自动续期失败"
     execute(
         "UPDATE cloud_cookies SET valid=?, checked_at=?, game_uid=?, nickname=?, free_duration=?, total_duration=? "
         "WHERE id=?",
         (1 if result.get("valid") else (0 if result.get("valid") is False else None),
          security.now_s(), result.get("game_uid") or row["game_uid"] or "",
          result.get("nickname") or row["nickname"] or "",
-         result.get("free_duration"), result.get("total_duration"), row["id"]),
+         result.get("free_duration"), result.get("total_duration"), row_id),
     )
-    return {"ok": True, **result}
+    return {"ok": True, **result, "refresh_msg": refresh_msg}
 
 
 @router.get("/my")
 def my(user: dict = Depends(get_current_user)):
     rows = query_all(
-        "SELECT game, updated_at, valid, checked_at, nickname, game_uid, free_duration, total_duration "
-        "FROM cloud_cookies WHERE user_id=?", (user["id"],),
+        "SELECT game, updated_at, valid, checked_at, nickname, game_uid, free_duration, total_duration, "
+        "refresh_at, refresh_ok, refresh_msg FROM cloud_cookies WHERE user_id=?", (user["id"],),
     )
     names = game_name_map()
     out = []
     for row in rows:
         item = dict(row)
+        item["refresh_at"] = int(item.get("refresh_at") or 0)
+        item["refresh_msg"] = item.get("refresh_msg") or ""
         item["game_name"] = names.get(item["game"]) or item["game"]
         out.append(item)
     return {"ok": True, "games": out}

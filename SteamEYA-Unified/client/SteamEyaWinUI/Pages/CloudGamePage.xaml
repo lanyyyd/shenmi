@@ -87,6 +87,10 @@
                                     <TextBlock Text="{x:Bind StatusText}" />
                                     <TextBlock Text="{x:Bind DurationText}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
+                                <TextBlock
+                                    Text="{x:Bind RenewalText}"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                             </StackPanel>
                         </Border>
                     </DataTemplate>

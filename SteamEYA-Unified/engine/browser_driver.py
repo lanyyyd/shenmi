@@ -2,9 +2,11 @@
 浏览器驱动模块（支持 Edge / Chrome / 360极速浏览器）
 负责：启动浏览器、注入 Cookie、抓取 Cookie、抓取 combo_token、登录状态检测
 """
+import hashlib
 import json
 import logging
 import os
+import random
 import time
 from urllib.parse import urlparse
 from typing import Optional
@@ -351,30 +353,118 @@ def navigate_to_cloud_genshin(driver: webdriver.Remote) -> None:
     navigate_to_game(driver, "genshin")
 
 
+_PASSPORT_API = "https://passport-api.mihoyo.com"
+_LTOKEN_URL = f"{_PASSPORT_API}/account/auth/api/getLTokenBySToken"
+_COOKIE_TOKEN_URL = f"{_PASSPORT_API}/account/auth/api/getCookieAccountInfoBySToken"
+_PASSPORT_X4_SALT = "xV8v4Qu54lUKrEYFZkJhB8cuOh9Asafs"
+_BBS_VERSION = "2.106.2"
+_BBS_UA = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) miHoYoBBS/{_BBS_VERSION}"
+
+
+def _ds_x4(query: str = "") -> str:
+    """passport 的 DS 签名：t,r,md5(salt&t&r&b&q)。"""
+    t = str(int(time.time()))
+    r = str(random.randint(100000, 200000))
+    sign = hashlib.md5(f"salt={_PASSPORT_X4_SALT}&t={t}&r={r}&b=&q={query}".encode("utf-8")).hexdigest()
+    return f"{t},{r},{sign}"
+
+
+def _exchange_by_stoken(url: str, stoken: str, mid: str, device_id: str, client_type: str) -> dict:
+    """用 stoken 换新票；返回 {"ok", "value", "msg"}。"""
+    headers = {
+        "user-agent": _BBS_UA,
+        "x-rpc-app_version": _BBS_VERSION,
+        "x-rpc-client_type": client_type,
+        "x-requested-with": "com.mihoyo.hyperion",
+        "referer": "https://webstatic.mihoyo.com",
+        "x-rpc-device_id": device_id,
+        "ds": _ds_x4(query=f"stoken={stoken}"),
+        "cookie": f"mid={mid};stoken={stoken}",
+        "accept": "application/json, text/plain, */*",
+    }
+    if client_type == "2":
+        headers["x-rpc-aigis"] = ""
+    try:
+        data = requests.get(url, params={"stoken": stoken}, headers=headers, timeout=12).json()
+    except Exception as e:
+        return {"ok": False, "msg": f"请求失败：{e}"}
+    if not isinstance(data, dict):
+        return {"ok": False, "msg": "接口返回格式异常"}
+    if data.get("retcode") != 0:
+        return {"ok": False, "msg": f"{data.get('message') or '续期失败'}（retcode={data.get('retcode')}）"}
+    return {"ok": True, "value": data.get("data") or {}, "msg": ""}
+
+
+def _apply_tokens(cookies: list, ltoken: str, cookie_token: str) -> tuple:
+    new_cookies = []
+    updated = []
+    for c in cookies:
+        c2 = dict(c)
+        name = c2.get("name")
+        if name in ("ltoken", "ltoken_v2"):
+            c2["value"] = ltoken
+            updated.append(name)
+        elif name in ("cookie_token", "cookie_token_v2"):
+            c2["value"] = cookie_token
+            updated.append(name)
+        new_cookies.append(c2)
+    existing = {c.get("name") for c in new_cookies}
+    if "ltoken" not in existing:
+        new_cookies.append({"name": "ltoken", "value": ltoken, "domain": ".mihoyo.com", "path": "/"})
+        updated.append("ltoken")
+    if "cookie_token" not in existing:
+        new_cookies.append({"name": "cookie_token", "value": cookie_token, "domain": ".mihoyo.com", "path": "/"})
+        updated.append("cookie_token")
+    return new_cookies, sorted(set(updated))
+
+
 def refresh_cookies(cookies: list, game: str = "genshin") -> dict:
     """
-    尝试用 login_ticket 刷新 Cookie（延长有效期），无需重新扫码登录。
+    自动续期 Cookie，无需重新扫码登录（与 MiyoQian 相同的 stoken 机制）。
 
-    原理：米游社提供 getMultiTokenByLoginTicket 接口，
-    用 Cookie 里的 login_ticket + account_id 换取新的 cookie_token / ltoken。
+    优先用长效 stoken 调 passport 换新的 ltoken / cookie_token；
+    老 Cookie 没有 stoken 时退回 login_ticket 接口兜底。
 
     返回 {"ok": bool, "cookies": [...], "msg": str, "updated": [字段名]}
     """
     cfg = _resolve_cfg(game)
     if cfg.get("vendor") != "mihoyo":
-        return {"ok": False, "msg": f"{cfg['name']} 使用会话 Cookie，不支持 login_ticket 续期",
+        return {"ok": False, "msg": f"{cfg['name']} 使用会话 Cookie，不支持自动续期",
                 "cookies": cookies, "updated": []}
 
     cmap = {c.get("name"): c.get("value") for c in cookies if c.get("name")}
-    login_ticket = cmap.get("login_ticket")
-    uid = (cmap.get("stuid") or cmap.get("account_id")
-           or cmap.get("ltuid") or cmap.get("ltuid_v2"))
     stoken = cmap.get("stoken", "")
+    mid = (cmap.get("mid") or cmap.get("account_mid_v2") or cmap.get("ltmid_v2") or "")
+    uid = (cmap.get("stuid") or cmap.get("account_id")
+           or cmap.get("ltuid") or cmap.get("ltuid_v2") or cmap.get("account_id_v2") or "")
 
+    stoken_msg = "Cookie 中没有 stoken"
+    if stoken:
+        if stoken.startswith("v2_") and not mid:
+            stoken_msg = "v2 stoken 缺少 mid，无法自动续期"
+        else:
+            device_id = hashlib.sha256(f"teatt-engine:{uid}:{stoken[-8:]}".encode("utf-8")).hexdigest()[:32]
+            lt = _exchange_by_stoken(_LTOKEN_URL, stoken, mid, device_id, "5")
+            ct = _exchange_by_stoken(_COOKIE_TOKEN_URL, stoken, mid, device_id, "2")
+            if lt.get("ok") and ct.get("ok"):
+                new_ltoken = str((lt.get("value") or {}).get("ltoken") or "")
+                new_cookie = str((ct.get("value") or {}).get("cookie_token") or "")
+                if new_ltoken and new_cookie:
+                    new_cookies, updated = _apply_tokens(cookies, new_ltoken, new_cookie)
+                    return {"ok": True, "cookies": new_cookies, "msg": "续期成功", "updated": updated}
+                stoken_msg = "续期接口未返回新 token"
+            else:
+                failed = lt if not lt.get("ok") else ct
+                stoken_msg = f"stoken 续期失败：{failed.get('msg')}"
+
+    # 兜底：旧账号可能只有 login_ticket
+    login_ticket = cmap.get("login_ticket")
     if not login_ticket:
-        return {"ok": False, "msg": "Cookie 中没有 login_ticket，无法自动续期"}
+        return {"ok": False, "msg": f"{stoken_msg}，且 Cookie 中没有 login_ticket",
+                "cookies": cookies, "updated": []}
     if not uid:
-        return {"ok": False, "msg": "Cookie 中没有 account_id / stuid，无法自动续期"}
+        return {"ok": False, "msg": "Cookie 中没有 account_id / stuid，无法自动续期",
+                "cookies": cookies, "updated": []}
 
     url = "https://api-takumi.mihoyo.com/auth/api/getMultiTokenByLoginTicket"
     params = {"login_ticket": login_ticket, "uid": uid, "token_types": "3"}
@@ -408,33 +498,11 @@ def refresh_cookies(cookies: list, game: str = "genshin") -> dict:
         elif tt == 2:
             mapping["ltoken"] = tok
 
-    if not mapping:
+    if not mapping.get("ltoken") or not mapping.get("cookie_token"):
         return {"ok": False, "msg": "续期接口返回的 token 类型无法识别"}
 
-    # 写回 Cookie，兼容 v1 / v2 命名
-    new_cookies = []
-    updated = []
-    for c in cookies:
-        name = c.get("name")
-        value = c.get("value")
-        if name in ("cookie_token", "cookie_token_v2") and "cookie_token" in mapping:
-            value = mapping["cookie_token"]
-            updated.append(name)
-        elif name in ("ltoken", "ltoken_v2") and "ltoken" in mapping:
-            value = mapping["ltoken"]
-            updated.append(name)
-        c2 = dict(c)
-        c2["value"] = value
-        new_cookies.append(c2)
-
-    # 原 Cookie 里若缺少对应字段则补上
-    existing = {c.get("name") for c in new_cookies}
-    for n, v in mapping.items():
-        if n not in existing:
-            new_cookies.append({"name": n, "value": v, "domain": ".mihoyo.com", "path": "/"})
-            updated.append(n)
-
-    return {"ok": True, "cookies": new_cookies, "msg": "续期成功", "updated": sorted(set(updated))}
+    new_cookies, updated = _apply_tokens(cookies, mapping["ltoken"], mapping["cookie_token"])
+    return {"ok": True, "cookies": new_cookies, "msg": "续期成功（login_ticket）", "updated": updated}
 
 
 def check_cookie_valid(cookies: list, game: str = "genshin", combo_token: str = "") -> dict:
