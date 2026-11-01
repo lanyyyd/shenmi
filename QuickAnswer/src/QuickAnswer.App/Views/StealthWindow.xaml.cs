@@ -70,6 +70,9 @@ public sealed partial class StealthWindow : Window
     /// <summary>当前卡片对应的、可以放进剪贴板的那段字。</summary>
     private string _copyText = "";
 
+    /// <summary>最近一次成功的答案。进度态结束后要能原样恢复。</summary>
+    private AnswerResult? _lastResult;
+
     private int _flashToken;
 
     private const string HintText = "点击复制 · 拖动移位";
@@ -122,6 +125,8 @@ public sealed partial class StealthWindow : Window
 
     public void Render(AnswerResult result)
     {
+        _lastResult = result;
+
         if (!ApplyContent(result))
         {
             Clear();
@@ -135,6 +140,74 @@ public sealed partial class StealthWindow : Window
 
         if (App.Config.ProtectFromCapture)
             WindowHelper.ProtectFromCapture(this);
+    }
+
+    /// <summary>
+    /// 识别途中把卡片切成「运行状态」：换题之后、答案回来之前，卡片上要有东西在动。
+    ///
+    /// 不这么做的话，用户按下下一题只看到上一题的旧答案挂在那里，
+    /// 分不清是程序在跑还是已经卡死 —— 这也是"循环搜题好像没反应"的来源之一。
+    /// </summary>
+    public void ShowProgress(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        _flashToken++;      // 作废还没执行的「已复制」提示定时器
+        _copyText = "";     // 进度态没有可复制的内容
+
+        BusyRing.Visibility = Visibility.Visible;
+        BusyRing.IsActive = true;
+        Dot.Visibility = Visibility.Collapsed;
+
+        LetterText.Visibility = Visibility.Collapsed;
+        BodyText.Visibility = Visibility.Visible;
+        BodyText.Text = text;
+        BodyText.FontSize = 15;
+
+        SourceLabel.Text = "运行中";
+        HintLabel.Text = HintText;
+
+        _logicalW = MinWidth;
+        _logicalH = MinHeight;
+
+        ApplyOpacity();
+
+        // 放在 ApplyOpacity 之后：它会按「有没有背景」重设文字颜色
+        BodyText.Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 147, 197, 253));
+
+        PlaceWindow();
+        WindowHelper.ShowNoActivate(this);
+
+        if (App.Config.ProtectFromCapture)
+            WindowHelper.ProtectFromCapture(this);
+    }
+
+    /// <summary>
+    /// 进度态收场：恢复上一题的答案。没有上一题（第一次识别）就把卡片收起来。
+    /// 没走到这一步的进度态会一直挂着「AI 思考中…」，看起来像卡死。
+    /// </summary>
+    public void EndProgress()
+    {
+        if (_lastResult is { } previous && ApplyContent(previous))
+        {
+            ApplyOpacity();
+            PlaceWindow();
+            WindowHelper.ShowNoActivate(this);
+            return;
+        }
+
+        Clear();
+    }
+
+    /// <summary>把卡片还原成「显示答案」的样子：转圈停掉、字号回正。</summary>
+    private void RestoreChrome()
+    {
+        BusyRing.IsActive = false;
+        BusyRing.Visibility = Visibility.Collapsed;
+        Dot.Visibility = Visibility.Visible;
+
+        BodyText.FontSize = 14.5;
     }
 
     public void Clear()
@@ -167,6 +240,8 @@ public sealed partial class StealthWindow : Window
 
     private bool ApplyContent(AnswerResult result)
     {
+        RestoreChrome();
+
         var letter = (result.Letter ?? "").Trim();
         var text = (result.Text ?? "").Trim();
 
@@ -280,10 +355,14 @@ public sealed partial class StealthWindow : Window
                 _top = area.Y + (area.Height - physH) / 2;
             }
 
-            _left = ClampX(area, _left, physW);
-            _top = ClampY(area, _top, physH);
             _placed = true;
         }
+
+        // 每次都要夹一次：进度态和答案态宽度不同（232 vs 300），
+        // 卡片贴在屏幕右边时变宽会顶出屏幕外
+        var work = WindowHelper.WorkAreaAt(this, _left + physW / 2, _top + physH / 2);
+        _left = ClampX(work, _left, physW);
+        _top = ClampY(work, _top, physH);
 
         // 后续换题只改内容，不再动位置 —— 这就是「不乱跑」的关键
         WindowHelper.MoveToPhysical(this, _left, _top, physW, physH);
@@ -398,6 +477,10 @@ public sealed partial class StealthWindow : Window
     /// </summary>
     public bool CopyAnswer()
     {
+        // 进度态下没有可复制的东西，别闪一句「剪贴板被占用」误导人
+        if (_copyText.Length == 0)
+            return false;
+
         bool ok = ClipboardWriter.SetText(_copyText);
         NotifyCopied(ok);
         return ok;

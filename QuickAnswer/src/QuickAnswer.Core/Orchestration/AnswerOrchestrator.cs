@@ -74,7 +74,7 @@ public sealed class AnswerOrchestrator
         }
 
         // ---------- 2. AI ----------
-        StatusChanged?.Invoke("问 AI…");
+        StatusChanged?.Invoke("AI 思考中…");
 
         SolveResponse? solve;
         try

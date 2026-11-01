@@ -19,6 +19,9 @@
         <Grid x:Name="DragBar" Grid.Row="0" Padding="10,0" Background="Transparent">
             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                 <Ellipse x:Name="Dot" Width="5" Height="5" Fill="#FF4ADE80" />
+                <!-- 进度态用它替掉小圆点 -->
+                <ProgressRing x:Name="BusyRing" IsActive="False" Visibility="Collapsed"
+                              Width="12" Height="12" Foreground="#FF60A5FA" />
                 <TextBlock x:Name="SourceLabel" Text="待命" FontSize="8.5" Foreground="#FF94A3B8"
                            VerticalAlignment="Center" />
             </StackPanel>

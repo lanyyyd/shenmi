@@ -23,6 +23,9 @@ public sealed partial class OverlayWindow : Window
     private bool _ready;
     private double _opacity = 0.30;
 
+    /// <summary>最近一次成功的答案。进度态结束后要能原样恢复。</summary>
+    private AnswerResult? _lastResult;
+
     public OverlayWindow()
     {
         InitializeComponent();
@@ -134,6 +137,13 @@ public sealed partial class OverlayWindow : Window
 
     public void Render(AnswerResult result)
     {
+        _lastResult = result;
+        RestoreChrome();
+
+        // 上一次可能被「进度态收场」或关闭按钮藏掉了，出答案时要重新露出来
+        if (!AppWindow.IsVisible)
+            WindowHelper.ShowNoActivate(this);
+
         bool choiceLike = result.TargetOptions.Count > 0 || result.Letter.Length > 0;
 
         SourceLabel.Text = result.Source.Length > 0 ? result.Source : "—";
@@ -164,6 +174,57 @@ public sealed partial class OverlayWindow : Window
         SetOpacity(App.Config.OverlayOpacity);
         App.Config.OverlayLeft = (int)AppWindow.Position.X;
         App.Config.OverlayTop = (int)AppWindow.Position.Y;
+    }
+
+    /// <summary>
+    /// 识别途中显示运行状态。换题之后、答案回来之前，小窗里得有东西在动，
+    /// 否则用户看到的是上一题的旧答案，分不清程序在跑还是已经卡死。
+    /// </summary>
+    public void ShowProgress(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        BusyRing.Visibility = Visibility.Visible;
+        BusyRing.IsActive = true;
+        Dot.Visibility = Visibility.Collapsed;
+
+        BigLetter.Visibility = Visibility.Collapsed;
+        TextScroller.Visibility = Visibility.Visible;
+        BodyText.Text = text;
+        BodyText.FontSize = 13;
+        BodyText.Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 147, 197, 253));
+
+        SourceLabel.Text = "运行中";
+        DetailLabel.Text = "";
+
+        SetOpacity(App.Config.OverlayOpacity);
+
+        if (!AppWindow.IsVisible)
+            WindowHelper.ShowNoActivate(this);
+    }
+
+    /// <summary>进度态收场：恢复上一题的答案；没有上一题就收起小窗。</summary>
+    public void EndProgress()
+    {
+        if (_lastResult is { } previous)
+        {
+            Render(previous);
+            return;
+        }
+
+        AppWindow.Hide();
+    }
+
+    /// <summary>转圈停掉、字号回正，把窗口还原成「显示答案」的样子。</summary>
+    private void RestoreChrome()
+    {
+        BusyRing.IsActive = false;
+        BusyRing.Visibility = Visibility.Collapsed;
+        Dot.Visibility = Visibility.Visible;
+
+        BodyText.FontSize = 12;
+        BodyText.Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 226, 232, 240));
     }
 
     private void OnDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)

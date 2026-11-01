@@ -19,6 +19,9 @@
                 <Grid>
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                         <Ellipse x:Name="Dot" Width="6" Height="6" Fill="#FF4ADE80" VerticalAlignment="Center" />
+                        <!-- 进度态用它替掉那个小圆点：换题时至少能看出程序在跑 -->
+                        <ProgressRing x:Name="BusyRing" IsActive="False" Visibility="Collapsed"
+                                      Width="13" Height="13" Foreground="#FF60A5FA" VerticalAlignment="Center" />
                         <TextBlock x:Name="SourceLabel" Text="待命" FontSize="9.5" Foreground="#FF94A3B8"
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                     </StackPanel>

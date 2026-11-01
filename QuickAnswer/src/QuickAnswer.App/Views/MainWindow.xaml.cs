@@ -72,7 +72,12 @@ public sealed partial class MainWindow : Window
         OcrDiagnostics.Enabled = App.Config.SaveDiagnostics;
         _orchestrator = new AnswerOrchestrator(App.Api, App.Config)
         {
-            StatusChanged = s => Post(() => StatusLabel.Text = s),
+            // 状态同时推给浮层：换题之后、答案回来之前，卡片上要能看出程序在跑
+            StatusChanged = s => Post(() =>
+            {
+                StatusLabel.Text = s;
+                ShowProgressOnOverlay(s);
+            }),
             AnswerReady = _ => { },
         };
 
@@ -352,6 +357,11 @@ public sealed partial class MainWindow : Window
         if (_working)
             return;
         _working = true;
+
+        // 这一帧是否真的换了题，要等 OCR 出来才知道。所以在确认之前不碰浮层 ——
+        // 否则鼠标划过、滚动条动画都会让卡片闪一下「识别中…」再弹回上一题。
+        bool answered = false;
+        bool progressed = false;
         Post(() =>
         {
             BusyBar.Visibility = Visibility.Visible;
@@ -364,7 +374,15 @@ public sealed partial class MainWindow : Window
             // 所以这里不需要（也没有）文字指纹。
             if (App.Config.Mode == WorkMode.Vision)
             {
+                progressed = true;
+                Post(() =>
+                {
+                    SetStatus("AI 识图中…", "#FF2563EB");
+                    ShowProgressOnOverlay("AI 识图中…");
+                });
+
                 await RecognizeByVisionAsync(region, ct).ConfigureAwait(false);
+                answered = true;
                 return;
             }
 
@@ -406,11 +424,18 @@ public sealed partial class MainWindow : Window
             _lastFingerprint = fingerprint;
             _lastTriggerUtc = DateTime.UtcNow;
 
+            // 确认是新题了，从这里开始才是用户要等的这段（查题库 / 问 AI）。
+            // 状态由 Orchestrator 一步步推过来（查题库… → AI 思考中…），
+            // 这条只是补上它发声之前的空档。
+            progressed = true;
+            Post(() => ShowProgressOnOverlay("正在查答案…"));
+
             var result = await _orchestrator.ProcessAsync(question, ct).ConfigureAwait(false);
             if (result is null || ct.IsCancellationRequested)
                 return;
 
             Post(() => Render(question, result));
+            answered = true;
 
             // 留样只在两种情况：用户手动点的（他明确觉得有问题），或者这题没出答案。
             // 自动出对的那些不占磁盘，20 个名额留给真正需要看的。
@@ -428,10 +453,16 @@ public sealed partial class MainWindow : Window
         finally
         {
             _working = false;
+
+            // 空手回来（请求失败 / 被取消）：浮层退回上一题，
+            // 否则「AI 思考中…」会一直挂着，看起来像卡死
+            if (!answered && progressed)
+                Post(EndProgressOnOverlay);
+
             Post(() =>
             {
                 BusyBar.Visibility = Visibility.Collapsed;
-                if (StatusLabel.Text is "识别中…" or "查题库…" or "问 AI…" or "AI 识图中…")
+                if (StatusLabel.Text is "识别中…" or "查题库…" or "AI 思考中…" or "AI 识图中…")
                     SetStatus("监听中", "#FF166534");
             });
         }
@@ -794,6 +825,24 @@ public sealed partial class MainWindow : Window
 
         SourceBadge.Background = new SolidColorBrush(
             result.Source == "题库" ? Windows.UI.Color.FromArgb(255, 22, 101, 52) : Windows.UI.Color.FromArgb(255, 30, 41, 59));
+    }
+
+    /// <summary>把运行状态写进当前这块浮层（隐蔽卡片或右下角小窗）。</summary>
+    private void ShowProgressOnOverlay(string text)
+    {
+        if (App.Config.StealthMode)
+            _stealth?.ShowProgress(text);
+        else
+            _overlay?.ShowProgress(text);
+    }
+
+    /// <summary>本次识别没拿到答案时的收场：浮层退回上一题，别把「AI 思考中…」永久挂在那儿。</summary>
+    private void EndProgressOnOverlay()
+    {
+        if (App.Config.StealthMode)
+            _stealth?.EndProgress();
+        else
+            _overlay?.EndProgress();
     }
 
     private void ShowOverlay(AnswerResult result)
