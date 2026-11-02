@@ -2179,6 +2179,18 @@ INT_PTR CALLBACK JiYuWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 			CheckMenuItem(hMenuGb, IDM_TOPMOST, gbCurrentIsTop ? MF_CHECKED : MF_UNCHECKED);
 			CheckMenuItem(GetSystemMenu(hWnd, FALSE), IDM_TOPMOST, gbCurrentIsTop ? MF_CHECKED : MF_UNCHECKED);
 
+			//修复：「广播窗口全屏」同样按窗口真实位置/尺寸同步。
+			//gbFullManual 是跨广播窗口的全局状态：上一次在全屏状态下结束广播后，新广播窗口
+			//默认是小窗，但菜单里仍然勾着「全屏」，导致必须「取消勾选 → 再勾选」两次才能全屏。
+			//这里直接在弹菜单前按真实几何状态纠正，保证勾选与当前窗口一致。
+			RECT gbRect = { 0 };
+			gbFullManual = GetWindowRect(hWnd, &gbRect)
+				&& gbRect.left == 0 && gbRect.top == 0
+				&& (gbRect.right - gbRect.left) == screenWidth
+				&& (gbRect.bottom - gbRect.top) == screenHeight;
+			CheckMenuItem(hMenuGb, IDM_FULL, gbFullManual ? MF_CHECKED : MF_UNCHECKED);
+			CheckMenuItem(GetSystemMenu(hWnd, FALSE), IDM_FULL, gbFullManual ? MF_CHECKED : MF_UNCHECKED);
+
 			ClientToScreen(hWnd, &pos);
 			int id = TrackPopupMenu(hMenuGb, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, pos.x + 10, pos.y + 10, NULL, hWnd, NULL);
 			SendMessage(hWnd, WM_COMMAND, id, NULL);

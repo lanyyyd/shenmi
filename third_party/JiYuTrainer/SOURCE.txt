@@ -16,7 +16,10 @@ src/ 为上游 tag 1.7.6（commit 977823d9）中 JiYuTrainerHooks 项目的源�
 内置的 Hook DLL 释放到自身目录（已存在则跳过），因此随安装包额外放置本目录
 编译出的 JiYuTrainerHooks.dll 即可替换注入模块，不需要改动 exe 本体。
 
-相对上游源码仅有两处修改（均在 src/JiYuTrainerHooks/JiYuTrainerHooks.cpp）：
+相对上游源码仅有三处修改（均在 src/JiYuTrainerHooks/JiYuTrainerHooks.cpp）：
 1. 广播窗口右键菜单标题改为「神秘の魔法武器提供的菜单」。
 2. 弹出右键菜单前按广播窗口真实的 WS_EX_TOPMOST 状态同步「广播窗口置顶」的
    勾选状态，修复第二次广播时「菜单显示未置顶、窗口实际已置顶」的问题。
+3. 弹出右键菜单前按广播窗口真实的位置/尺寸同步「广播窗口全屏」的勾选状态，
+   修复上一次全屏结束广播后，新广播窗口是小窗但菜单仍显示已全屏，需要
+   「取消勾选 → 再勾选」两次才能全屏的问题。
