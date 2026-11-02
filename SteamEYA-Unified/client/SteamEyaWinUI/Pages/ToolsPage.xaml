@@ -130,6 +130,30 @@
                 </StackPanel>
             </Border>
 
+            <!-- 全体模式切换：在线经服务器广播，离线经局域网转发 -->
+            <Border Style="{StaticResource CardBorderStyle}">
+                <StackPanel Spacing="8">
+                    <TextBlock x:Name="ModeTitle" Style="{StaticResource SectionTitleTextStyle}" />
+                    <TextBlock x:Name="ModeDesc" Style="{StaticResource FieldLabelTextStyle}" TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button
+                            x:Name="ModeToOnlineButton"
+                            MinWidth="180"
+                            Style="{StaticResource AuroraGlassButtonStyle}"
+                            Click="OnModeToOnlineClick" />
+                        <Button
+                            x:Name="ModeToOfflineButton"
+                            MinWidth="180"
+                            Style="{StaticResource AuroraGlassButtonStyle}"
+                            Click="OnModeToOfflineClick" />
+                        <Button
+                            x:Name="ModeCancelButton"
+                            Click="OnModeCancelClick"
+                            Visibility="Collapsed" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
             <!-- 保队友 -->
             <Border Style="{StaticResource CardBorderStyle}">
                 <StackPanel Spacing="8">

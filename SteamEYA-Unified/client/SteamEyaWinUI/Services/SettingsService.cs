@@ -251,6 +251,12 @@ internal sealed class AppSettings
     /// </summary>
     public string ChatMode { get; set; } = "Auto";
 
+    /// <summary>
+    /// 在线/离线运行模式偏好：Auto（默认，自动双向切换）/ Online（优先在线，断网降级、恢复回在线）/ Offline（始终离线）。
+    /// 实际运行态由 <see cref="NetworkModeService"/> 统一维护。
+    /// </summary>
+    public string NetworkMode { get; set; } = "Auto";
+
     /// <summary>自定义背景默认不透明度。</summary>
     public const double DefaultCustomBackgroundOpacity = 0.4;
 

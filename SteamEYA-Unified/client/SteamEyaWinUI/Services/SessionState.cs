@@ -1,4 +1,5 @@
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using SteamEyaWinUI.Models;
 
@@ -35,6 +36,14 @@ internal static class SessionState
     /// <summary>是否处于离线（局域网）模式。</summary>
     public static bool Offline { get; private set; }
 
+    /// <summary>在线/离线运行态发生变化（切换完成后触发，供导航、页面按模式重算）。</summary>
+    public static event Action? ModeChanged;
+
+    /// <summary>最近一次在线会话（仅内存缓存）：离线→在线时可免密码直接恢复。</summary>
+    private static (string Token, string Username, string Nickname)? _cachedOnline;
+
+    public static (string Token, string Username, string Nickname)? CachedOnlineSession => _cachedOnline;
+
     private static string StorePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SteamEYA", "session.txt");
 
@@ -60,11 +69,13 @@ internal static class SessionState
         Username = username;
         Nickname = nickname;
         BaseUrl = OnlineBaseUrl;
+        _cachedOnline = (token, username, nickname);
         Apply();
         SaveValue("username", username);
         SaveValue("nickname", nickname);
         // 登录即拉起常驻聊天连接：之后切到任何页面都能收消息并弹系统提醒。
         ChatHub.EnsureStarted();
+        ModeChanged?.Invoke();
     }
 
     public static void EnterOffline(string localToken, string nickname)
@@ -78,18 +89,21 @@ internal static class SessionState
         SaveValue("nickname", nickname);
         // 离线同样拉起常驻聊天：BaseUrl 已指向本机网关（调用方此前已确保网关在跑）。
         ChatHub.EnsureStarted();
+        ModeChanged?.Invoke();
     }
 
     /// <summary>退出登录：清空令牌与用户名（供「远程账号」退出使用）。</summary>
     public static void Clear()
     {
         ChatHub.Shutdown();
+        _cachedOnline = null;
         Token = null;
         Username = string.Empty;
         Nickname = string.Empty;
         Apply();
         SaveValue("username", string.Empty);
         SaveValue("nickname", string.Empty);
+        ModeChanged?.Invoke();
     }
 
     /// <summary>探测在线网关是否可达（离线时用）。</summary>
@@ -98,6 +112,22 @@ internal static class SessionState
         try
         {
             using var resp = await HttpClient.GetAsync(OnlineBaseUrl + "/health", ct);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>校验缓存的在线 JWT 是否仍有效（GET /api/me），供离线→在线免密码恢复。</summary>
+    public static async Task<bool> ValidateOnlineTokenAsync(string token, CancellationToken ct = default)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, OnlineBaseUrl + "/api/me");
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using var resp = await HttpClient.SendAsync(req, ct);
             return resp.IsSuccessStatusCode;
         }
         catch

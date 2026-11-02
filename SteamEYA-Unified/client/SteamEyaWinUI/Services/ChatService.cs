@@ -43,6 +43,9 @@ internal sealed class ChatService : IAsyncDisposable
     /// <summary>收到服务端广播的「保队友」指令：所有在线客户端应立即退出本软件。</summary>
     public event Action? PanicReceived;
 
+    /// <summary>收到其他用户下发的全员在线/离线切换指令（值为 online / offline）。</summary>
+    public event Action<string>? ModeReceived;
+
     /// <summary>小火人流式回复：phase = start / delta / error。</summary>
     public event Action<ChatAiStreamDto>? AiStreamReceived;
 
@@ -544,6 +547,10 @@ internal sealed class ChatService : IAsyncDisposable
                 case "panic":
                     PanicReceived?.Invoke();
                     break;
+                case "mode":
+                    ModeReceived?.Invoke(
+                        doc.RootElement.TryGetProperty("mode", out var me) ? me.GetString() ?? string.Empty : string.Empty);
+                    break;
                 case "recall":
                     if (doc.RootElement.TryGetProperty("id", out var rid) && rid.TryGetInt64(out var id))
                     {
@@ -657,6 +664,18 @@ internal sealed class ChatService : IAsyncDisposable
             return false;
         }
         await SendRawAsync("{\"type\":\"panic\"}", ct);
+        return true;
+    }
+
+    /// <summary>下发全员在线/离线切换指令；返回 false 表示当前没有可用的在线连接。</summary>
+    public async Task<bool> SendModeAsync(string mode, CancellationToken ct = default)
+    {
+        if (!IsConnected)
+        {
+            return false;
+        }
+        var wanted = string.Equals(mode, "online", StringComparison.OrdinalIgnoreCase) ? "online" : "offline";
+        await SendRawAsync($"{{\"type\":\"mode\",\"mode\":\"{wanted}\"}}", ct);
         return true;
     }
 

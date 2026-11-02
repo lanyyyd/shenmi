@@ -84,6 +84,7 @@ public sealed partial class MainWindow : Window
         {
             _tipTimer?.Stop();
             StopBackgroundVideo();
+            NetworkModeService.Stop();
             ChatHub.Shutdown();
             EngineLauncher.Stop();
             GatewayLauncher.Stop();
@@ -127,6 +128,10 @@ public sealed partial class MainWindow : Window
         AppState.StatusReporter = ShowStatus;
         AppState.BusyChanged += OnBusyChanged;
 
+        // 在线/离线模式控制器：30 秒探测 + 自动/手动切换；无凭据切在线时由主窗口弹登录框。
+        NetworkModeService.Start(DispatcherQueue, PromptOnlineLoginAsync);
+        SessionState.ModeChanged += OnSessionModeChanged;
+
         ConfigureWindowSize();
 
         // 截图全局热键：必须等 hwnd 就绪后再注册（失败说明被其它程序占用，状态栏会提示）。
@@ -152,49 +157,113 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>按在线/离线模式决定可用导航项：离线仅保留「局域网聊天」。</summary>
+    /// <summary>按在线/离线模式决定可用导航项。设置页在离线模式下也保留，作为运行模式切换入口。</summary>
     private void ApplyAccessMode()
     {
-        if (SessionState.Offline)
+        var offline = SessionState.Offline;
+        LoginNavItem.Visibility = offline ? Visibility.Collapsed : Visibility.Visible;
+        CloudGameNavItem.Visibility = offline ? Visibility.Collapsed : Visibility.Visible;
+        CachedAccountsNavItem.Visibility = offline ? Visibility.Collapsed : Visibility.Visible;
+        CloudSaveNavItem.Visibility = offline ? Visibility.Collapsed : Visibility.Visible;
+        AboutNavItem.Visibility = offline ? Visibility.Collapsed : Visibility.Visible;
+
+        if (offline)
         {
-            LoginNavItem.Visibility = Visibility.Collapsed;
-            CloudGameNavItem.Visibility = Visibility.Collapsed;
-            CachedAccountsNavItem.Visibility = Visibility.Collapsed;
-            CloudSaveNavItem.Visibility = Visibility.Collapsed;
-            SettingsNavItem.Visibility = Visibility.Collapsed;
-            AboutNavItem.Visibility = Visibility.Collapsed;
-            RootNavigationView.SelectedItem = ChatNavItem;
+            // 当前页在离线模式下仍可用就保持（例如设置页/聊天室/局域网互传），否则回聊天室。
+            if (!IsOfflineAllowedPage(ContentFrame.CurrentSourcePageType))
+            {
+                RootNavigationView.SelectedItem = ChatNavItem;
+            }
         }
-        else
+        else if (ContentFrame.CurrentSourcePageType is null)
         {
+            // 首次构建尚未导航时默认进登录页；运行中切回在线则保持当前页面。
             RootNavigationView.SelectedItem = LoginNavItem;
+        }
+    }
+
+    private static bool IsOfflineAllowedPage(Type? page) =>
+        page == typeof(ChatPage) || page == typeof(SettingsPage) || page == typeof(ToolsPage) ||
+        page == typeof(LanTransferPage) || page == typeof(LibraryPage) || page == typeof(ToolboxPage);
+
+    private void OnSessionModeChanged()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(ApplyAccessMode);
+            return;
+        }
+        ApplyAccessMode();
+    }
+
+    /// <summary>切在线但无可用凭据时弹登录框；取消返回 null，由控制器保持离线。</summary>
+    private async Task<(string Username, string Password)?> PromptOnlineLoginAsync()
+    {
+        try
+        {
+            // 启动瞬间窗口可能还没进入可视树（XamlRoot 未就绪），稍等它就绪再弹框。
+            for (var i = 0; i < 10 && (Content is null || Content.XamlRoot is null); i++)
+            {
+                await Task.Delay(500);
+            }
+            if (Content is null || Content.XamlRoot is null)
+            {
+                return null;
+            }
+
+            var remembered = new RememberCredentialStore().Load();
+            var userBox = new TextBox
+            {
+                Header = Loc.T("Mode_Login_Username"),
+                Text = remembered?.Username ?? SessionState.Username
+            };
+            var passBox = new PasswordBox { Header = Loc.T("Mode_Login_Password") };
+
+            var panel = new StackPanel { Spacing = 10 };
+            panel.Children.Add(new TextBlock
+            {
+                Text = Loc.T("Mode_Login_Desc"),
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+            });
+            panel.Children.Add(userBox);
+            panel.Children.Add(passBox);
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = Content.XamlRoot,
+                Title = Loc.T("Mode_Login_Title"),
+                Content = panel,
+                PrimaryButtonText = Loc.T("Mode_Login_Confirm"),
+                CloseButtonText = Loc.T("Common_Cancel"),
+                DefaultButton = ContentDialogButton.Primary
+            };
+
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return null;
+            }
+
+            var username = userBox.Text.Trim();
+            var password = passBox.Password;
+            if (username.Length == 0 || password.Length == 0)
+            {
+                ShowStatus(Loc.T("Mode_Login_Empty"), InfoBarSeverity.Warning);
+                return null;
+            }
+            return (username, password);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"弹出在线登录框失败：{ex.Message}");
+            return null;
         }
     }
 
     private async Task RunStartupSyncAsync()
     {
-        try
-        {
-            // 离线期间的消息存在「本机网关」的数据库里，联网启动时网关并未运行，
-            // 必须先把它拉起来，否则读 /api/sync/pending 必然失败、同步被静默跳过。
-            await GatewayLauncher.EnsureStartedAsync(SessionState.Nickname);
-
-            var (ok, pushed, msg) = await new SyncService().TrySyncAsync();
-            if (ok && pushed > 0)
-            {
-                ShowStatus($"已同步 {pushed} 条离线聊天记录", InfoBarSeverity.Success);
-            }
-            else if (!ok && !string.IsNullOrEmpty(msg))
-            {
-                // 直接显示出来，方便用户/我们定位是网关没起来、还是服务端返回了拒绝。
-                AppLog.Warn($"离线记录同步失败：{msg}");
-                ShowStatus($"离线记录同步失败：{msg}", InfoBarSeverity.Warning);
-            }
-        }
-        catch (Exception ex)
-        {
-            AppLog.Error("启动同步失败。", ex);
-        }
+        // 启动（在线）时把离线期间产生的记录同步到远端；运行中模式切换后的同步由控制器统一处理。
+        await NetworkModeService.SyncPendingAsync();
     }
 
     // 启动时解析 Steam 路径：成功则静默持久化；自动检测失败时弹框让用户手动选择含 steam.exe 的目录。

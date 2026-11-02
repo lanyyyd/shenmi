@@ -16,7 +16,9 @@ from fastapi import APIRouter, Body, File, Form, UploadFile
 from .. import chat_logic as CL
 from .. import security
 from ..config import MAX_UPLOAD, STICKER_DIR, UPLOAD_DIR
-from ..lan import LanDiscovery, get_discovery, inbound_message, set_discovery as _set_discovery
+from ..hub import hub
+from ..lan import (LanDiscovery, forward_control, get_discovery, inbound_message, mark_control,
+                   set_discovery as _set_discovery)
 
 router = APIRouter(prefix="/api/lan", tags=["lan"])
 
@@ -84,6 +86,38 @@ def add_peer(payload: dict = Body(...)):
         return {"ok": False, "msg": "请填写正确的 IP 与端口"}
     peer = d.add_manual(ip, port, str(payload.get("name") or ""))
     return {"ok": True, "peer": peer}
+
+
+# ---------------- 局域网控制指令（保队友 / 全员切换） ----------------
+@router.post("/control")
+async def control(payload: dict = Body(...)):
+    """接收本机或对端下发的控制指令：在本机广播给聊天连接，并继续转发给同网段对端。
+
+    controlId 用于去重，visited 记录已处理过的实例，避免环形转发。
+    """
+    if not _enabled():
+        return {"ok": False, "msg": "当前未启用局域网模式"}
+    action = str(payload.get("action") or "").strip().lower()
+    if action not in ("panic", "mode"):
+        return {"ok": False, "msg": "不支持的控制指令"}
+    mode = "online" if str(payload.get("mode") or "").lower() == "online" else "offline"
+    control_id = str(payload.get("controlId") or "").strip()[:64]
+    visited = payload.get("visited") if isinstance(payload.get("visited"), list) else []
+    d = get_discovery()
+    ident = d.instance_id if d else ""
+
+    # 已经处理过本实例 / 重复指令：直接结束，不再广播与转发。
+    if ident and ident in visited:
+        return {"ok": True, "dedup": True}
+    if control_id and not mark_control(control_id):
+        return {"ok": True, "dedup": True}
+
+    if action == "panic":
+        await hub.broadcast_all({"type": "panic", "mode": "", "at": security.now_ms()})
+    else:
+        await hub.broadcast_all({"type": "mode", "mode": mode, "at": security.now_ms()})
+    forward_control(action, mode, control_id, visited)
+    return {"ok": True}
 
 
 # ---------------- 接收对端转来的消息 / 文件 ----------------

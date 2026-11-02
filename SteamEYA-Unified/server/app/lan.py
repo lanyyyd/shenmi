@@ -211,6 +211,49 @@ def _local_upload_path(file_path: str):
         return None
 
 
+# ---------------- 局域网控制指令（保队友 / 全员切换） ----------------
+_control_seen: Dict[str, float] = {}
+_control_lock = threading.Lock()
+CONTROL_TTL = 60.0
+
+
+def mark_control(control_id: str) -> bool:
+    """记录控制指令；首次返回 True，重复或超过 60 秒后再次出现返回 False。"""
+    if not control_id:
+        return False
+    now = time.time()
+    with _control_lock:
+        for k in [k for k, t in _control_seen.items() if now - t > CONTROL_TTL]:
+            _control_seen.pop(k, None)
+        if control_id in _control_seen:
+            return False
+        _control_seen[control_id] = now
+        return True
+
+
+def forward_control(action: str, mode: str, control_id: str, visited: list) -> None:
+    """把控制指令异步转发给同网段对端；visited 用于阻断环形转发。"""
+    d = get_discovery()
+    if d is None:
+        return
+    peers = d.snapshot()
+    if not peers:
+        return
+    seen = list(dict.fromkeys([*(visited or []), d.instance_id]))
+    threading.Thread(target=_control_worker,
+                     args=(peers, action, mode, control_id, seen), daemon=True).start()
+
+
+def _control_worker(peers: list, action: str, mode: str, control_id: str, visited: list) -> None:
+    body = {"action": action, "mode": mode, "controlId": control_id, "visited": visited}
+    for p in peers:
+        try:
+            requests.post(f"http://{p['ip']}:{int(p['port'])}/api/lan/control",
+                          json=body, timeout=(2, 5))
+        except Exception:
+            continue
+
+
 def forward_to_peers(payload: dict) -> None:
     """本机新消息广播后调用：异步转发给同网段对端（仅群聊，尽力而为，不阻塞调用方）。"""
     d = get_discovery()

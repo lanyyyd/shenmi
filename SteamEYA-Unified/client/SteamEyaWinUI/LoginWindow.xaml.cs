@@ -175,6 +175,14 @@ public sealed partial class LoginWindow : Window
             SessionState.EnterOnline(result.AccessToken, result.User?.Username ?? username,
                 result.User?.Nickname ?? username);
 
+            // 手动登录在线：若之前锁定在离线，改回自动，便于断网时自动降级、恢复后自动回在线。
+            var onlineSettings = AppState.SettingsService.Load();
+            if (onlineSettings.NetworkMode == NetworkModeService.ModeOffline)
+            {
+                onlineSettings.NetworkMode = NetworkModeService.ModeAuto;
+                AppState.SettingsService.Save(onlineSettings);
+            }
+
             // 「记住密码」仅在登录时生效：勾选则加密保存，取消则清除已存凭据。
             if (!register)
             {

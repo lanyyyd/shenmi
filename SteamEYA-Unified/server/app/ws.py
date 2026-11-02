@@ -82,6 +82,19 @@ async def ws_endpoint(ws: WebSocket):
                 })
                 continue
 
+            if m.get("type") == "mode":
+                # 全体在线/离线切换：任意在线用户可触发，广播给所有在线连接（含发起者）。
+                mode = "online" if str(m.get("mode") or "").lower() == "online" else "offline"
+                await hub.broadcast_all({
+                    "type": "mode",
+                    "mode": mode,
+                    "userId": user["id"],
+                    "username": user["username"],
+                    "displayName": CL.display_name(user),
+                    "at": security.now_ms(),
+                })
+                continue
+
             if m.get("type") == "recall":
                 rid = int(m.get("id") or 0)
                 row = CL.get_msg(rid) if rid > 0 else None

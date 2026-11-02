@@ -384,8 +384,7 @@
                     <TextBlock
                         x:Name="ConnBannerText"
                         FontSize="12"
-                        Foreground="#92400E"
-                        Text="{x:Bind Strings.Get('Chat_Conn_Banner'), Mode=OneWay}" />
+                        Foreground="#92400E" />
                 </Border>
 
                 <!-- 消息区 -->

@@ -116,6 +116,10 @@ public sealed partial class ToolsPage : Page
         PanicDesc.Text = Loc.T("Tools_Panic_Desc");
         PanicButton.Content = _panicArmed ? Loc.T("Tools_Panic_Button_Confirm") : Loc.T("Tools_Panic_Button");
         PanicCancelButton.Content = Loc.T("Common_Cancel");
+
+        ModeTitle.Text = Loc.T("Tools_Mode_Title");
+        ModeDesc.Text = Loc.T("Tools_Mode_Desc");
+        RefreshModeButtons();
     }
 
     private void SyncFromSettings()
@@ -572,6 +576,91 @@ public sealed partial class ToolsPage : Page
 
         // 发送成功后服务端会把 panic 广播回本机，ChatHub 收到后立即退出，这里无需再处理。
         ShowStatus(Loc.T("Tools_Panic_Sent"), InfoBarSeverity.Success);
+    }
+
+    private bool _modeArmed;
+    private string? _modeTarget;
+    private int _modeArmVersion;
+
+    /// <summary>两步确认：首次点击进入待确认态（按钮变「确认切换」），8 秒无操作自动复位。</summary>
+    private void OnModeToOnlineClick(object sender, RoutedEventArgs e) => HandleModeClick("online");
+
+    private void OnModeToOfflineClick(object sender, RoutedEventArgs e) => HandleModeClick("offline");
+
+    private async void HandleModeClick(string target)
+    {
+        if (!_modeArmed || _modeTarget != target)
+        {
+            ArmMode(target);
+            return;
+        }
+
+        await ExecuteModeAsync(target);
+    }
+
+    private async void ArmMode(string target)
+    {
+        _modeArmed = true;
+        _modeTarget = target;
+        var version = ++_modeArmVersion;
+
+        RefreshModeButtons();
+
+        await Task.Delay(8000);
+
+        if (_modeArmed && version == _modeArmVersion)
+        {
+            DisarmMode();
+        }
+    }
+
+    private void DisarmMode()
+    {
+        _modeArmed = false;
+        _modeTarget = null;
+        _modeArmVersion++;
+        RefreshModeButtons();
+    }
+
+    private void OnModeCancelClick(object sender, RoutedEventArgs e) => DisarmMode();
+
+    /// <summary>刷新全员切换按钮文案与取消按钮可见性。</summary>
+    private void RefreshModeButtons()
+    {
+        if (ModeToOnlineButton is null)
+        {
+            return;
+        }
+
+        ModeToOnlineButton.Content = Loc.T(
+            _modeArmed && _modeTarget == "online" ? "Tools_Mode_Confirm" : "Tools_Mode_ToOnline");
+        ModeToOfflineButton.Content = Loc.T(
+            _modeArmed && _modeTarget == "offline" ? "Tools_Mode_Confirm" : "Tools_Mode_ToOffline");
+        ModeCancelButton.Content = Loc.T("Common_Cancel");
+        ModeCancelButton.Visibility = _modeArmed ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async Task ExecuteModeAsync(string target)
+    {
+        DisarmMode();
+
+        ModeToOnlineButton.IsEnabled = false;
+        ModeToOfflineButton.IsEnabled = false;
+        try
+        {
+            if (!await ChatHub.SendModeCommandAsync(target))
+            {
+                ShowStatus(Loc.T("Tools_Mode_Failed"), InfoBarSeverity.Warning);
+                return;
+            }
+
+            ShowStatus(Loc.T("Tools_Mode_Sent"), InfoBarSeverity.Success);
+        }
+        finally
+        {
+            ModeToOnlineButton.IsEnabled = true;
+            ModeToOfflineButton.IsEnabled = true;
+        }
     }
 
     private void ShowStatus(string message, InfoBarSeverity severity)

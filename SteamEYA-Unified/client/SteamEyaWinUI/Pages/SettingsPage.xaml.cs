@@ -49,6 +49,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
 
         // 语言切换后，让本页所有 {x:Bind Strings.Get(...), Mode=OneWay} 重新求值（主题项文本等）。
         Loc.LanguageChanged += OnLanguageChanged;
+        NetworkModeService.StateChanged += OnNetworkModeStateChanged;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -60,6 +61,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
     {
         base.OnNavigatedTo(e);
         BuildLanguageItems();
+        BuildModeItems();
         SyncFromSettings();
     }
 
@@ -98,6 +100,8 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
             UpdateCustomBackgroundControls();
             UpdateDownloadDirText();
             BuildNotifyModeItems(AppState.SettingsService.Load().NotificationMode);
+            BuildModeItems();
+            RefreshModeStatus();
 
             if (!_recordingScreenshotHotkey)
             {
@@ -122,6 +126,121 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         }
 
         _languageItemsBuilt = true;
+    }
+
+    /// <summary>按当前界面语言重建运行模式下拉项（自动 / 在线 / 离线），并保持已选偏好。</summary>
+    private void BuildModeItems()
+    {
+        _syncing = true;
+        try
+        {
+            var current = (NetworkModeComboBox.SelectedItem as ComboBoxItem)?.Tag as string
+                ?? NetworkModeService.Preference;
+
+            NetworkModeComboBox.Items.Clear();
+            foreach (var (tag, key) in new[]
+                     {
+                         (NetworkModeService.ModeAuto, "Mode_Auto"),
+                         (NetworkModeService.ModeOnline, "Mode_Online"),
+                         (NetworkModeService.ModeOffline, "Mode_Offline"),
+                     })
+            {
+                NetworkModeComboBox.Items.Add(new ComboBoxItem { Content = Loc.T(key), Tag = tag });
+            }
+
+            NetworkModeComboBox.SelectedItem = FindByTag(NetworkModeComboBox, current);
+        }
+        finally
+        {
+            _syncing = false;
+        }
+    }
+
+    private void SyncModeSelection()
+    {
+        _syncing = true;
+        try
+        {
+            NetworkModeComboBox.SelectedItem =
+                FindByTag(NetworkModeComboBox, NetworkModeService.Preference);
+        }
+        finally
+        {
+            _syncing = false;
+        }
+    }
+
+    /// <summary>显示当前运行态与上次检测结果。</summary>
+    private void RefreshModeStatus()
+    {
+        if (NetworkStatusText is null)
+        {
+            return;
+        }
+
+        var last = NetworkModeService.LastProbeAt is { } time
+            ? time.ToString("HH:mm:ss")
+            : Loc.T("Mode_Status_None");
+        var network = NetworkModeService.LastProbeOk switch
+        {
+            true => Loc.T("Mode_Status_Ok"),
+            false => Loc.T("Mode_Status_Fail"),
+            null => Loc.T("Mode_Status_None")
+        };
+
+        NetworkStatusText.Text = Loc.Tf(
+            "Mode_Status_Format",
+            Loc.T(SessionState.Offline ? "Mode_Label_Offline" : "Mode_Label_Online"),
+            last, network);
+    }
+
+    private async void NetworkModeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncing)
+        {
+            return;
+        }
+
+        if (NetworkModeComboBox.SelectedItem is not ComboBoxItem item || item.Tag is not string mode)
+        {
+            return;
+        }
+
+        NetworkModeComboBox.IsEnabled = false;
+        try
+        {
+            await NetworkModeService.ApplyPreferenceAsync(mode);
+        }
+        finally
+        {
+            NetworkModeComboBox.IsEnabled = true;
+        }
+
+        SyncModeSelection();
+        RefreshModeStatus();
+    }
+
+    private async void ModeProbeButton_Click(object sender, RoutedEventArgs e)
+    {
+        ModeProbeButton.IsEnabled = false;
+        try
+        {
+            await NetworkModeService.ProbeAsync(manual: true);
+        }
+        finally
+        {
+            ModeProbeButton.IsEnabled = true;
+        }
+        RefreshModeStatus();
+    }
+
+    private void OnNetworkModeStateChanged()
+    {
+        _dispatcherQueue.TryEnqueue(() =>
+        {
+            SyncModeSelection();
+            RefreshModeStatus();
+        });
     }
 
     /// <summary>按当前语言与已保存主题选中对应下拉项；过程中屏蔽 SelectionChanged 处理。</summary>
@@ -149,6 +268,8 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
             RefreshNotifyDiagnostics();
             ScreenshotHotkeyBox.Text = ScreenshotService.FormatHotkey(
                 settings.ScreenshotHotkeyMods, settings.ScreenshotHotkeyVk);
+            SyncModeSelection();
+            RefreshModeStatus();
         }
         finally
         {

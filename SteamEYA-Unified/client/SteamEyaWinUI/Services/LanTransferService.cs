@@ -157,8 +157,8 @@ internal sealed class LanTransferService
                ?? new LanTransferFinishResponse { Ok = false, Msg = "无响应" };
     }
 
-    /// <summary>读取本机网关的接收页数据（进行中 + 已完成 + 接收目录）。</summary>
-    public async Task<LanTransferInboxResponse> GetInboxAsync(CancellationToken ct = default)
+    /// <summary>读取本机网关的接收页数据（进行中 + 已完成 + 接收目录）；连接异常时返回 null。</summary>
+    public async Task<LanTransferInboxResponse?> GetInboxAsync(CancellationToken ct = default)
     {
         try
         {
@@ -171,7 +171,7 @@ internal sealed class LanTransferService
         }
         catch
         {
-            return new LanTransferInboxResponse();
+            return null;
         }
     }
 }

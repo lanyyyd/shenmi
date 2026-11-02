@@ -19,6 +19,47 @@
                     Style="{StaticResource PageSubtitleTextStyle}" />
             </StackPanel>
 
+            <!-- 在线/离线运行模式：自动双向切换，或手动锁定；切换在线前先做网络检测 -->
+            <Border Style="{StaticResource CardBorderStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                        <TextBlock
+                            Text="{x:Bind Strings.Get('Settings_Mode_Section'), Mode=OneWay}"
+                            Style="{StaticResource SectionTitleTextStyle}" />
+                        <TextBlock
+                            Text="{x:Bind Strings.Get('Settings_Mode_Desc'), Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            x:Name="NetworkStatusText"
+                            Margin="0,4,0,0"
+                            FontSize="12.5"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel
+                        Grid.Column="1"
+                        Spacing="8"
+                        MinWidth="180"
+                        VerticalAlignment="Center">
+                        <ComboBox
+                            x:Name="NetworkModeComboBox"
+                            HorizontalAlignment="Stretch"
+                            SelectionChanged="NetworkModeComboBox_SelectionChanged" />
+                        <Button
+                            x:Name="ModeProbeButton"
+                            HorizontalAlignment="Stretch"
+                            Style="{StaticResource AuroraGlassButtonStyle}"
+                            Content="{x:Bind Strings.Get('Mode_Probe'), Mode=OneWay}"
+                            Click="ModeProbeButton_Click" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
             <!-- 语言：用 ComboBox 而非堆叠单选，既紧凑（避免页面出现多余滚动条）又适配可增长的语言列表 -->
             <Border Style="{StaticResource CardBorderStyle}">
                 <Grid ColumnSpacing="16">

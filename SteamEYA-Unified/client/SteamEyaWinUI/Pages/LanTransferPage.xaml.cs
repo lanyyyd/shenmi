@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -156,10 +158,15 @@ public sealed partial class LanTransferPage : Page
                 }
             }
             PeersEmptyText.Visibility = _peers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            _connTipShown = false;
         }
         catch (Exception ex)
         {
             AppLog.Warn($"刷新局域网设备失败：{ex.Message}");
+            if (IsConnectionError(ex))
+            {
+                ShowConnTip();
+            }
         }
     }
 
@@ -263,7 +270,18 @@ public sealed partial class LanTransferPage : Page
                 }
                 catch (Exception ex)
                 {
-                    Ui(() => item.StatusText = Loc.Tf("Lan_Status_Failed", ex.Message));
+                    if (IsConnectionError(ex))
+                    {
+                        Ui(() =>
+                        {
+                            item.StatusText = Loc.T("Lan_Conn_Error_Tip");
+                            ShowConnTip();
+                        });
+                    }
+                    else
+                    {
+                        Ui(() => item.StatusText = Loc.Tf("Lan_Status_Failed", ex.Message));
+                    }
                 }
                 finally
                 {
@@ -302,6 +320,13 @@ public sealed partial class LanTransferPage : Page
     private async Task RefreshInboxAsync()
     {
         var inbox = await _service.GetInboxAsync();
+        if (inbox is null)
+        {
+            ShowConnTip();
+            return;
+        }
+        _connTipShown = false;
+
         if (!string.IsNullOrWhiteSpace(inbox.Dir))
         {
             _recvDir = inbox.Dir;
@@ -393,6 +418,8 @@ public sealed partial class LanTransferPage : Page
     }
 
     // ---------------- 工具 ----------------
+    private bool _connTipShown;
+
     private void Ui(Action action) => _dispatcher.TryEnqueue(() => action());
 
     private void ShowInfo(string message, InfoBarSeverity severity)
@@ -400,6 +427,24 @@ public sealed partial class LanTransferPage : Page
         PageInfoBar.Message = message;
         PageInfoBar.Severity = severity;
         PageInfoBar.IsOpen = true;
+    }
+
+    /// <summary>是否为网络层连接异常（而非业务失败）。</summary>
+    private static bool IsConnectionError(Exception ex) =>
+        ex is HttpRequestException
+        || ex is SocketException
+        || (ex is TaskCanceledException tce && !tce.CancellationToken.IsCancellationRequested);
+
+    /// <summary>同一轮异常只提示一次，避免 2 秒轮询反复弹。</summary>
+    private void ShowConnTip()
+    {
+        if (_connTipShown)
+        {
+            return;
+        }
+
+        _connTipShown = true;
+        ShowInfo(Loc.T("Lan_Conn_Error_Tip"), InfoBarSeverity.Warning);
     }
 
     private static long SizeOf(string path)

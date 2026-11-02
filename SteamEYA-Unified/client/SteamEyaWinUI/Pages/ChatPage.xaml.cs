@@ -154,8 +154,14 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     // ---------------- 生命周期 ----------------
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // 页面可能被缓存后再次进入：先确保模式订阅存在。
+        SessionState.ModeChanged -= OnSessionModeChanged;
+        SessionState.ModeChanged += OnSessionModeChanged;
+
         if (_initialized)
         {
+            ApplyStaticText();
+            RefreshConnBanner(_chat.IsConnected);
             return;
         }
         _initialized = true;
@@ -203,6 +209,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         Loc.LanguageChanged -= OnLanguageChanged;
+        SessionState.ModeChanged -= OnSessionModeChanged;
         _mentionFlyout?.Hide();
         ChatHub.IsChatPageOpen = false;
 
@@ -260,6 +267,29 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         EatButton.Visibility = SessionState.Offline || string.IsNullOrWhiteSpace(SessionState.Token)
             ? Visibility.Collapsed
             : Visibility.Visible;
+        RefreshConnBanner(_chat.IsConnected);
+    }
+
+    /// <summary>在线断线显示普通提示；离线（局域网）断线统一提示防火墙检查文案。</summary>
+    private void RefreshConnBanner(bool connected)
+    {
+        if (connected)
+        {
+            ConnBanner.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        ConnBannerText.Text = Loc.T(SessionState.Offline ? "Lan_Conn_Error_Tip" : "Chat_Conn_Banner");
+        ConnBanner.Visibility = Visibility.Visible;
+    }
+
+    private void OnSessionModeChanged()
+    {
+        _dispatcher.TryEnqueue(() =>
+        {
+            ApplyStaticText();
+            RefreshConnBanner(_chat.IsConnected);
+        });
     }
 
     // ---------------- 主题色板 ----------------
@@ -2788,7 +2818,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         {
             ConnText.Text = Loc.T(connected ? "Chat_Connected" : "Chat_Connecting");
             ConnDot.Fill = BrushOf(connected ? "#22C55E" : "#F59E0B");
-            ConnBanner.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
+            RefreshConnBanner(connected);
             if (connected)
             {
                 _ = RefreshUnreadAsync();
