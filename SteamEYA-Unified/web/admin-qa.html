@@ -109,6 +109,12 @@ tr:last-child td{border-bottom:none}
         <b>base_url 要填到域名级别</b>（如 <code>https://api.deepseek.com</code>），程序会自动拼 <code>/chat/completions</code>。
       </div>
 
+      <div class="warn">
+        客户端的「AI 识图（多模态）」模式走 <code>/api/v1/qa/solve-image</code>，
+        会把整张截图发给你配置的模型，所以至少要有<b>一个「能力 = 多模态」的模型</b>。
+        只配了文本模型时，识图会失败并提示模型不支持图片。
+      </div>
+
       <div class="card">
         <div class="card-h"><h2>已配置的模型</h2></div>
         <div id="model-list"></div>
@@ -128,6 +134,11 @@ tr:last-child td{border-bottom:none}
               <input id="m-model" placeholder="deepseek-chat"></div>
             <div class="fld"><label>API Key</label>
               <input id="m-key" type="password" placeholder="sk-..."></div>
+            <div class="fld"><label>能力（AI 识图要选「多模态」）</label>
+              <select id="m-role">
+                <option value="fast">文本（只能读题干）</option>
+                <option value="vision">多模态（能读截图）</option>
+              </select></div>
             <div class="fld"><label>排序（越小越靠前）</label>
               <input id="m-sort" type="number" value="0"></div>
           </div>
@@ -281,12 +292,13 @@ async function loadModels(){
       return;
     }
 
-    box.innerHTML = '<table><thead><tr><th>ID</th><th>名称</th><th>地址</th><th>模型</th><th>Key</th><th>状态</th><th></th></tr></thead><tbody>' +
+    box.innerHTML = '<table><thead><tr><th>ID</th><th>名称</th><th>地址</th><th>模型</th><th>能力</th><th>Key</th><th>状态</th><th></th></tr></thead><tbody>' +
       d.items.map(m => `<tr>
         <td class="mono">${esc(m.id)}</td>
         <td>${esc(m.name)}</td>
         <td class="mono">${esc(m.base_url)}</td>
         <td class="mono">${esc(m.model_name)}</td>
+        <td>${m.role === 'vision' ? '🖼 多模态' : esc(m.role || 'fast')}</td>
         <td class="mono">${m.api_key ? '••••' + esc(String(m.api_key).slice(-4)) : '<span style="color:#EF4444">未填</span>'}</td>
         <td>${m.enabled ? '✅' : '⛔'}</td>
         <td style="white-space:nowrap">
@@ -305,6 +317,7 @@ function editModel(m){
   $('m-key').value = m.api_key || '';
   $('m-enabled').checked = !!m.enabled;
   $('m-sort').value = m.sort || 0;
+  $('m-role').value = m.role === 'vision' ? 'vision' : 'fast';
   window.scrollTo({top: 0, behavior: 'smooth'});
 }
 
@@ -322,6 +335,7 @@ async function saveModel(){
         base_url: $('m-base').value.trim(),
         model_name: $('m-model').value.trim() || id,
         api_key: $('m-key').value.trim(),
+        role: $('m-role').value || 'fast',
         enabled: $('m-enabled').checked,
         sort: parseInt($('m-sort').value || '0', 10),
       })

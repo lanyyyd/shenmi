@@ -543,7 +543,37 @@ def _aggregate(qid: int) -> None:
 
 # ============================================================ AI 提示词
 
+# 视觉模式（整张截图直接交给多模态模型）用的提示词。
+# 和 build_prompt 那条路不共用：那边题干选项是现成的，只要填空；
+# 这边题目得模型自己从画面里找，所以必须显式交代「哪些内容不是题目」。
+DEFAULT_VISION_PROMPT = (
+    "你是答题助手。图片是一道题的截图，画面里可能混着与题目无关的内容"
+    "（导航栏、按钮、广告、温馨提示、版权声明、聊天消息、水印、页码）。\n\n"
+    "先从图里找出真正的「题干」和它的「全部选项」，再作答。\n\n"
+    "要求：\n"
+    "1. 只输出 JSON，不要 markdown 代码块，不要任何前后缀解释。\n"
+    '2. 格式：{"type":"choice|multi|judge|fill|short","stem":"题干全文",'
+    '"options":[{"key":"A","text":"..."}],"answer_letter":"A","answer_text":"...",'
+    '"explain":"不超过40字","confidence":0.0-1.0}\n'
+    "3. type 判断：有 A/B/C/D 选项的是 choice；问「以下正确的有」「多选」的是 multi；"
+    "只有对错或 √/× 的是 judge；没有选项的是 fill 或 short。\n"
+    "4. 选择题：answer_letter 用图里选项的字母；answer_text 原样复制该选项文本。\n"
+    '5. 多选题：answer_letter 用英文逗号分隔，如 "A,C"，按字母升序。\n'
+    '6. 判断题：answer_letter 固定为 "T" 或 "F"，answer_text 为 "正确" 或 "错误"。\n'
+    "7. 填空题 / 简答题：answer_letter 留空，answer_text 只给答案本身。\n"
+    "8. stem 和 options 必须逐字抄图里的内容，不要改写、不要补全、不要自己编选项；"
+    "看不清就用最接近的字。\n"
+    "9. 只回答图里真正的那道题。「请仔细阅读」「本卷满分 100 分」这类提示语、"
+    "广告、页码、按钮文字都不是题目，不要拿来作答。\n"
+    '10. 图里确实没有题目时，confidence 给 0，answer_text 写「未识别到题目」。'
+)
+
+
 DEFAULT_PROMPTS: dict[str, str] = {
+    # 全新安装时写进 qa_prompts，之后可以在 /admin-qa.html 里改。
+    # 老库不会自动补这一行（_seed_defaults 只在建表时跑），
+    # 所以 build_vision_prompt 取不到就回落到上面的常量。
+    "vision": DEFAULT_VISION_PROMPT,
     "default": (
         "你是答题助手。根据题目给出最可能的正确答案。\n\n"
         "题目类型：{{type}}\n题干：{{stem}}\n选项：{{options}}\n\n"
@@ -585,6 +615,27 @@ def build_prompt(qtype: str, stem: str, options: list[dict]) -> str:
             .replace("{{options}}", opt_text))
 
 
+def build_vision_prompt() -> str:
+    """视觉模式的提示词。
+
+    没有复用 build_prompt：那条路需要 {{stem}} / {{options}} 去填空，
+    而视觉模式下手上一张图、没有任何文本。
+
+    老库里不会有 type='vision' 这一行（_seed_defaults 只在建表时跑过），
+    所以取不到就回落到代码里的 DEFAULT_VISION_PROMPT，保证升级后立刻可用。
+    """
+    ensure_schema()
+
+    row = query_one(
+        "SELECT template FROM qa_prompts WHERE type = 'vision' AND enabled = 1 "
+        "ORDER BY version DESC LIMIT 1",
+    )
+    if row and str(row["template"] or "").strip():
+        return str(row["template"])
+
+    return DEFAULT_VISION_PROMPT
+
+
 # ============================================================ 模型配置
 
 def list_models(include_secret: bool = False) -> list[dict]:
@@ -616,6 +667,52 @@ def get_model(model_id: Optional[str] = None) -> Optional[dict]:
 
     row = query_one("SELECT * FROM qa_models WHERE enabled = 1 ORDER BY sort ASC LIMIT 1")
     return dict(row) if row else None
+
+
+# 模型名里常见的「多模态」特征词。只用来猜，不做硬判断 ——
+# 各家命名太乱（qwen-vl / glm-4v / gpt-4o / gemini / claude-3-5-sonnet…），
+# 硬拦一定会误伤，猜错的代价只是多一次 400，看日志就能改。
+_VISION_NAME_HINTS = ("vl", "vision", "4o", "omni", "glm-4v", "gemini",
+                      "claude-3", "claude-4", "gpt-4.1")
+
+
+def looks_vision(model: dict) -> bool:
+    """这个模型的配置看起来能不能吃图片。"""
+    role = str(model.get("role") or "").lower()
+    name = str(model.get("model_name") or "").lower()
+    return "vision" in role or any(k in name for k in _VISION_NAME_HINTS)
+
+
+def get_vision_model(model_id: Optional[str] = None) -> Optional[dict]:
+    """挑一个能给图看的模型。
+
+    顺序：显式指定且确实像多模态 → role 标了 vision 的 → 显式指定的那个 → sort 最前的。
+
+    为什么不是「显式指定优先」：客户端的 model_id 来自设置页那个通用下拉，
+    用户可能选的是文本模型。图发过去上游直接 400，用户看到的只是「调用失败」，
+    根本想不到是选错模型。这里宁可换一个能看图的，也不要照着错误配置硬发。
+    """
+    ensure_schema()
+
+    explicit = None
+    if model_id:
+        row = query_one("SELECT * FROM qa_models WHERE id = ? AND enabled = 1", (model_id,))
+        if row:
+            explicit = dict(row)
+            if looks_vision(explicit):
+                return explicit
+
+    row = query_one(
+        "SELECT * FROM qa_models WHERE enabled = 1 AND lower(IFNULL(role,'')) LIKE '%vision%' "
+        "ORDER BY sort ASC LIMIT 1"
+    )
+    if row:
+        return dict(row)
+
+    if explicit is not None:
+        return explicit
+
+    return get_model()
 
 
 def save_model(model_id: str, name: str, base_url: str, api_key: str,

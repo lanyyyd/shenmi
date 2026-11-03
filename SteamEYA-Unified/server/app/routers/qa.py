@@ -27,6 +27,10 @@ router = APIRouter(prefix="/api/v1/qa", tags=["qa"])
 # 单次 AI 调用的上限。超过就直接报错，不要挂着让用户干等。
 _AI_CONNECT_TIMEOUT = 4
 _AI_READ_TIMEOUT = 40
+# 视觉请求比文本慢得多：读一张 1600px 的图再推理，20 秒起步。
+# 用 40 秒会在一半的题上被自己掐断，看起来像「模型超时」其实是客户端放弃太早。
+# 注意反向代理那一层：nginx 默认 proxy_read_timeout 是 60s，要一起放大。
+_AI_VISION_READ_TIMEOUT = 90
 
 
 # ============================================================ 检索
@@ -52,6 +56,11 @@ def search(payload: dict = Body(...), user: dict = Depends(get_current_user)):
 
 # ============================================================ AI 求解（SSE）
 
+# 视觉模式：base64 串长度上限。8MB 约等于 6MB 原图；
+# 客户端会先缩到 1600px，正常只有几百 KB。
+_IMAGE_MAX_CHARS = 8 * 1024 * 1024
+
+
 @router.post("/solve")
 def solve(payload: dict = Body(...), request: Request = None,
           user: dict = Depends(get_current_user)):
@@ -63,23 +72,137 @@ def solve(payload: dict = Body(...), request: Request = None,
     if not stem:
         raise HTTPException(400, "题干为空")
 
+    if not isinstance(options, list):
+        options = []
+
     model = QA.get_model(model_id)
     if not model:
         raise HTTPException(503, "后台还没有配置可用的 AI 模型，请联系管理员")
 
-    prompt = QA.build_prompt(qtype, stem, options if isinstance(options, list) else [])
+    prompt = QA.build_prompt(qtype, stem, options)
     messages = [{"role": "user", "content": prompt}]
 
     # 诊断日志：只记结构和长度，不落题干原文（题目内容属于用户数据）。
-    _opt0 = options[0] if isinstance(options, list) and options else None
+    _opt0 = options[0] if options else None
     _ua = (request.headers.get("user-agent") if request else "") or ""
     _accept = (request.headers.get("accept") if request else "") or ""
     log.info("qa solve: model=%s type=%s stem_len=%d options=%s opt0_type=%s opt0_keys=%s ua=%r accept=%r",
-             model.get("id"), qtype, len(stem),
-             len(options) if isinstance(options, list) else "not-list",
+             model.get("id"), qtype, len(stem), len(options),
              type(_opt0).__name__,
              sorted(_opt0.keys()) if isinstance(_opt0, dict) else "",
              _ua[:80], _accept[:80])
+
+    return _stream_answer(
+        model, messages,
+        finalize=lambda parsed: _sanitize(parsed, options),
+        save_cb=lambda result: _save_solution(result, stem, options, qtype, model, user),
+    )
+
+
+@router.post("/solve-image")
+def solve_image(payload: dict = Body(...), request: Request = None,
+                user: dict = Depends(get_current_user)):
+    """整张截图直接交给多模态模型，跳过 OCR。
+
+    客户端把 PNG 编成 data:image/... 内联在 image 里；也接受公网 image_url。
+    图片不落盘、不入库，只在这一次请求的内存里过一遍。
+    """
+    image = str(payload.get("image") or "").strip()
+    image_url = str(payload.get("image_url") or "").strip()
+    model_id = payload.get("model_id")
+
+    if not image and not image_url:
+        raise HTTPException(400, "缺少图片：image 传 data:image/...，或 image_url 传公网地址")
+
+    if len(image) > _IMAGE_MAX_CHARS:
+        raise HTTPException(413, "图片太大（base64 超过 8MB），客户端应先缩到 1600px 以内再传")
+
+    url = image_url or image
+    if not (url.startswith("data:image/") or url.startswith("http://") or url.startswith("https://")):
+        raise HTTPException(400, "image 必须是 data:image/... 或 http(s) 地址")
+
+    model = QA.get_vision_model(model_id)
+    if not model:
+        raise HTTPException(503, "后台还没有配置可用的 AI 模型，请联系管理员")
+
+    try:
+        prompt = QA.build_vision_prompt()
+    except Exception as exc:                       # noqa: BLE001
+        log.warning("构建视觉提示词失败，回落到内置版本：%s", exc)
+        prompt = QA.DEFAULT_VISION_PROMPT
+
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": url}},
+        ],
+    }]
+
+    name = str(model.get("model_name") or "")
+    role = str(model.get("role") or "")
+    hint = ""
+    if not QA.looks_vision(model):
+        hint = (f"当前模型 {name} 可能不支持图片输入；"
+                "请到 /admin-qa.html 新增一个多模态模型，并在「能力」里选「多模态（看图）」")
+
+    log.info("qa solve-image: model=%s img_chars=%d src=%s role=%s ua=%r",
+             model.get("id"), len(image), "url" if image_url else "data-url", role,
+             ((request.headers.get("user-agent") if request else "") or "")[:80])
+
+    # 模型如果连题干、选项一起读了出来，就顺手入库 —— 下次同一题直接命中题库，
+    # 不用再等模型几秒。置信度太低的不入库，免得把读错的题写进库里。
+    sink: dict[str, Any] = {}
+
+    def finalize(parsed: dict) -> Optional[dict]:
+        result, stem, opts = _vision_result(parsed)
+        sink["stem"] = stem
+        sink["options"] = opts
+        return result
+
+    def save(result: dict) -> Optional[dict]:
+        stem = str(sink.get("stem") or "")
+        opts = sink.get("options") or []
+        if len(QA.normalize(stem)) < 8 or len(opts) < 2:
+            return None                      # 读出来的题干不像题目，别污染题库
+        if float(result.get("confidence") or 0) < 0.5:
+            return None
+        return _save_solution(result, stem, opts, str(result.get("type") or "choice"), model, user)
+
+    return _stream_answer(model, messages, finalize=finalize, save_cb=save, hint=hint,
+                          read_timeout=_AI_VISION_READ_TIMEOUT)
+
+
+def _save_solution(result: dict, stem: str, options: list[dict], qtype: str,
+                   model: dict, user: dict) -> dict:
+    """AI 成功作答：直接进题库并置为 verified（不等人审，立刻可被检索）。"""
+    try:
+        saved = QA.contribute(
+            stem,
+            options,
+            qtype,
+            result.get("answer_letter") or None,
+            result.get("answer_text") or "",
+            source="ai",
+            model=str(model.get("model_name") or ""),
+            confidence=float(result.get("confidence") or 0),
+            user_id=(user or {}).get("id"),
+            force_verified=True,
+        )
+        log.info("qa 入库：qid=%s merged=%s status=%s",
+                 (saved or {}).get("question_id"), (saved or {}).get("merged"),
+                 (saved or {}).get("status"))
+        return saved or {}
+    except Exception as exc:                       # noqa: BLE001
+        log.warning("qa 入库失败：%s", exc)
+        return {}
+
+
+def _stream_answer(model: dict, messages: list[dict], *,
+                   finalize, save_cb=None, hint: str = "",
+                   read_timeout: int = _AI_READ_TIMEOUT) -> StreamingResponse:
+    """SSE 输出。solve 与 solve-image 共用这一份 —— 两种模式的结果格式必须完全一致，
+    否则客户端那边得写两套解析。"""
 
     def event(payload_obj: dict) -> str:
         return "data: " + json.dumps(payload_obj, ensure_ascii=False) + "\n\n"
@@ -92,7 +215,7 @@ def solve(payload: dict = Body(...), request: Request = None,
         finish = ""
 
         try:
-            for kind, piece in _call_model_stream(model, messages):
+            for kind, piece in _call_model_stream(model, messages, read_timeout):
                 if kind == "delta":
                     acc.append(piece)
                     yield event({"delta": "".join(acc)})
@@ -110,66 +233,139 @@ def solve(payload: dict = Body(...), request: Request = None,
         parsed = QA.parse_ai_json(raw)
 
         if parsed is None:
-            log.warning("qa solve 无法解析：raw_len=%d reasoning_len=%d finish=%r error=%r head=%r",
+            log.warning("qa 无法解析：raw_len=%d reasoning_len=%d finish=%r error=%r head=%r",
                         len(raw), reasoning_len, finish, error, raw[:160])
+            # 上游因为「内容格式不对」拒绝时，原样抛 HTTP 400 给用户等于没说。
+            # 既然已经猜到是模型不支持图片，就把原因讲清楚，别让人去查网络。
+            msg = error or ("模型没有返回可解析的 JSON" if raw else "模型无输出")
+            if hint and ("HTTP 400" in msg or "HTTP 422" in msg or "HTTP 415" in msg):
+                msg = hint
             yield event({
                 "done": True,
                 "result": None,
                 "model": model.get("model_name"),
                 "elapsed_ms": int((time.time() - started) * 1000),
-                "error": error or ("模型没有返回可解析的 JSON" if raw else "模型无输出"),
+                "error": msg,
             })
             return
 
-        # 校验：字母必须在选项里，且与 answer_text 对得上
+        result = finalize(parsed)
+
+        # 校验：字母必须在选项里，且与 answer_text 对得上。
         # 不通过就让客户端走「失败」分支，宁可不给答案，也不给一个对不上的字母。
-        result = _sanitize(parsed, options if isinstance(options, list) else [])
-        log.info("qa solve done: ok=%s elapsed_ms=%d letter=%r text_len=%d",
+        log.info("qa done: ok=%s elapsed_ms=%d letter=%r text_len=%d",
                  bool(result), int((time.time() - started) * 1000),
                  (result or {}).get("answer_letter"), len((result or {}).get("answer_text") or ""))
+
         if result is None:
-            log.warning("qa solve 答案与选项不匹配：letter=%r text=%r raw_len=%d head=%r",
+            log.warning("qa 答案与选项不匹配：letter=%r text=%r raw_len=%d head=%r",
                         parsed.get("answer_letter"), parsed.get("answer_text"), len(raw), raw[:120])
-            yield event({
+            payload = {
                 "done": True,
                 "result": None,
                 "model": model.get("model_name"),
                 "elapsed_ms": int((time.time() - started) * 1000),
                 "error": "模型返回的答案与选项不匹配",
-            })
+            }
+            if hint:
+                payload["hint"] = hint
+            yield event(payload)
             return
 
-        # AI 成功作答：直接进题库并置为 verified（不等人审，立刻可被检索）。
         saved = None
-        try:
-            saved = QA.contribute(
-                stem,
-                options if isinstance(options, list) else [],
-                qtype,
-                result.get("answer_letter") or None,
-                result.get("answer_text") or "",
-                source="ai",
-                model=str(model.get("model_name") or ""),
-                confidence=float(result.get("confidence") or 0),
-                user_id=(user or {}).get("id"),
-                force_verified=True,
-            )
-            log.info("qa solve 入库：qid=%s merged=%s status=%s",
-                     (saved or {}).get("question_id"), (saved or {}).get("merged"),
-                     (saved or {}).get("status"))
-        except Exception as exc:                       # noqa: BLE001
-            log.warning("qa solve 入库失败：%s", exc)
+        if save_cb is not None:
+            saved = save_cb(result)
 
-        yield event({
+        payload = {
             "done": True,
             "result": result,
-            "saved": saved,
             "model": model.get("model_name"),
             "elapsed_ms": int((time.time() - started) * 1000),
-        })
+        }
+        if saved:
+            payload["saved"] = saved
+        if hint:
+            payload["hint"] = hint
+        yield event(payload)
 
     return StreamingResponse(generate(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _vision_result(parsed: dict) -> tuple[Optional[dict], str, list[dict]]:
+    """视觉模式的答案整理，返回 (result, 题干, 选项)。
+
+    和 _sanitize 的差别：那边有客户端传来的选项表，这边选项是模型自己读出来的，
+    反过来拿它校验字母，能挡住「字母和选项错位」——视觉模型最常见的错。
+    校验不过不丢答案：重跑一次要好几秒，宁可只给文本，也别给一个错的字母。
+    """
+    qtype = str(parsed.get("type") or "choice").lower()
+    letter = str(parsed.get("answer_letter") or "").strip().upper()
+    text = str(parsed.get("answer_text") or "").strip()
+    stem = str(parsed.get("stem") or "").strip()
+
+    opts: list[dict] = []
+    raw_opts = parsed.get("options")
+    if isinstance(raw_opts, list):
+        for o in raw_opts:
+            if not isinstance(o, dict):
+                continue
+            k = str(o.get("key") or "").strip().upper().rstrip(".")
+            t = str(o.get("text") or "").strip()
+            if k and t:
+                opts.append({"key": k, "text": t})
+
+    try:
+        confidence = float(parsed.get("confidence") or 0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    confidence = max(0.0, min(1.0, confidence))
+
+    # 「AC」这种没分隔符的多选
+    if len(letter) > 1 and letter.isalpha() and "," not in letter:
+        letter = ",".join(letter)
+
+    keys = {o["key"]: o["text"] for o in opts}
+
+    if keys:
+        raw_keys = QA.split_keys(letter)
+        wanted = [k for k in raw_keys if k in keys]
+        letter_ok = bool(wanted) and len(wanted) == len(raw_keys)
+
+        # 字母合法不代表选对了选项：模型经常把「第 3 个选项」的 C 当成答案，
+        # 却把 B 选项的原文抄进 answer_text。文本是它从图里一个个字读出来的，
+        # 比它自己标的字母可信，所以文本和字母打架时以文本为准。
+        agree = True
+        if letter_ok and text and len(wanted) == 1:
+            agree = QA.dice(QA.normalize(text), QA.normalize(keys[wanted[0]])) >= 0.55
+            # 多选题的 answer_text 是多个选项拼起来的，和单个选项比 dice 必然低，
+            # 所以只对单选做这项核对。
+        if not letter_ok or not agree:
+            best_key, best_score = "", 0.0
+            if text:
+                for k, v in keys.items():
+                    score = QA.dice(QA.normalize(text), QA.normalize(v))
+                    if score > best_score:
+                        best_key, best_score = k, score
+            if best_score >= 0.55:
+                letter = best_key                      # 文本能定位到某个选项，就改字母
+            elif not letter_ok:
+                letter = ""
+                confidence = min(confidence, 0.4)
+
+    if keys and letter and not text:
+        text = "、".join(keys[k] for k in QA.split_keys(letter) if k in keys)
+
+    if not text and not letter:
+        return None, stem, opts
+
+    return ({
+        "type": qtype,
+        "answer_letter": letter,
+        "answer_text": text,
+        "explain": str(parsed.get("explain") or "")[:200],
+        "confidence": confidence,
+    }, stem, opts)
 
 
 def _sanitize(parsed: dict, options: list[dict]) -> Optional[dict]:
@@ -211,7 +407,7 @@ def _sanitize(parsed: dict, options: list[dict]) -> Optional[dict]:
     }
 
 
-def _call_model_stream(model: dict, messages: list[dict]):
+def _call_model_stream(model: dict, messages: list[dict], read_timeout: int = _AI_READ_TIMEOUT):
     """OpenAI 兼容的流式调用。产出：
     ("delta", text)      正文增量（拼起来是最终答案）
     ("reasoning", text)  思考过程增量（只用于诊断/计数，不进答案）
@@ -244,7 +440,7 @@ def _call_model_stream(model: dict, messages: list[dict]):
         resp = requests.post(
             base + "/chat/completions",
             json=body,
-            timeout=(_AI_CONNECT_TIMEOUT, _AI_READ_TIMEOUT),
+            timeout=(_AI_CONNECT_TIMEOUT, read_timeout),
             stream=True,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         )
