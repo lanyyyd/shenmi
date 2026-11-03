@@ -57,6 +57,12 @@
                 HorizontalAlignment="Stretch"
                 Click="OnScanStoken"
                 ToolTipService.ToolTip="用米游社 App 扫码，补上 Cookie 缺失的长期 stoken，之后自动续期" />
+            <Button
+                x:Name="GachaLinkButton"
+                Content="获取抽卡链接"
+                HorizontalAlignment="Stretch"
+                Click="OnGachaLink"
+                ToolTipService.ToolTip="用已扫码的 stoken 生成原神/星铁的抽卡记录链接" />
 
             <InfoBar x:Name="PageInfoBar" IsOpen="False" IsClosable="True" />
 

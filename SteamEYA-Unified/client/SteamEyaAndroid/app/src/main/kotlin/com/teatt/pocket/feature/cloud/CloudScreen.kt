@@ -2,6 +2,7 @@ package com.teatt.pocket.feature.cloud
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -50,6 +52,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,6 +62,8 @@ import com.teatt.pocket.core.ApiException
 import com.teatt.pocket.core.CloudAccountDto
 import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CookieDto
+import com.teatt.pocket.core.GachaLinkDto
+import com.teatt.pocket.core.GachaRoleDto
 import com.teatt.pocket.core.StokenCreateDto
 import com.teatt.pocket.data.CloudApi
 import kotlinx.coroutines.delay
@@ -83,6 +88,9 @@ fun CloudScreen(
     var scanTarget by remember { mutableStateOf<CloudAccountDto?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var gachaRoles by remember { mutableStateOf<List<GachaRoleDto>>(emptyList()) }
+    var gachaOpen by remember { mutableStateOf(false) }
+    var gachaLoading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     suspend fun reload() {
@@ -182,6 +190,40 @@ fun CloudScreen(
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                    TextButton(
+                        enabled = !gachaLoading,
+                        onClick = {
+                            gachaLoading = true
+                            scope.launch {
+                                try {
+                                    val res = CloudApi.gachaRoles(token)
+                                    gachaRoles = res.roles
+                                    if (res.roles.isEmpty()) {
+                                        dialog = "没有可用的游戏账号" to (res.detail.ifBlank {
+                                            res.errors.firstOrNull()
+                                                ?: "请先用米游社 App 扫码补 stoken，并确认米游社已绑定原神/星铁角色。"
+                                        })
+                                    } else {
+                                        gachaOpen = true
+                                    }
+                                } catch (e: Exception) {
+                                    dialog = "获取账号失败" to (e.message ?: "请稍后重试")
+                                } finally {
+                                    gachaLoading = false
+                                }
+                            }
+                        }
+                    ) {
+                        if (gachaLoading) {
+                            CircularProgressIndicator(
+                                Modifier.size(14.dp),
+                                color = BrandPink,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("抽卡链接", color = BrandPink)
+                        }
                     }
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
@@ -310,6 +352,118 @@ fun CloudScreen(
             }
         )
     }
+
+    if (gachaOpen) {
+        GachaLinkDialog(
+            token = token,
+            roles = gachaRoles,
+            onDismiss = { gachaOpen = false }
+        )
+    }
+}
+
+/** 用扫码 stoken 生成抽卡链接：选角色 -> 生成 -> 复制。 */
+@Composable
+private fun GachaLinkDialog(
+    token: String,
+    roles: List<GachaRoleDto>,
+    onDismiss: () -> Unit
+) {
+    var selected by remember { mutableStateOf(0) }
+    var link by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("链接约 24 小时有效，只用来读取抽卡记录，不要发给陌生人。") }
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    val role = roles.getOrNull(selected)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("获取抽卡链接") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "选择游戏账号",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                roles.forEachIndexed { index, item ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { selected = index },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = selected == index,
+                            onClick = { selected = index }
+                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "${item.gameName} · ${item.nickname.ifBlank { "未命名" }}",
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                "UID ${item.gameUid} · " +
+                                    item.regionName.ifBlank { if (item.isOfficial) "官服" else "渠道服" },
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                if (link.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "抽卡链接",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(link, fontSize = 11.sp)
+                    TextButton(onClick = {
+                        clipboard.setText(AnnotatedString(link))
+                        status = "已复制到剪贴板。"
+                    }) { Text("复制链接") }
+                }
+                Text(
+                    status,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !busy && role != null,
+                onClick = {
+                    val item = role ?: return@TextButton
+                    busy = true
+                    status = "正在生成…"
+                    scope.launch {
+                        try {
+                            val res: GachaLinkDto =
+                                CloudApi.gachaLink(token, item.game, item.gameUid, item.region, item.mid)
+                            link = res.url
+                            status = if (res.url.isBlank()) {
+                                res.detail.ifBlank { "生成失败，请稍后重试" }
+                            } else {
+                                "生成成功，链接约 24 小时有效。"
+                            }
+                        } catch (e: Exception) {
+                            status = "生成失败：${e.message ?: "请稍后重试"}"
+                        } finally {
+                            busy = false
+                        }
+                    }
+                }
+            ) {
+                Text(if (busy) "生成中…" else "生成链接")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+    )
 }
 
 /** 米游社扫码补 stoken：服务端返回二维码 0/1 矩阵，这里直接画格子，不引二维码库。 */

@@ -465,6 +465,141 @@ public sealed partial class CloudGamePage : Page
         return canvas;
     }
 
+    // ---------------- 抽卡链接（米游社 stoken -> Auth Key B） ----------------
+
+    private async void OnGachaLink(object sender, RoutedEventArgs e)
+    {
+        GachaLinkButton.IsEnabled = false;
+        try
+        {
+            var rolesDto = await _cloud.GachaRolesAsync();
+            if (!rolesDto.Ok || rolesDto.Roles.Count == 0)
+            {
+                var error = rolesDto.Detail;
+                if (string.IsNullOrWhiteSpace(error) && rolesDto.Errors.Count > 0)
+                {
+                    error = string.Join("；", rolesDto.Errors.Distinct());
+                }
+                ShowInfo(error ?? "没有找到绑定的原神/星铁角色，请先用米游社 App 扫码补 stoken，并确认米游社已绑定游戏角色。",
+                    InfoBarSeverity.Error);
+                return;
+            }
+
+            var roles = rolesDto.Roles;
+            var picker = new ComboBox
+            {
+                MinWidth = 460,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                ItemsSource = roles.Select(RoleLabel).ToList(),
+                SelectedIndex = 0
+            };
+            var linkBox = new TextBox
+            {
+                IsReadOnly = true,
+                TextWrapping = TextWrapping.Wrap,
+                MinHeight = 90,
+                PlaceholderText = "点「生成链接」后显示，复制后粘贴到提瓦特小助手等抽卡分析工具"
+            };
+            var status = new TextBlock
+            {
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 12,
+                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                Text = "链接约 24 小时有效，只用来读取抽卡记录，不要发给陌生人。"
+            };
+            var generate = new Button
+            {
+                Content = "生成链接",
+                Style = (Style)Application.Current.Resources["AccentButtonStyle"]
+            };
+            var copy = new Button { Content = "复制链接", IsEnabled = false };
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            buttons.Children.Add(generate);
+            buttons.Children.Add(copy);
+
+            var panel = new StackPanel { Spacing = 10, MinWidth = 480 };
+            panel.Children.Add(new TextBlock { Text = "选择游戏账号", FontSize = 12 });
+            panel.Children.Add(picker);
+            panel.Children.Add(buttons);
+            panel.Children.Add(linkBox);
+            panel.Children.Add(status);
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "获取抽卡链接（米游社）",
+                Content = panel,
+                CloseButtonText = "关闭"
+            };
+
+            generate.Click += async (_, _) =>
+            {
+                var index = picker.SelectedIndex;
+                if (index < 0 || index >= roles.Count)
+                {
+                    return;
+                }
+                var role = roles[index];
+                generate.IsEnabled = false;
+                status.Text = "正在生成…";
+                try
+                {
+                    var result = await _cloud.GachaLinkAsync(role.Game, role.GameUid, role.Region, role.Mid);
+                    if (string.IsNullOrWhiteSpace(result.Url))
+                    {
+                        status.Text = $"生成失败：{result.Detail ?? "请确认该账号已绑定米游社，并重新扫码补 stoken"}";
+                        return;
+                    }
+                    linkBox.Text = result.Url;
+                    copy.IsEnabled = true;
+                    status.Text = "生成成功，链接约 24 小时有效；复制后粘贴到抽卡分析工具。";
+                }
+                catch (Exception ex)
+                {
+                    status.Text = $"生成失败：{ex.Message}";
+                }
+                finally
+                {
+                    generate.IsEnabled = true;
+                }
+            };
+
+            copy.Click += (_, _) =>
+            {
+                if (string.IsNullOrWhiteSpace(linkBox.Text))
+                {
+                    return;
+                }
+                var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                package.SetText(linkBox.Text);
+                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+                status.Text = "已复制到剪贴板。";
+            };
+
+            await dialog.ShowAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("获取抽卡链接失败。", ex);
+            ShowInfo($"获取抽卡链接失败：{ex.Message}", InfoBarSeverity.Error);
+        }
+        finally
+        {
+            GachaLinkButton.IsEnabled = true;
+        }
+    }
+
+    private static string RoleLabel(GachaRoleDto role)
+    {
+        var region = role.RegionName;
+        if (!role.IsOfficial)
+        {
+            region = string.IsNullOrEmpty(region) ? "渠道服" : $"{region}·渠道服";
+        }
+        var nick = string.IsNullOrWhiteSpace(role.Nickname) ? "未命名" : role.Nickname;
+        return $"{role.GameName} · {nick} · UID {role.GameUid} · {region}";
+    }
+
     private void ShowInfo(string message, InfoBarSeverity severity)
     {
         PageInfoBar.Message = message;

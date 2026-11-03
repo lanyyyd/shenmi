@@ -7,6 +7,8 @@ import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CloudGamesDto
 import com.teatt.pocket.core.CloudMyDto
 import com.teatt.pocket.core.CookieDto
+import com.teatt.pocket.core.GachaLinkDto
+import com.teatt.pocket.core.GachaRolesDto
 import com.teatt.pocket.core.LoginDto
 import com.teatt.pocket.core.MeDto
 import com.teatt.pocket.core.StokenCreateDto
@@ -101,6 +103,21 @@ object CloudApi {
     suspend fun stokenPoll(token: String, session: String): StokenPollDto {
         val body = buildJsonObject { put("session", JsonPrimitive(session)) }.toString()
         return Api.decode(Api.postJson("/api/cloud/stoken/poll", body, token))
+    }
+
+    /** 列出扫码 stoken 绑定的原神/星铁角色。 */
+    suspend fun gachaRoles(token: String): GachaRolesDto =
+        Api.decode(Api.get("/api/mihoyo/gacha/roles", token))
+
+    /** 生成某个角色的抽卡记录链接（约 24 小时有效）。 */
+    suspend fun gachaLink(token: String, game: String, gameUid: String, region: String, mid: String): GachaLinkDto {
+        val body = buildJsonObject {
+            put("game", JsonPrimitive(game))
+            put("game_uid", JsonPrimitive(gameUid))
+            put("region", JsonPrimitive(region))
+            put("mid", JsonPrimitive(mid))
+        }.toString()
+        return Api.decode(Api.postJson("/api/mihoyo/gacha/link", body, token))
     }
 
     suspend fun addGame(token: String, name: String, url: String) {

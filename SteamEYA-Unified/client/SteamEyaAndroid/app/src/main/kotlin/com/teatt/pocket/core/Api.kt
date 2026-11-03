@@ -273,6 +273,42 @@ data class StokenPollDto(
     val matched: Int = 0
 )
 
+@Serializable
+data class GachaRoleDto(
+    @SerialName("game_biz") val gameBiz: String = "",
+    val game: String = "",
+    @SerialName("game_name") val gameName: String = "",
+    @SerialName("game_uid") val gameUid: String = "",
+    val region: String = "",
+    @SerialName("region_name") val regionName: String = "",
+    val nickname: String = "",
+    val level: Int? = null,
+    @SerialName("is_official") val isOfficial: Boolean = true,
+    val mid: String = ""
+)
+
+@Serializable
+data class GachaRolesDto(
+    val ok: Boolean = false,
+    val roles: List<GachaRoleDto> = emptyList(),
+    val errors: List<String> = emptyList(),
+    val detail: String = ""
+)
+
+@Serializable
+data class GachaLinkDto(
+    val ok: Boolean = false,
+    val game: String = "",
+    @SerialName("game_name") val gameName: String = "",
+    @SerialName("game_uid") val gameUid: String = "",
+    val region: String = "",
+    val url: String = "",
+    @SerialName("api_url") val apiUrl: String = "",
+    val authkey: String = "",
+    @SerialName("expires_in") val expiresIn: Int = 0,
+    val detail: String = ""
+)
+
 /** 上传用的 Cookie 项；服务端只用 name/value，domain 放宽即可。 */
 @Serializable
 data class CookieDto(

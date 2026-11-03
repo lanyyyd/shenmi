@@ -225,6 +225,69 @@ internal sealed class StokenPollDto
     public int Matched { get; set; }
 }
 
+/// <summary>GET /api/mihoyo/gacha/roles：扫码 stoken 绑定的游戏角色。</summary>
+internal sealed class GachaRolesDto
+{
+    public bool Ok { get; set; }
+    public List<GachaRoleDto> Roles { get; set; } = [];
+    public List<string> Errors { get; set; } = [];
+    public string? Detail { get; set; }
+}
+
+internal sealed class GachaRoleDto
+{
+    [JsonPropertyName("game_biz")]
+    public string GameBiz { get; set; } = string.Empty;
+
+    public string Game { get; set; } = string.Empty;
+
+    [JsonPropertyName("game_name")]
+    public string GameName { get; set; } = string.Empty;
+
+    [JsonPropertyName("game_uid")]
+    public string GameUid { get; set; } = string.Empty;
+
+    public string Region { get; set; } = string.Empty;
+
+    [JsonPropertyName("region_name")]
+    public string RegionName { get; set; } = string.Empty;
+
+    public string Nickname { get; set; } = string.Empty;
+
+    public int? Level { get; set; }
+
+    [JsonPropertyName("is_official")]
+    public bool IsOfficial { get; set; }
+
+    public string Mid { get; set; } = string.Empty;
+}
+
+/// <summary>POST /api/mihoyo/gacha/link：生成的抽卡链接。</summary>
+internal sealed class GachaLinkDto
+{
+    public bool Ok { get; set; }
+    public string Game { get; set; } = string.Empty;
+
+    [JsonPropertyName("game_name")]
+    public string GameName { get; set; } = string.Empty;
+
+    [JsonPropertyName("game_uid")]
+    public string GameUid { get; set; } = string.Empty;
+
+    public string Region { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+
+    [JsonPropertyName("api_url")]
+    public string ApiUrl { get; set; } = string.Empty;
+
+    public string Authkey { get; set; } = string.Empty;
+
+    [JsonPropertyName("expires_in")]
+    public int ExpiresIn { get; set; }
+
+    public string? Detail { get; set; }
+}
+
 /// <summary>
 /// 离线同步消息。服务端与本地网关均使用 snake_case 字段名（client_msg_id / to_username /
 /// from_username / created_at），而 JSON 上下文用 camelCase 策略不会转换下划线，
@@ -354,6 +417,9 @@ internal sealed class CloudCreateGameDto
 [JsonSerializable(typeof(CloudCreateGameDto))]
 [JsonSerializable(typeof(StokenCreateDto))]
 [JsonSerializable(typeof(StokenPollDto))]
+[JsonSerializable(typeof(GachaRolesDto))]
+[JsonSerializable(typeof(GachaRoleDto))]
+[JsonSerializable(typeof(GachaLinkDto))]
 [JsonSerializable(typeof(SyncMessage))]
 [JsonSerializable(typeof(SyncPendingDto))]
 [JsonSerializable(typeof(SyncPushRequest))]
