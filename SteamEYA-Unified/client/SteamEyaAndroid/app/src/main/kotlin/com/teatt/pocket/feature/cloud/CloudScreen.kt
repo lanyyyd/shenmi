@@ -1,5 +1,6 @@
 package com.teatt.pocket.feature.cloud
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -44,6 +46,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.font.FontWeight
@@ -55,7 +59,9 @@ import com.teatt.pocket.core.ApiException
 import com.teatt.pocket.core.CloudAccountDto
 import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CookieDto
+import com.teatt.pocket.core.StokenCreateDto
 import com.teatt.pocket.data.CloudApi
+import kotlinx.coroutines.delay
 import com.teatt.pocket.ui.BrandPink
 import com.teatt.pocket.ui.LocalBarInset
 import com.teatt.pocket.ui.NetworkErrorPane
@@ -74,6 +80,7 @@ fun CloudScreen(
     var busyKey by remember { mutableStateOf<String?>(null) }
     var captureTarget by remember { mutableStateOf<CloudGameDto?>(null) }
     var pasteTarget by remember { mutableStateOf<CloudGameDto?>(null) }
+    var scanTarget by remember { mutableStateOf<CloudAccountDto?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<Pair<String, String>?>(null) }
     val scope = rememberCoroutineScope()
@@ -113,6 +120,8 @@ fun CloudScreen(
                     append("\n有效性：").append(if (result.valid == true) "通过" else "未通过（${result.msg}）")
                     when {
                         result.refreshOk == true -> append("\n自动续期：已开启（stoken 换票）")
+                        result.refreshOk == false && result.needStoken ->
+                            append("\nCookie 里没有 stoken：点卡片上的「扫码」补上后即可自动续期")
                         result.refreshOk == false && result.refreshMsg.isNotBlank() ->
                             append("\n自动续期失败：${result.refreshMsg}")
                     }
@@ -237,6 +246,7 @@ fun CloudScreen(
                         onPaste = {
                             games.firstOrNull { it.key == account.game }?.let { pasteTarget = it }
                         },
+                        onStoken = { scanTarget = account },
                         onDelete = {
                             busyKey = account.game
                             scope.launch {
@@ -288,6 +298,110 @@ fun CloudScreen(
             }
         )
     }
+
+    scanTarget?.let { account ->
+        StokenScanDialog(
+            token = token,
+            onDismiss = { scanTarget = null },
+            onDone = { msg ->
+                scanTarget = null
+                dialog = "扫码成功" to msg
+                scope.launch { reload() }
+            }
+        )
+    }
+}
+
+/** 米游社扫码补 stoken：服务端返回二维码 0/1 矩阵，这里直接画格子，不引二维码库。 */
+@Composable
+private fun StokenScanDialog(
+    token: String,
+    onDismiss: () -> Unit,
+    onDone: (String) -> Unit
+) {
+    var created by remember { mutableStateOf<StokenCreateDto?>(null) }
+    var status by remember { mutableStateOf("正在向米游社申请二维码…") }
+    var terminal by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        try {
+            val c = CloudApi.stokenCreate(token)
+            if (!c.ok || c.rows.isEmpty()) {
+                status = c.msg.ifBlank { "生成二维码失败" }
+                terminal = true
+                return@LaunchedEffect
+            }
+            created = c
+            status = "请用米游社 App 扫描二维码"
+            while (true) {
+                delay(2000)
+                val r = CloudApi.stokenPoll(token, c.session)
+                if (r.msg.isNotBlank()) status = r.msg
+                when (r.state) {
+                    "confirmed" -> {
+                        onDone(r.msg.ifBlank { "扫码成功，stoken 已保存" })
+                        return@LaunchedEffect
+                    }
+                    "expired", "canceled", "error" -> {
+                        terminal = true
+                        return@LaunchedEffect
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            status = e.message ?: "网络请求失败"
+            terminal = true
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("扫码补 stoken（米游社）") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                val qr = created
+                if (qr == null) {
+                    CircularProgressIndicator(color = BrandPink, strokeWidth = 2.dp, modifier = Modifier.size(26.dp))
+                } else {
+                    Canvas(
+                        Modifier
+                            .size(240.dp)
+                            .background(Color.White)
+                    ) {
+                        val rows = qr.rows
+                        val cellX = size.width / (rows.firstOrNull()?.length ?: 1)
+                        val cellY = size.height / rows.size.coerceAtLeast(1)
+                        rows.forEachIndexed { y, row ->
+                            row.forEachIndexed { x, ch ->
+                                if (ch == '1') {
+                                    drawRect(
+                                        Color.Black,
+                                        topLeft = Offset(x * cellX, y * cellY),
+                                        size = Size(cellX + 0.5f, cellY + 0.5f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    status,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "扫码只用于获取长期 stoken，不会上传账号密码；combo_token 仍需按原方式抓取。",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(if (terminal) "关闭" else "取消") }
+        }
+    )
 }
 
 @Composable
@@ -326,6 +440,7 @@ private fun AccountCard(
     onCheck: () -> Unit,
     onRecapture: () -> Unit,
     onPaste: () -> Unit,
+    onStoken: () -> Unit,
     onDelete: () -> Unit
 ) {
     Surface(
@@ -374,6 +489,15 @@ private fun AccountCard(
                 )
             }
 
+            if (account.stokenHint.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    account.stokenHint,
+                    fontSize = 11.sp,
+                    color = Color(0xFFB45309)
+                )
+            }
+
             Spacer(Modifier.height(4.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -395,6 +519,13 @@ private fun AccountCard(
                     Icon(Icons.Filled.ContentPaste, null, Modifier.size(15.dp))
                     Spacer(Modifier.size(4.dp))
                     Text("粘贴", fontSize = 13.sp)
+                }
+                if (account.game in setOf("genshin", "starrail")) {
+                    TextButton(onClick = onStoken, enabled = !busy) {
+                        Icon(Icons.Filled.QrCodeScanner, null, Modifier.size(15.dp))
+                        Spacer(Modifier.size(4.dp))
+                        Text("扫码", fontSize = 13.sp)
+                    }
                 }
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = onDelete, enabled = !busy) {

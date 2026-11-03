@@ -1,7 +1,10 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
+using System.Threading;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Shapes;
 using SteamEyaWinUI.Models;
 using SteamEyaWinUI.Services;
 
@@ -241,8 +244,9 @@ public sealed partial class CloudGamePage : Page
             var refreshNote = data.RefreshOk switch
             {
                 true => "，已自动续期 Cookie",
+                false when data.NeedStoken => "，Cookie 里没有 stoken：请点「扫码补 stoken」",
                 false when !string.IsNullOrWhiteSpace(data.RefreshMsg)
-                    => $"，自动续期失败：{data.RefreshMsg}（建议重新抓取）",
+                    => $"，自动续期失败：{data.RefreshMsg}",
                 _ => string.Empty
             };
             var failedRefresh = data.RefreshOk == false;
@@ -284,6 +288,7 @@ public sealed partial class CloudGamePage : Page
         var refreshNote = result.RefreshOk switch
         {
             true => "，stoken 自动续期已开启",
+            false when result.NeedStoken => "（Cookie 里没有 stoken，请点「扫码补 stoken」）",
             false when !string.IsNullOrWhiteSpace(result.RefreshMsg) => $"（自动续期失败：{result.RefreshMsg}）",
             _ => string.Empty
         };
@@ -304,8 +309,160 @@ public sealed partial class CloudGamePage : Page
         {
             text += $"\n{result.RefreshMsg}";
         }
+        if (result.NeedStoken)
+        {
+            text += "\nCookie 里没有 stoken：请点「扫码补 stoken」用米游社 App 扫一次";
+        }
         ShowInfo(text, result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Error);
         await RefreshStatusAsync();
+    }
+
+    // ---------------- 米游社扫码补 stoken ----------------
+
+    private async void OnScanStoken(object sender, RoutedEventArgs e)
+    {
+        StokenButton.IsEnabled = false;
+        try
+        {
+            var created = await _cloud.StokenCreateAsync();
+            if (!created.Ok || created.Rows.Count == 0)
+            {
+                ShowInfo(created.Msg ?? "生成米游社二维码失败", InfoBarSeverity.Error);
+                return;
+            }
+
+            var status = new TextBlock
+            {
+                Text = "请用米游社 App 扫描二维码",
+                TextWrapping = TextWrapping.Wrap,
+                TextAlignment = TextAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            var canvas = BuildQrCanvas(created.Rows, Math.Max(1, created.Size));
+            var panel = new StackPanel { Spacing = 12 };
+            panel.Children.Add(new Border
+            {
+                Background = new SolidColorBrush(Microsoft.UI.Colors.White),
+                CornerRadius = new CornerRadius(12),
+                Padding = new Thickness(10),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Child = canvas
+            });
+            panel.Children.Add(status);
+            panel.Children.Add(new TextBlock
+            {
+                Text = "扫码只用来获取长期 stoken，不会上传账号密码；云游戏 combo_token 仍需按原方式抓取。",
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.Gray)
+            });
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "扫码补 stoken（米游社）",
+                Content = panel,
+                CloseButtonText = "关闭"
+            };
+
+            using var cts = new CancellationTokenSource();
+            _ = Task.Run(() => PollStokenAsync(created.Session, status, dialog, cts.Token));
+            try
+            {
+                await dialog.ShowAsync();
+            }
+            finally
+            {
+                cts.Cancel();
+            }
+            await RefreshStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("扫码补 stoken 失败。", ex);
+            ShowInfo($"扫码补 stoken 失败：{ex.Message}", InfoBarSeverity.Error);
+        }
+        finally
+        {
+            StokenButton.IsEnabled = true;
+        }
+    }
+
+    /// <summary>2 秒一次查询扫码状态；确认后服务端已入库并续期，直接关掉弹窗刷新列表。</summary>
+    private async Task PollStokenAsync(string session, TextBlock status, ContentDialog dialog, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(2000, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            StokenPollDto result;
+            try
+            {
+                result = await _cloud.StokenPollAsync(session, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                DispatcherQueue.TryEnqueue(() => status.Text = $"查询扫码状态失败：{ex.Message}");
+                continue;
+            }
+
+            DispatcherQueue.TryEnqueue(() => status.Text = result.Msg ?? "请用米游社 App 扫描二维码");
+            if (result.State == "confirmed")
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    status.Text = result.Msg ?? "扫码成功";
+                    dialog.Hide();
+                    ShowInfo(result.Msg ?? "扫码成功，stoken 已保存", InfoBarSeverity.Success);
+                });
+                return;
+            }
+            if (result.State is "expired" or "canceled" or "error")
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>把服务端给的 0/1 矩阵画成二维码（不引第三方 QR 库）。</summary>
+    private static Canvas BuildQrCanvas(IReadOnlyList<string> rows, int size)
+    {
+        const double side = 320;
+        var cell = side / size;
+        var canvas = new Canvas
+        {
+            Width = side,
+            Height = side,
+            Background = new SolidColorBrush(Microsoft.UI.Colors.White)
+        };
+        var fill = new SolidColorBrush(Microsoft.UI.Colors.Black);
+        for (var r = 0; r < rows.Count; r++)
+        {
+            var row = rows[r];
+            for (var c = 0; c < row.Length; c++)
+            {
+                if (row[c] != '1')
+                {
+                    continue;
+                }
+                var rect = new Rectangle { Width = cell, Height = cell, Fill = fill };
+                Canvas.SetLeft(rect, c * cell);
+                Canvas.SetTop(rect, r * cell);
+                canvas.Children.Add(rect);
+            }
+        }
+        return canvas;
     }
 
     private void ShowInfo(string message, InfoBarSeverity severity)

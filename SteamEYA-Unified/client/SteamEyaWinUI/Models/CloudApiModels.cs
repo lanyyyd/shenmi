@@ -97,6 +97,10 @@ internal sealed class CloudGameItem
     [JsonPropertyName("refresh_msg")]
     public string RefreshMsg { get; set; } = string.Empty;
 
+    /// <summary>该账号是否已补长期 stoken（能自动续期）。</summary>
+    [JsonPropertyName("has_stoken")]
+    public bool HasStoken { get; set; }
+
     /// <summary>
     /// 显示名优先级：服务端 → 客户端已知列表（/api/cloud/games 拉到的）→ 内置硬编码 → key。
     /// 之前只有内置 switch，自定义游戏（key 形如 custom_xxxxxxxx）会直接把 key 显示给用户。
@@ -137,6 +141,11 @@ internal sealed class CloudGameItem
                 : $"自动续期 {when}（{RefreshMsg}）";
         }
     }
+
+    /// <summary>米哈游账号缺 stoken 时提示去扫码（会话型游戏没有这个概念）。</summary>
+    public string StokenHint => !HasStoken && (Game is "genshin" or "starrail")
+        ? "stoken 未补：点左侧「扫码补 stoken」，之后 Cookie 会自动续期"
+        : string.Empty;
 }
 
 internal sealed class CloudMyDto
@@ -159,6 +168,10 @@ internal sealed class CloudDownloadDto
 
     [JsonPropertyName("refresh_msg")]
     public string? RefreshMsg { get; set; }
+
+    /// <summary>Cookie 缺少 stoken，需要先扫码补（米哈游账号）。</summary>
+    [JsonPropertyName("need_stoken")]
+    public bool NeedStoken { get; set; }
 
     public string? Msg { get; set; }
 }
@@ -184,6 +197,32 @@ internal sealed class CloudActionResultDto
 
     [JsonPropertyName("refresh_msg")]
     public string? RefreshMsg { get; set; }
+
+    /// <summary>Cookie 缺少 stoken，需要先扫码补（米哈游账号）。</summary>
+    [JsonPropertyName("need_stoken")]
+    public bool NeedStoken { get; set; }
+}
+
+/// <summary>POST /api/cloud/stoken/create：米游社扫码二维码（rows 是 0/1 矩阵）。</summary>
+internal sealed class StokenCreateDto
+{
+    public bool Ok { get; set; }
+    public string Session { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+    public int Size { get; set; }
+    public List<string> Rows { get; set; } = [];
+    public string? Msg { get; set; }
+}
+
+/// <summary>POST /api/cloud/stoken/poll：waiting / scanned / confirmed / expired / canceled / error。</summary>
+internal sealed class StokenPollDto
+{
+    public bool Ok { get; set; }
+    public string State { get; set; } = string.Empty;
+    public string? Msg { get; set; }
+    public string Mid { get; set; } = string.Empty;
+    public string Stuid { get; set; } = string.Empty;
+    public int Matched { get; set; }
 }
 
 /// <summary>
@@ -313,6 +352,8 @@ internal sealed class CloudCreateGameDto
 [JsonSerializable(typeof(CloudActionResultDto))]
 [JsonSerializable(typeof(CloudGamesDto))]
 [JsonSerializable(typeof(CloudCreateGameDto))]
+[JsonSerializable(typeof(StokenCreateDto))]
+[JsonSerializable(typeof(StokenPollDto))]
 [JsonSerializable(typeof(SyncMessage))]
 [JsonSerializable(typeof(SyncPendingDto))]
 [JsonSerializable(typeof(SyncPushRequest))]

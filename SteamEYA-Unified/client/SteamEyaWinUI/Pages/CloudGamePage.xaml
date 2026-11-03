@@ -51,11 +51,17 @@
                 <Button x:Name="CaptureButton" Content="抓取并上传" Click="OnCaptureUpload" />
             </StackPanel>
             <Button x:Name="CheckButton" Content="检测 Cookie 有效性" HorizontalAlignment="Stretch" Click="OnCheck" />
+            <Button
+                x:Name="StokenButton"
+                Content="扫码补 stoken（米游社）"
+                HorizontalAlignment="Stretch"
+                Click="OnScanStoken"
+                ToolTipService.ToolTip="用米游社 App 扫码，补上 Cookie 缺失的长期 stoken，之后自动续期" />
 
             <InfoBar x:Name="PageInfoBar" IsOpen="False" IsClosable="True" />
 
             <TextBlock
-                Text="提示：云端模式下会自动取用你账号已上传的 Cookie 一键上号；若提示失效，请先「更新 Cookie」。"
+                Text="提示：云端模式下会自动取用你账号已上传的 Cookie 一键上号；若提示失效，请先「更新 Cookie」。网页抓到的 Cookie 通常没有 stoken，点「扫码补 stoken」用米游社 App 扫一次，之后就能长期自动续期。"
                 TextWrapping="Wrap"
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
         </StackPanel>
@@ -91,6 +97,11 @@
                                     Text="{x:Bind RenewalText}"
                                     FontSize="12"
                                     Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                <TextBlock
+                                    Text="{x:Bind StokenHint}"
+                                    FontSize="12"
+                                    TextWrapping="Wrap"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                             </StackPanel>
                         </Border>
                     </DataTemplate>

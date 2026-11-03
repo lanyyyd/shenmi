@@ -72,6 +72,91 @@ def credentials_from(cookies: list) -> tuple[str, str, str]:
     return stoken, mid, uid
 
 
+def stoken_record(user_id: int, mid: str = "", uid: str = "") -> dict | None:
+    """按 mid / stuid 查用户扫码存下的 stoken；Cookie 里没有 stoken 时用它兜底。"""
+    mid = str(mid or "").strip()
+    uid = str(uid or "").strip()
+    if not mid and not uid:
+        return None
+    # 优先按 mid 精确匹配；Cookie 没有 mid 时才退回 stuid，避免把 A 账号的
+    # stoken 拼到 B 账号的 Cookie 上。
+    if mid:
+        row = query_one(
+            "SELECT mid, stuid, stoken, device_id FROM cloud_stokens "
+            "WHERE user_id=? AND mid=? ORDER BY updated_at DESC LIMIT 1",
+            (user_id, mid),
+        )
+    else:
+        row = query_one(
+            "SELECT mid, stuid, stoken, device_id FROM cloud_stokens "
+            "WHERE user_id=? AND stuid=? AND stuid<>'' ORDER BY updated_at DESC LIMIT 1",
+            (user_id, uid),
+        )
+    if not row:
+        return None
+    try:
+        stoken = security.decrypt_blob(row["stoken"])
+    except Exception:
+        return None
+    if not stoken:
+        return None
+    return {"stoken": str(stoken), "mid": row["mid"] or "", "stuid": row["stuid"] or "",
+            "device_id": row["device_id"] or ""}
+
+
+def save_stoken(user_id: int, stoken: str, mid: str, stuid: str = "", device_id: str = "") -> None:
+    """保存米游社扫码拿到的 stoken（加密入库，同一 mid 覆盖）。"""
+    mid = str(mid or "").strip()
+    if not mid or not stoken:
+        return
+    now = security.now_s()
+    execute(
+        "INSERT INTO cloud_stokens (user_id, mid, stuid, stoken, device_id, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?) "
+        "ON CONFLICT(user_id, mid) DO UPDATE SET stuid=excluded.stuid, stoken=excluded.stoken, "
+        "device_id=excluded.device_id, updated_at=excluded.updated_at",
+        (user_id, mid, str(stuid or ""), security.encrypt_blob(str(stoken)),
+         str(device_id or ""), now, now),
+    )
+
+
+def stoken_bound(user_id: int, cookies: list) -> bool:
+    """这套 Cookie 是否能用长期 stoken 续期（自身带 stoken，或扫码存过）。"""
+    stoken, mid, uid = credentials_from(cookies)
+    if stoken:
+        return True
+    return stoken_record(user_id, mid, uid) is not None
+
+
+def merge_stoken(cookies: list, user_id: int) -> tuple[list, str]:
+    """Cookie 里缺 stoken 时，把扫码存下的补进去。
+
+    返回 (新 Cookie 数组, 扫码时用的设备号)；设备号必须与拿 stoken 时一致，
+    否则换票容易触发风控。
+    """
+    stoken, mid, uid = credentials_from(cookies)
+    if stoken:
+        return cookies, ""
+    rec = stoken_record(user_id, mid, uid)
+    if not rec:
+        return cookies, ""
+
+    new_cookies = [dict(c) for c in cookies]
+    names = {c.get("name") for c in new_cookies}
+    stoken_mid = rec.get("mid") or ""
+    stoken_uid = rec.get("stuid") or ""
+    if "stoken" not in names:
+        new_cookies.append({"name": "stoken", "value": rec["stoken"],
+                            "domain": ".mihoyo.com", "path": "/"})
+    if "mid" not in names and not mid and stoken_mid:
+        new_cookies.append({"name": "mid", "value": stoken_mid,
+                            "domain": ".mihoyo.com", "path": "/"})
+    if "stuid" not in names and not uid and stoken_uid:
+        new_cookies.append({"name": "stuid", "value": stoken_uid,
+                            "domain": ".mihoyo.com", "path": "/"})
+    return new_cookies, rec.get("device_id") or ""
+
+
 def _headers(stoken: str, mid: str, device_id: str, client_type: str) -> dict:
     headers = {
         "user-agent": UA,
@@ -131,19 +216,22 @@ def _apply(cookies: list, ltoken: str, cookie_token: str) -> tuple[list, list]:
     return new_cookies, sorted(set(updated))
 
 
-def refresh_cookies(cookies: list, user_id: int, game_uid: str = "") -> dict:
+def refresh_cookies(cookies: list, user_id: int, game_uid: str = "", device_id: str = "") -> dict:
     """用 stoken 换一套新的 ltoken / cookie_token。
 
-    返回 {"ok": bool, "cookies": [...], "msg": str, "updated": [字段名]}。
+    返回 {"ok": bool, "cookies": [...], "msg": str, "updated": [字段名], "need_stoken": bool}。
     失败时仍返回原 Cookie，调用方可以继续用旧值（至少还能尝试登录）。
     """
     stoken, mid, _uid = credentials_from(cookies)
     if not stoken:
-        return {"ok": False, "msg": "Cookie 中没有 stoken，无法自动续期", "cookies": cookies, "updated": []}
+        return {"ok": False, "need_stoken": True, "cookies": cookies, "updated": [],
+                "msg": "Cookie 中没有 stoken，无法自动续期（请在客户端用米游社 App 扫码补 stoken）"}
     if stoken.startswith("v2_") and not mid:
-        return {"ok": False, "msg": "v2 stoken 需要 mid，请重新抓取", "cookies": cookies, "updated": []}
+        return {"ok": False, "need_stoken": True, "cookies": cookies, "updated": [],
+                "msg": "v2 stoken 需要 mid，请在客户端重新扫码补 stoken"}
 
-    device_id = device_id_for(user_id, game_uid)
+    # 扫码拿到的 stoken 必须沿用扫码时的设备号，否则换票会被风控。
+    device_id = device_id or device_id_for(user_id, game_uid)
     ltoken = _exchange(LTOKEN_URL, stoken, mid, device_id, "5")
     if not ltoken.get("ok"):
         return {"ok": False, "msg": f"ltoken 续期失败：{ltoken.get('msg')}",
@@ -199,8 +287,11 @@ def refresh_stored(user_id: int, game: str = "", uid: str = "", force: bool = Fa
         if not row:
             return {}
         cookies = security.decrypt_blob(row["data"])
-        result = refresh_cookies(cookies, user_id, row["game_uid"] or "")
+        # Cookie 里没有 stoken 时，把扫码存下的补进来再换票。
+        cookies, device_id = merge_stoken(cookies, user_id)
+        result = refresh_cookies(cookies, user_id, row["game_uid"] or "", device_id=device_id)
         msg = str(result.get("msg") or "")[:200]
+        need_stoken = bool(result.get("need_stoken"))
         if result.get("ok"):
             execute("UPDATE cloud_cookies SET data=?, refresh_at=?, refresh_ok=1, refresh_msg=? WHERE id=?",
                     (security.encrypt_blob(result["cookies"]), now, msg, row["id"]))
@@ -210,7 +301,41 @@ def refresh_stored(user_id: int, game: str = "", uid: str = "", force: bool = Fa
                     (now, msg, row["id"]))
             log.warning("云游戏 Cookie 自动续期失败：user=%s game=%s uid=%s msg=%s",
                         user_id, game, row["game_uid"], msg)
-    return {"ok": bool(result.get("ok")), "refreshed": True, "skipped": False, "msg": msg}
+    return {"ok": bool(result.get("ok")), "refreshed": True, "skipped": False, "msg": msg,
+            "need_stoken": need_stoken}
+
+
+def bind_and_refresh(user_id: int, stoken: str, mid: str, stuid: str = "", device_id: str = "") -> int:
+    """扫码成功后：保存 stoken，并把该用户已上传且能对上的米哈游 Cookie 立刻续一遍。
+
+    返回命中的 Cookie 条数；对不上（别的米游社账号）的记录不动。
+    """
+    save_stoken(user_id, stoken, mid, stuid, device_id)
+    mid = str(mid or "").strip()
+    stuid = str(stuid or "").strip()
+    if not mid and not stuid:
+        return 0
+
+    rows = query_all(
+        "SELECT game, game_uid, data FROM cloud_cookies WHERE user_id=? AND game IN (?,?)",
+        (user_id, *MIHOYO_GAMES),
+    )
+    matched = 0
+    for row in rows:
+        try:
+            cookies = security.decrypt_blob(row["data"])
+        except Exception:
+            continue
+        _stoken, cmid, cuid = credentials_from(cookies)
+        matched_account = (cmid == mid) if cmid else (bool(cuid) and cuid == stuid)
+        if not matched_account:
+            continue
+        try:
+            refresh_stored(user_id, row["game"], row["game_uid"] or "", force=True)
+            matched += 1
+        except Exception:
+            log.exception("扫码后立即续期失败：user=%s game=%s", user_id, row["game"])
+    return matched
 
 
 def refresh_due(limit: int = 30) -> None:

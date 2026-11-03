@@ -9,6 +9,8 @@ import com.teatt.pocket.core.CloudMyDto
 import com.teatt.pocket.core.CookieDto
 import com.teatt.pocket.core.LoginDto
 import com.teatt.pocket.core.MeDto
+import com.teatt.pocket.core.StokenCreateDto
+import com.teatt.pocket.core.StokenPollDto
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -89,6 +91,16 @@ object CloudApi {
             if (uid.isNotBlank()) put("uid", uid)
         }
         Api.delete("/api/cloud/my", query, token)
+    }
+
+    /** 米游社扫码补 stoken：生成二维码（服务端返回 0/1 矩阵）。 */
+    suspend fun stokenCreate(token: String): StokenCreateDto =
+        Api.decode(Api.postJson("/api/cloud/stoken/create", "{}", token))
+
+    /** 查询扫码状态；confirmed 时服务端已保存 stoken 并续期对得上的账号。 */
+    suspend fun stokenPoll(token: String, session: String): StokenPollDto {
+        val body = buildJsonObject { put("session", JsonPrimitive(session)) }.toString()
+        return Api.decode(Api.postJson("/api/cloud/stoken/poll", body, token))
     }
 
     suspend fun addGame(token: String, name: String, url: String) {

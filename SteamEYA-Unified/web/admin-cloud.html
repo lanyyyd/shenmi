@@ -127,7 +127,7 @@ html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c
       <div style="overflow-x:auto">
         <table class="tbl">
           <thead><tr>
-            <th>用户</th><th>游戏</th><th>账号昵称</th><th>UID</th><th>Cookie 状态</th><th>剩余免费时长</th><th>更新时间</th><th>检测时间</th><th>操作</th>
+            <th>用户</th><th>游戏</th><th>账号昵称</th><th>UID</th><th>Cookie 状态</th><th>stoken</th><th>剩余免费时长</th><th>更新时间</th><th>检测时间</th><th>操作</th>
           </tr></thead>
           <tbody id="tbody"></tbody>
         </table>
@@ -227,13 +227,14 @@ function renderTable(){
   const list = ACCOUNTS.filter(a => (!game || a.game===game)
     && (!kw || (a.username||'').toLowerCase().includes(kw) || (a.user_name||'').toLowerCase().includes(kw)
         || (a.nickname||'').toLowerCase().includes(kw) || (a.game_uid||'').toLowerCase().includes(kw)));
-  if(!list.length){ $('tbody').innerHTML = '<tr><td colspan="9" class="empty">暂无云端 Cookie 记录</td></tr>'; return; }
+  if(!list.length){ $('tbody').innerHTML = '<tr><td colspan="10" class="empty">暂无云端 Cookie 记录</td></tr>'; return; }
   $('tbody').innerHTML = list.map(a=>`<tr>
     <td data-l="用户">${esc(a.user_name||a.username||'—')} <span class="mono">@${esc(a.username||'')}</span></td>
     <td data-l="游戏"><span class="chip gray">${esc(a.game_name||GAME[a.game]||a.game)}</span></td>
     <td data-l="账号昵称"><span class="mono">${esc(a.nickname||'—')}</span></td>
     <td data-l="UID"><span class="mono">${esc(a.game_uid||'—')}</span></td>
     <td data-l="Cookie 状态">${validChip(a.valid)}</td>
+    <td data-l="stoken">${(a.game==='genshin'||a.game==='starrail')?(a.has_stoken?'<span class="chip">已补</span>':'<span class="chip gray">未补</span>'):'—'}</td>
     <td data-l="剩余免费时长">${a.free_duration==null?'—':esc(a.free_duration)+' 分钟'}</td>
     <td data-l="更新时间"><span class="mono">${secToTime(a.updated_at)}</span></td>
     <td data-l="检测时间"><span class="mono">${secToTime(a.checked_at)}</span></td>

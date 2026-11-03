@@ -130,6 +130,23 @@ internal sealed class CloudGameService
         return await SendAsync(req, CloudApiJsonContext.Default.CloudActionResultDto, ct) ?? new CloudActionResultDto();
     }
 
+    // ---------------- 米游社扫码补 stoken ----------------
+    /// <summary>生成米游社扫码二维码（服务端返回 0/1 矩阵，客户端自己画）。</summary>
+    public async Task<StokenCreateDto> StokenCreateAsync(CancellationToken ct = default)
+    {
+        using var req = Auth(HttpMethod.Post, "/api/cloud/stoken/create");
+        return await SendAsync(req, CloudApiJsonContext.Default.StokenCreateDto, ct) ?? new StokenCreateDto();
+    }
+
+    /// <summary>查询扫码状态；confirmed 时服务端已保存 stoken 并续期对得上的云账号。</summary>
+    public async Task<StokenPollDto> StokenPollAsync(string session, CancellationToken ct = default)
+    {
+        var json = new JsonObject { ["session"] = session }.ToJsonString();
+        using var req = Auth(HttpMethod.Post, "/api/cloud/stoken/poll");
+        req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+        return await SendAsync(req, CloudApiJsonContext.Default.StokenPollDto, ct) ?? new StokenPollDto();
+    }
+
     public async Task ReportLoginAsync(string game, CancellationToken ct = default)
     {
         var json = new JsonObject { ["game"] = game }.ToJsonString();

@@ -168,6 +168,21 @@ CREATE TABLE IF NOT EXISTS cloud_login_logs (
     client_ip TEXT
 );
 
+-- 米游社扫码补的 stoken：云游戏 Cookie 里没有 stoken 时，拿这里的长期凭据去换票。
+-- 同一个用户按 mid 只留一条；stuid（账号 aid）用于和 Cookie 里的 stuid 对上。
+CREATE TABLE IF NOT EXISTS cloud_stokens (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    mid        TEXT NOT NULL,
+    stuid      TEXT DEFAULT '',
+    stoken     BLOB NOT NULL,              -- 加密存储
+    device_id  TEXT DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(user_id, mid)
+);
+CREATE INDEX IF NOT EXISTS idx_cloud_stokens_stuid ON cloud_stokens(user_id, stuid);
+
 -- ============ 聊天室 ============
 CREATE TABLE IF NOT EXISTS messages (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,

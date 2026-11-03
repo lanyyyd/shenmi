@@ -249,6 +249,17 @@ jobs:
 
           Get-ChildItem artifacts
 
+      # 服务端源码单独打个 zip 方便部署：用 git archive 只打包已跟踪文件，
+      # 不会把本地 data/（数据库、主密钥）带出去。
+      - name: Package server source (zip)
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          git archive --format=zip --output=artifacts/steameya-server-src.zip HEAD:SteamEYA-Unified/server
+          if (-not (Test-Path artifacts/steameya-server-src.zip)) { throw "服务端源码 zip 未生成" }
+          Get-Item artifacts/steameya-server-src.zip | Select-Object Name, Length
+
       # 安装包传到 GitHub Release 而不是 Actions artifact：
       # Release 附件不占用 500MB 的 Actions 存储配额，避免再次触发
       # “Artifact storage quota has been hit”导致整个构建失败。
@@ -268,8 +279,10 @@ jobs:
             gh release create $tag --title "茶π·次元口袋 $tag" --notes "自动构建 ${{ github.sha }}"
             if ($LASTEXITCODE -ne 0) { throw "创建 Release 失败" }
           }
-          gh release upload $tag $exes.FullName --clobber
-          if ($LASTEXITCODE -ne 0) { throw "上传安装包到 Release 失败" }
+          $serverZip = "artifacts\steameya-server-src.zip"
+          if (-not (Test-Path $serverZip)) { throw "服务端源码 zip 缺失" }
+          gh release upload $tag $exes.FullName $serverZip --clobber
+          if ($LASTEXITCODE -ne 0) { throw "上传安装包/服务端源码到 Release 失败" }
           Write-Host "Release: https://github.com/${{ github.repository }}/releases/tag/$tag"
 
       # 便携包 ~83MB，与 setup.exe 内容重复，只在手动触发时打包上传，

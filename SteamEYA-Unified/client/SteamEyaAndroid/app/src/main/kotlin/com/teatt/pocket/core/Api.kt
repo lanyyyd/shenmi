@@ -194,9 +194,16 @@ data class CloudAccountDto(
     @SerialName("refresh_at") val refreshAt: Long = 0,
     /** 1 成功、0 失败、null 未续期。 */
     @SerialName("refresh_ok") val refreshOk: Int? = null,
-    @SerialName("refresh_msg") val refreshMsg: String = ""
+    @SerialName("refresh_msg") val refreshMsg: String = "",
+    /** 是否已补长期 stoken（能自动续期）；米哈游游戏才有意义。 */
+    @SerialName("has_stoken") val hasStoken: Boolean = false
 ) {
     val displayName: String get() = gameName.ifBlank { game }
+
+    /** 米哈游账号缺 stoken 时提示去扫码，会话型游戏不提示。 */
+    val stokenHint: String get() = if (!hasStoken && game in setOf("genshin", "starrail")) {
+        "stoken 未补，点「扫码」后 Cookie 可自动续期"
+    } else ""
     val statusText: String get() = when (valid) {
         1 -> "有效"
         0 -> "已失效"
@@ -239,7 +246,31 @@ data class CloudCheckDto(
     @SerialName("free_duration") val freeDuration: Int? = null,
     /** 米哈游游戏上传后服务端立刻换票的结果；null 表示该游戏不支持自动续期。 */
     @SerialName("refresh_ok") val refreshOk: Boolean? = null,
-    @SerialName("refresh_msg") val refreshMsg: String = ""
+    @SerialName("refresh_msg") val refreshMsg: String = "",
+    /** Cookie 缺少 stoken，需要先扫码补。 */
+    @SerialName("need_stoken") val needStoken: Boolean = false
+)
+
+@Serializable
+data class StokenCreateDto(
+    val ok: Boolean = false,
+    val session: String = "",
+    val url: String = "",
+    val size: Int = 0,
+    /** 二维码 0/1 矩阵，每行一个字符串。 */
+    val rows: List<String> = emptyList(),
+    val msg: String = ""
+)
+
+@Serializable
+data class StokenPollDto(
+    val ok: Boolean = false,
+    /** waiting / scanned / confirmed / expired / canceled / error */
+    val state: String = "",
+    val msg: String = "",
+    val mid: String = "",
+    val stuid: String = "",
+    val matched: Int = 0
 )
 
 /** 上传用的 Cookie 项；服务端只用 name/value，domain 放宽即可。 */
