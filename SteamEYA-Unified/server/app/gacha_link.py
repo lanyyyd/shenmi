@@ -3,7 +3,7 @@
 流程：
 1. 用扫码存下的 stoken 调 getUserGameRolesByStoken 拿到绑定的游戏角色（uid/region）。
 2. 调 genAuthKey（auth_appid=webview_gacha）换一个临时 authkey。
-3. 拼成 webstatic 查看页 / getGachaLog 接口链接。
+3. 拼成可直接请求的 getGachaLog 链接（参数与 HoYoGet 输出一致）。
 
 authkey 约 24 小时过期，过期后重新调用即可；stoken 不失效就一直能生成。
 只覆盖国服原神、星穹铁道；B 服角色走同一接口，region 是 cn_qd01。
@@ -38,20 +38,12 @@ GAMES = {
         "name": "原神",
         "biz": "hk4e_cn",
         "host": "public-operation-hk4e.mihoyo.com",
-        "web": "https://webstatic.mihoyo.com/hk4e/event/e20190909gacha-v3/index.html",
-        "gacha_id": "50eef7be3b7945930041f9f20310e0bbcb8a7a",
-        "version": "CNRELAndroid5.0.0",
-        "plat_type": "android",
         "gacha_type": "301",
     },
     "starrail": {
         "name": "星穹铁道",
         "biz": "hkrpg_cn",
         "host": "public-operation-hkrpg.mihoyo.com",
-        "web": "https://webstatic.mihoyo.com/hkrpg/event/e20211215gacha-v2/index.html",
-        "gacha_id": "",
-        "version": "2.5.0",
-        "plat_type": "prod_gf_cn",
         "gacha_type": "11",
     },
 }
@@ -146,22 +138,19 @@ def gen_authkey(stoken: str, mid: str, device_id: str, game_biz: str,
 
 
 def build_link(game: str, authkey: str, region: str) -> dict:
-    """拼出查看页链接和可直接请求的 getGachaLog 链接。"""
+    """拼出 HoYoGet 同款的 getGachaLog 链接（分析工具直接认这个）。"""
     cfg = GAMES[game]
+    region = region or ("cn_gf01" if game == "genshin" else "prod_gf_cn")
     params = [
+        ("win_mode", "fullscreen"), ("no_joypad_close", "1"),
         ("authkey_ver", "1"), ("sign_type", "2"), ("auth_appid", "webview_gacha"),
-        ("init_type", "301"), ("gacha_id", cfg["gacha_id"]), ("timestamp", str(int(time.time()))),
-        ("lang", "zh-cn"), ("device_type", "mobile"), ("game_version", cfg["version"]),
-        ("plat_type", cfg["plat_type"]), ("region", region), ("authkey", authkey),
-        ("game_biz", cfg["biz"]),
+        ("init_type", "301"), ("lang", "zh-cn"), ("device_type", "mobile"),
+        ("plat_type", "android"), ("region", region), ("authkey", authkey),
+        ("game_biz", cfg["biz"]), ("gacha_type", cfg["gacha_type"]),
+        ("page", "1"), ("size", "5"), ("end_id", "0"),
     ]
-    query = urllib.parse.urlencode(params)
-    return {
-        "url": f"{cfg['web']}?{query}#/log",
-        "api_url": (f"https://{cfg['host']}/gacha_info/api/getGachaLog?{query}"
-                    f"&gacha_type={cfg['gacha_type']}&size=20&page=1&end_id=0"),
-        "expires_in": 24 * 3600,
-    }
+    url = f"https://{cfg['host']}/gacha_info/api/getGachaLog?{urllib.parse.urlencode(params)}"
+    return {"url": url, "api_url": url, "expires_in": 24 * 3600}
 
 
 def accounts(user_id: int) -> list[dict]:
