@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -54,6 +56,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -381,7 +384,10 @@ private fun GachaLinkDialog(
         onDismissRequest = onDismiss,
         title = { Text("获取抽卡链接") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
                 Text(
                     "选择游戏账号",
                     fontSize = 12.sp,
@@ -391,12 +397,20 @@ private fun GachaLinkDialog(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable { selected = index },
+                            .clickable {
+                                selected = index
+                                link = ""
+                                status = "链接约 24 小时有效，只用来读取抽卡记录，不要发给陌生人。"
+                            },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
                             selected = selected == index,
-                            onClick = { selected = index }
+                            onClick = {
+                                selected = index
+                                link = ""
+                                status = "链接约 24 小时有效，只用来读取抽卡记录，不要发给陌生人。"
+                            }
                         )
                         Column(Modifier.weight(1f)) {
                             Text(
@@ -415,15 +429,16 @@ private fun GachaLinkDialog(
                 if (link.isNotBlank()) {
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "抽卡链接",
+                        "抽卡链接（已自动复制）",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Text(link, fontSize = 11.sp)
-                    TextButton(onClick = {
-                        clipboard.setText(AnnotatedString(link))
-                        status = "已复制到剪贴板。"
-                    }) { Text("复制链接") }
+                    Text(
+                        if (link.length > 64) link.take(64) + "…" else link,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
                 Text(
                     status,
@@ -436,6 +451,12 @@ private fun GachaLinkDialog(
             TextButton(
                 enabled = !busy && role != null,
                 onClick = {
+                    // 已经生成过就只做复制，避免重复请求换票
+                    if (link.isNotBlank()) {
+                        clipboard.setText(AnnotatedString(link))
+                        status = "已复制到剪贴板。"
+                        return@TextButton
+                    }
                     val item = role ?: return@TextButton
                     busy = true
                     status = "正在生成…"
@@ -443,11 +464,12 @@ private fun GachaLinkDialog(
                         try {
                             val res: GachaLinkDto =
                                 CloudApi.gachaLink(token, item.game, item.gameUid, item.region, item.mid)
-                            link = res.url
-                            status = if (res.url.isBlank()) {
-                                res.detail.ifBlank { "生成失败，请稍后重试" }
+                            if (res.url.isBlank()) {
+                                status = res.detail.ifBlank { "生成失败，请稍后重试" }
                             } else {
-                                "生成成功，链接约 24 小时有效。"
+                                link = res.url
+                                clipboard.setText(AnnotatedString(res.url))
+                                status = "生成成功，已复制到剪贴板（链接约 24 小时有效）。"
                             }
                         } catch (e: Exception) {
                             status = "生成失败：${e.message ?: "请稍后重试"}"
@@ -457,7 +479,13 @@ private fun GachaLinkDialog(
                     }
                 }
             ) {
-                Text(if (busy) "生成中…" else "生成链接")
+                Text(
+                    when {
+                        busy -> "生成中…"
+                        link.isNotBlank() -> "复制链接"
+                        else -> "生成链接"
+                    }
+                )
             }
         },
         dismissButton = {
