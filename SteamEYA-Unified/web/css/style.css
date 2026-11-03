@@ -374,6 +374,11 @@ html[data-theme="light"] .sr-item{background:#F7F9FA}
 .search-empty{padding:26px 0;text-align:center;color:var(--hint);font-size:13px}
 
 /* ================= 表情包 ================= */
+/* 面板改成浮层：不再用全屏遮罩，方便发完一个继续点下一个 */
+.sticker-pop{position:fixed;z-index:190;display:none}
+.sticker-pop.on{display:block}
+.sticker-pop .search-card{max-height:min(60vh,520px);animation:none}
+.sticker-pop .sticker-grid{max-height:calc(min(60vh,520px) - 132px)}
 .sticker-body{padding:14px 16px 18px;display:flex;flex-direction:column;gap:12px;min-height:0}
 .sticker-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .sticker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:10px;
@@ -388,6 +393,10 @@ html[data-theme="light"] .stk-item{background:#F7F9FA}
 .stk-del{position:absolute;right:4px;top:4px;width:19px;height:19px;padding:0;border-radius:50%;
   background:rgba(239,68,68,.92);color:#fff;font-size:14px;line-height:17px;text-align:center;opacity:0;transition:.15s}
 .stk-item:hover .stk-del{opacity:1}
+/* 上传进度：百分比 + 取消 */
+#upTip b{font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
+.up-cancel{background:none;border:0;padding:0 2px;color:var(--primary);font-size:11.5px;cursor:pointer}
+.up-cancel:hover{text-decoration:underline}
 .sticker-bubble{display:inline-block}
 .sticker-bubble img{max-width:130px;max-height:130px;display:block;border-radius:8px}
 

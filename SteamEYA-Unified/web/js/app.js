@@ -394,12 +394,36 @@ $('senderPicker').addEventListener('click', e => {
 });
 
 /* ---------------- 表情包共享库 ---------------- */
+/* 面板是浮层而不是遮罩：选一个发出去后不关，方便连续发多个。
+   再点一次表情按钮、或点面板外任意位置才收起。 */
 let stickerSort = 'hot';
 function openStickers() {
-  $('stickerModal').classList.add('on');
+  const m = $('stickerModal');
+  if (m.classList.contains('on')) { closeStickers(); return; }
+  m.classList.add('on');
+  placeStickers();
   if (!$('stickerGrid').dataset.loaded) loadStickers();
 }
 function closeStickers() { $('stickerModal').classList.remove('on'); }
+/* 让面板贴在输入区上方，左右不超出视口 */
+function placeStickers() {
+  const m = $('stickerModal'), btn = $('stkBtn'), comp = document.querySelector('.composer');
+  if (!m || !btn || !comp) return;
+  const br = btn.getBoundingClientRect(), cr = comp.getBoundingClientRect();
+  const w = Math.min(480, window.innerWidth - 24);
+  m.style.width = w + 'px';
+  m.style.left = Math.max(12, Math.min(br.left, window.innerWidth - 12 - w)) + 'px';
+  m.style.bottom = Math.round(window.innerHeight - cr.top + 6) + 'px';
+}
+document.addEventListener('click', (e) => {
+  const m = $('stickerModal');
+  if (!m.classList.contains('on')) return;
+  if (e.target.closest('#stickerModal') || e.target.closest('#stkBtn')) return;
+  closeStickers();
+});
+window.addEventListener('resize', () => {
+  if ($('stickerModal').classList.contains('on')) placeStickers();
+});
 function setStickerSort(s) {
   stickerSort = s;
   $('stkHot').classList.toggle('on', s === 'hot');
@@ -441,7 +465,7 @@ function sendSticker(s) {
   const payload = { type: 'chat', msgType: 'sticker', stickerId: s.id };
   if (currentRoom !== 'group' && currentPeer) payload.to = currentPeer.id;
   WS.send(JSON.stringify(payload));
-  closeStickers();
+  // 面板保持打开：用户可以连着发多个表情
 }
 async function uploadSticker(file) {
   if (file.size > 2 * 1024 * 1024) return toast('❌ 表情包需 2MB 以内');
@@ -1464,20 +1488,36 @@ function send() {
   mentionPick.clear();
   hideMentionPop();
 }
-async function uploadAndSend(file) {
+/* 上传进度 + 取消：同一时间只跑一个，40MB 视频能看见百分比，也能中途放弃 */
+let upXHR = null;
+function uploadAndSend(file) {
   if (!file) return;
   if (file.size > 50 * 1024 * 1024) return toast('文件超过 50MB 限制');
-  const tip = $('upTip'); tip.textContent = '上传中…';
-  try {
-    const fd = new FormData(); fd.append('file', file);
-    const r = await fetch('/api/upload', { method: 'POST', body: fd });
-    const d = await r.json();
-    if (!d.ok) { tip.textContent = ''; return toast(d.error || '上传失败'); }
-    tip.textContent = '';
+  if (upXHR) return toast('上一个文件还在上传，请稍候');
+  const tip = $('upTip');
+  tip.innerHTML = '上传中 <b>0%</b> · <button type="button" class="up-cancel">取消</button>';
+  const pctEl = tip.querySelector('b');
+  const xhr = new XMLHttpRequest();
+  upXHR = xhr;
+  const finish = () => { if (upXHR === xhr) upXHR = null; tip.textContent = ''; };
+  tip.querySelector('.up-cancel').onclick = () => { if (upXHR === xhr) xhr.abort(); };
+  xhr.upload.onprogress = e => {
+    if (pctEl && e.lengthComputable) pctEl.textContent = Math.round(e.loaded / e.total * 100) + '%';
+  };
+  xhr.onload = () => {
+    let d = {};
+    try { d = JSON.parse(xhr.responseText || '{}'); } catch (_) {}
+    if (!d.ok) { finish(); return toast(d.error || '上传失败'); }
+    finish();
     const payload = { type: 'chat', msgType: d.isVideo ? 'video' : (d.isImage ? 'image' : 'file'), content: '', file: { url: d.url, name: d.name, size: d.size } };
     if (currentRoom !== 'group' && currentPeer) payload.to = currentPeer.id;
     WS.send(JSON.stringify(payload));
-  } catch (e) { tip.textContent = ''; toast('上传失败'); }
+  };
+  xhr.onerror = () => { finish(); toast('上传失败'); };
+  xhr.onabort = () => { finish(); toast('已取消上传'); };
+  const fd = new FormData(); fd.append('file', file);
+  xhr.open('POST', '/api/upload');
+  xhr.send(fd);
 }
 
 $('fileInput').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) uploadAndSend(f); });

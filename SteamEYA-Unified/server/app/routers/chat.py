@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import pathlib
 import quopri
 import re
+import tempfile
 import uuid
 from typing import Optional
 
@@ -480,32 +482,59 @@ async def upload_file(request: Request, file: UploadFile = File(...),
     u = _me(None, request, authorization)
     if not u:
         return _err("请先登录", 401)
-    data = await file.read()
-    if len(data) > MAX_UPLOAD:
-        return _err("文件超过 50MB 限制", 413)
     raw_name = _decode_upload_name(file.filename or "")
     ext = pathlib.Path(raw_name).suffix.lower()
     mt = (file.content_type or "").lower()
     is_img = mt.startswith("image/") or ext in _IMG_EXT
     is_vid = (not is_img) and (mt.startswith("video/") or ext in _VID_EXT)
-    if not is_img and not is_vid:
-        # 文件名没有可用扩展名（被 MIME 编码截断、或本就无扩展名）时按文件头兜底，
-        # 否则图片/视频会被误判成普通文件，既不能预览、下载名也不对。
-        kind, sniff_ext = _sniff_media(data)
-        if kind == "image":
-            is_img, ext = True, (ext or sniff_ext)
-        elif kind == "video":
-            is_vid, ext = True, (ext or sniff_ext)
-    sub = "images" if is_img else ("videos" if is_vid else "files")
-    name = f"{_now()}-{security.gen_token(6)}{ext[:12]}"
-    (UPLOAD_DIR / sub / name).write_bytes(data)
+
+    # 流式落盘：边读边写边算 sha256，不再把整个文件读进内存。
+    # 原来是 await file.read() + write_bytes，50MB 的视频峰值要占 100MB。
+    fd, tmp_path = tempfile.mkstemp(dir=str(UPLOAD_DIR), prefix=".upload-")
+    sha = hashlib.sha256()
+    head = b""
+    size = 0
+    try:
+        with os.fdopen(fd, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_UPLOAD:
+                    return _err("文件超过 50MB 限制", 413)
+                if len(head) < 32:
+                    head += chunk[:32 - len(head)]
+                sha.update(chunk)
+                out.write(chunk)
+
+        if not is_img and not is_vid:
+            # 文件名没有可用扩展名（被 MIME 编码截断、或本就无扩展名）时按文件头兜底，
+            # 否则图片/视频会被误判成普通文件，既不能预览、下载名也不对。
+            kind, sniff_ext = _sniff_media(head)
+            if kind == "image":
+                is_img, ext = True, (ext or sniff_ext)
+            elif kind == "video":
+                is_vid, ext = True, (ext or sniff_ext)
+        sub = "images" if is_img else ("videos" if is_vid else "files")
+        # 内容寻址 + 去重：同一份内容（比如反复转发的 40MB 视频）只存一份，
+        # 文件名带 30 天 immutable 缓存，重复上传直接复用。
+        name = f"{sha.hexdigest()[:32]}{ext[:12]}"
+        dst = UPLOAD_DIR / sub / name
+        dedup = dst.exists()
+        if not dedup:
+            os.replace(tmp_path, dst)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
     # 发送文件经验（图片/视频/文件都算；每天有上限）
     try:
         LV.grant(u["id"], "upload", ref=(raw_name or name)[:80], remark="发送文件")
     except Exception:
         pass
     return {"ok": True, "url": f"/uploads/{sub}/{name}", "name": raw_name or name,
-            "size": len(data), "isImage": is_img, "isVideo": is_vid}
+            "size": size, "isImage": is_img, "isVideo": is_vid, "dedup": dedup}
 
 
 # ---------------- 表情包 ----------------
