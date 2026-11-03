@@ -49,7 +49,7 @@ function cycleTheme() {
 
 /* ---------------- 状态 ---------------- */
 const COLORS = ['#10B981','#3B82F6','#F59E0B','#EF4444','#8B5CF6','#EC4899','#06B6D4','#84CC16','#F97316','#14B8A6'];
-const PAGE_SIZE = 100;       // 每页消息数（首屏 100 条，上滑到顶再加载更早的 100 条）
+const PAGE_SIZE = 30;        // 每页消息数（首屏 30 条，上滑到顶再加载更早的 30 条）
 let ME = null;
 let WS = null;
 let onlineUsers = [];
@@ -1197,26 +1197,32 @@ function appendJumpLatest() {
   box.appendChild(bar);
 }
 
-/* 上滑加载更早的消息（保持滚动位置） */
+/* 上滑加载更早的消息（顶部骨架 + 锚点保持视口位置） */
 async function loadMore() {
   if (!hasMore || loadingMore || !oldestId) return;
   loadingMore = true;
   const box = $('msgs');
-  const prevH = box.scrollHeight, prevTop = box.scrollTop;
   const tip = document.createElement('div');
-  tip.className = 'day-divider load-more-tip'; tip.innerHTML = '<span>正在加载更早的消息…</span>';
+  tip.className = 'load-more-tip';
+  tip.innerHTML = '<i></i><i></i><i></i><span>正在加载更早的消息…</span>';
   box.insertBefore(tip, box.firstChild);
   try {
     const r = await fetch(`/api/history?room=${encodeURIComponent(currentRoom)}&before=${oldestId}&limit=${PAGE_SIZE}`);
     const d = await r.json();
+    // 锚点在插入前一刻取：请求期间用户还在滚的话，按他现在的视口算，别拉回旧位置
+    const anchor = pickAnchor(box);
     tip.remove();
     if (d.ok && d.messages.length) {
       const frag = document.createDocumentFragment();
-      d.messages.forEach(m => frag.appendChild(buildMsgEl(m)));
+      d.messages.forEach(m => {
+        const el = buildMsgEl(m);
+        el.classList.add('msg-in');
+        frag.appendChild(el);
+      });
       box.insertBefore(frag, box.firstChild);
       oldestId = d.messages[0].id;
       hasMore = !!d.hasMore;
-      box.scrollTop = box.scrollHeight - prevH + prevTop;   // 保持视觉位置
+      if (anchor) holdAnchor(box, anchor, frag);
     } else { hasMore = false; }
   } catch (e) { tip.remove(); }
   loadingMore = false;
@@ -1241,7 +1247,14 @@ function buildMsgEl(m) {
   const mtype = m.msgType || m.type || 'text';
   let inner = '';
   if (isPlayableVideo(m)) {
-    inner = `<div class="bubble" style="padding:6px"><video class="bubble-video" src="${esc(m.filePath)}" controls preload="metadata" playsinline onloadedmetadata="onImgLoad()"></video></div>`;
+    // 只渲染封面卡：点击前不发任何视频请求，40MB 的视频不会拖慢首屏（见 loadVideo）
+    const vname = esc(m.fileName || '视频'), vsize = fmtSize(m.fileSize);
+    inner = `<div class="bubble video-card" data-src="${esc(m.filePath)}" role="button" tabindex="0"
+      title="点击加载视频" onclick="loadVideo(this)"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();loadVideo(this)}">
+      <span class="video-play">▶</span>
+      <span class="video-meta">${vname}${vsize ? ' · ' + vsize : ''}</span>
+    </div>`;
   } else if (mtype === 'image' && m.filePath) {
     inner = `<div class="bubble" style="padding:6px"><img src="${esc(m.filePath)}" alt="" loading="lazy" onload="onImgLoad()" onclick="showImg('${esc(m.filePath)}')"></div>`;
   } else if (mtype === 'sticker' && m.filePath) {
@@ -1281,6 +1294,62 @@ function scrollBottom() { const b = $('msgs'); b.scrollTop = b.scrollHeight; aut
 function showImg(src) { $('lightboxImg').src = src; $('lightbox').classList.add('on'); }
 /* 图片加载完高度变化：如果用户本来就贴在底部，跟着保持在底部 */
 function onImgLoad() { if (autoStick) { const b = $('msgs'); b.scrollTop = b.scrollHeight; } }
+
+/* ---------------- 视频按需加载 ----------------
+   进页面只渲染封面卡，点击后才把 src 挂到 <video> 上。
+   40MB 的视频不会再在打开聊天室时被浏览器预取，首屏带宽留给头像和最近几条消息。 */
+function loadVideo(card) {
+  if (!card || card.dataset.loading === '1') return;
+  card.dataset.loading = '1';
+  const wrap = document.createElement('div');
+  wrap.className = 'bubble';
+  wrap.style.padding = '6px';
+  const v = document.createElement('video');
+  v.className = 'bubble-video';
+  v.controls = true;
+  v.playsInline = true;
+  v.preload = 'auto';
+  v.src = card.dataset.src || '';
+  v.onloadedmetadata = onImgLoad;
+  wrap.appendChild(v);
+  card.replaceWith(wrap);
+  v.play().catch(() => {});
+}
+
+/* ---------------- 上滑加载的锚点校正 ----------------
+   只按 scrollHeight 差值补位置不够：插入的历史消息里图片/视频没有预留高度，
+   等它们晚一步加载完，上方内容变高，正在看的那条就被推走了。
+   这里记住「视口第一条消息」相对列表顶部的位置，插入后按它的实际屏幕位置还原；
+   新插入的媒体每加载完一次再校一次，用户自己滚动就立即放手。 */
+let anchorJob = null;
+let programmaticScrollAt = 0;
+
+function pickAnchor(box) {
+  const boxTop = box.getBoundingClientRect().top;
+  const el = Array.from(box.querySelectorAll('.msg'))
+    .find(n => n.getBoundingClientRect().bottom > boxTop + 1);
+  return el ? { el, top: el.getBoundingClientRect().top - boxTop } : null;
+}
+
+function holdAnchor(box, anchor, frag) {
+  if (anchorJob) { anchorJob.alive = false; clearTimeout(anchorJob.timer); }
+  const job = { box, el: anchor.el, top: anchor.top, alive: true, timer: 0 };
+  anchorJob = job;
+  const apply = () => {
+    if (!job.alive || !job.el.isConnected) return;
+    const delta = (job.el.getBoundingClientRect().top - box.getBoundingClientRect().top) - job.top;
+    if (!delta) return;
+    programmaticScrollAt = performance.now();
+    box.scrollTop += delta;
+  };
+  apply();
+  frag.querySelectorAll('img, video').forEach(x => {
+    x.addEventListener('load', apply, { once: true });
+    x.addEventListener('loadedmetadata', apply, { once: true });
+  });
+  /* 媒体一般在几百毫秒内就绪；窗口过后不再干预，避免影响后续正常浏览 */
+  job.timer = setTimeout(() => { job.alive = false; }, 1500);
+}
 
 /* 实时消息预览文案：历史消息用 type，WS 推送用 msgType（原来只看 type 导致一律显示「[文件]」）
    max：文本截断长度，默认 18（toast 用），系统通知传 60 */
@@ -1616,6 +1685,8 @@ document.addEventListener('paste', e => {
 $('msgs').addEventListener('scroll', () => {
   const box = $('msgs');
   autoStick = (box.scrollHeight - box.scrollTop - box.clientHeight) < 120;
+  // 用户自己滚动（排除上面补位置引起的那次）→ 结束锚点校正，不跟用户抢滚动条
+  if (anchorJob && performance.now() - programmaticScrollAt > 120) anchorJob.alive = false;
   if (box.scrollTop < 80 && hasMore && !loadingMore) loadMore();
 });
 

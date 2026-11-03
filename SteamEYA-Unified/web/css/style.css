@@ -164,7 +164,7 @@ html[data-theme="light"] .chat{background:#fff}
 html[data-theme="light"] .icon-btn:hover{background:#F3F4F6}
 .icon-btn svg{width:19px;height:19px;fill:var(--muted)}
 
-.msgs{flex:1;overflow-y:auto;padding:22px 20px 10px;display:flex;flex-direction:column;gap:16px;background:var(--panel-soft)}
+.msgs{flex:1;overflow-y:auto;overflow-anchor:none;padding:22px 20px 10px;display:flex;flex-direction:column;gap:16px;background:var(--panel-soft)}
 html[data-theme="light"] .msgs{background:#F7F9FA}
 .msgs::-webkit-scrollbar,.sb-list::-webkit-scrollbar{width:6px}
 .msgs::-webkit-scrollbar-thumb,.sb-list::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
@@ -198,10 +198,21 @@ html[data-theme="light"] .msg.other .bubble{border-color:transparent}
 .msg-read{color:var(--primary);font-weight:600;margin-left:7px}
 .msg-read:empty{display:none}
 .bubble img{max-width:240px;border-radius:10px;display:block;cursor:pointer}
-/* 视频消息：内嵌播放器，自带进度条 / 音量 / 全屏；竖屏超高时限高并保持比例不拉伸 */
-.bubble-video{display:block;width:320px;max-width:100%;max-height:400px;object-fit:contain;
+/* 视频消息：默认只显示封面卡，点击后才挂 src（40MB 视频不会在打开聊天室时被预取） */
+.bubble.video-card{position:relative;display:flex;align-items:center;justify-content:center;
+  width:320px;height:180px;max-width:100%;padding:0;border:0;overflow:hidden;cursor:pointer;
+  border-radius:10px;background:linear-gradient(135deg,#111827,#1F2937);box-shadow:var(--shadow)}
+.video-card .video-play{width:54px;height:54px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:19px;color:#fff;background:rgba(255,255,255,.16);
+  border:1px solid rgba(255,255,255,.35);backdrop-filter:blur(4px);transition:transform .18s,background .18s}
+.video-card:hover .video-play,.video-card:focus-visible .video-play{transform:scale(1.08);background:rgba(255,255,255,.28)}
+.video-card .video-meta{position:absolute;left:0;right:0;bottom:0;padding:22px 10px 8px;font-size:12px;
+  color:#E5E7EB;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  background:linear-gradient(transparent,rgba(0,0,0,.72))}
+/* 播放器与封面卡尺寸一致，点开播放时不跳高度 */
+.bubble-video{display:block;width:320px;height:180px;max-width:100%;object-fit:contain;
   border-radius:10px;background:#000;outline:none}
-@media(max-width:768px){ .bubble-video{width:220px;max-height:330px} }
+@media(max-width:768px){ .bubble-video{width:220px;height:124px} .bubble.video-card{width:220px;height:124px} }
 .file-bubble{display:flex;align-items:center;gap:11px;padding:12px 14px;min-width:212px;
   text-decoration:none;color:inherit}
 .file-ico{width:38px;height:38px;border-radius:10px;background:var(--file-ico-bg);display:flex;align-items:center;
@@ -239,7 +250,18 @@ html[data-theme="dark"] .send-btn{box-shadow:0 8px 24px rgba(139,92,246,.45)}
   font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;
   box-shadow:0 2px 8px rgba(239,68,68,.45);animation:dotPop .25s ease}
 @keyframes dotPop{from{transform:scale(.5);opacity:0}to{transform:scale(1);opacity:1}}
-.load-more-tip{margin:2px 0 6px}
+.load-more-tip{display:flex;align-items:center;justify-content:center;gap:5px;height:26px;
+  margin:2px 0 6px;font-size:11.5px;color:var(--hint)}
+.load-more-tip i{width:5px;height:5px;border-radius:50%;background:var(--hint);opacity:.3;
+  animation:tipDot 1s ease-in-out infinite}
+.load-more-tip i:nth-child(2){animation-delay:.15s}
+.load-more-tip i:nth-child(3){animation-delay:.3s}
+.load-more-tip span{margin-left:3px}
+@keyframes tipDot{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}
+/* 上滑补进来的旧消息：轻微淡入，避免整块“啪”一下出现 */
+.msg-in{animation:msgIn .18s ease-out both}
+@keyframes msgIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){ .load-more-tip i,.msg-in{animation:none} }
 /* 搜索定位到历史消息后：底部「回到最新」提示 */
 .jump-latest{cursor:pointer;padding:8px 0 2px}
 .jump-latest span{transition:.18s}

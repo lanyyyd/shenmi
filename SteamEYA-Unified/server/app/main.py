@@ -46,10 +46,15 @@ async def _cache_uploads(request, call_next):
     StaticFiles 直出不带 Cache-Control，WebView / Coil / 浏览器没有新鲜度依据，
     每次进页面都要重新把整批图拉一遍（「吃什么」一进就是几十 MB）。
     这里统一补 30 天，客户端就能真正命中本地缓存。
+
+    上传文件名带时间戳 + 随机串，内容不会变，所以加 immutable；同时显式声明
+    支持分段，播放器可以边下边播，40MB 的视频不必整包拉完才出第一帧。
     """
     response = await call_next(request)
     if request.url.path.startswith("/uploads/"):
-        response.headers["Cache-Control"] = "public, max-age=2592000"
+        response.headers["Cache-Control"] = "public, max-age=2592000, immutable"
+        if response.status_code in (200, 206):
+            response.headers.setdefault("Accept-Ranges", "bytes")
     return response
 
 
