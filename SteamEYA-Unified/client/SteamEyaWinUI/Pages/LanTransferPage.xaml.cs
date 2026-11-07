@@ -117,6 +117,7 @@ public sealed partial class LanTransferPage : Page
         OpenFolderText.Text = Loc.T("Lan_OpenFolder");
         PeersTitle.Text = Loc.T("Lan_Peers_Title");
         AddDeviceText.Text = Loc.T("Lan_AddDevice");
+        FirewallText.Text = Loc.T("Lan_Firewall");
         SelectFilesText.Text = Loc.T("Lan_SelectFiles");
         CancelText.Text = Loc.T("Lan_Cancel");
         OutgoingTitle.Text = Loc.T("Lan_Outgoing_Title");
@@ -171,6 +172,22 @@ public sealed partial class LanTransferPage : Page
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshPeersAsync();
+
+    /// <summary>手动重新放行防火墙（规则被系统或安全软件清掉时用）。</summary>
+    private async void Firewall_Click(object sender, RoutedEventArgs e)
+    {
+        FirewallBtn.IsEnabled = false;
+        try
+        {
+            var ok = await FirewallService.EnsureRulesAsync(force: true);
+            ShowInfo(ok ? Loc.T("Lan_Firewall_Ok") : Loc.T("Lan_Firewall_Fail"),
+                ok ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
+        }
+        finally
+        {
+            FirewallBtn.IsEnabled = true;
+        }
+    }
 
     private void OnPeerSelectionChanged(object sender, SelectionChangedEventArgs e)
     {

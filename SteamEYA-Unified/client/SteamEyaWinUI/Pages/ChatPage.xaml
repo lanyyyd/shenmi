@@ -491,11 +491,13 @@
                                                         Padding="12,9"
                                                         Visibility="{x:Bind BubbleVisibility}">
                                                         <StackPanel Spacing="4">
+                                                            <!-- 支持鼠标拖选 / 触屏长按选择，右键或 Ctrl+C 复制选中文字 -->
                                                             <TextBlock
                                                                 Loaded="MessageText_Loaded"
                                                                 DataContextChanged="MessageText_DataContextChanged"
                                                                 FontSize="14.5"
                                                                 TextWrapping="Wrap"
+                                                                IsTextSelectionEnabled="True"
                                                                 Foreground="{x:Bind ContentForeground}"
                                                                 Visibility="{x:Bind TextVisibility}" />
                                                             <Image

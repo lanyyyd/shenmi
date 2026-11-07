@@ -30,6 +30,7 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <TextBlock
                 x:Name="PageTitle"
@@ -53,6 +54,16 @@
                 <StackPanel Orientation="Horizontal" Spacing="6">
                     <FontIcon FontSize="14" Glyph="&#xE8B7;" />
                     <TextBlock x:Name="OpenFolderText" />
+                </StackPanel>
+            </Button>
+            <Button
+                x:Name="FirewallBtn"
+                Grid.Column="4"
+                Click="Firewall_Click"
+                ToolTipService.ToolTip="每台电脑都要允许入站 TCP 8898 / UDP 8899，否则收不到对端消息">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="14" Glyph="&#xE72E;" />
+                    <TextBlock x:Name="FirewallText" />
                 </StackPanel>
             </Button>
         </Grid>

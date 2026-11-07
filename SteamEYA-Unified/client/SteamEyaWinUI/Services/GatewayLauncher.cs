@@ -46,6 +46,10 @@ internal static class GatewayLauncher
             return true;
         }
 
+        // 局域网模式每台机器都要被对端连入，先确保防火墙放行 8898/8899；
+        // 已经放行过会直接跳过，失败也不阻断启动（用户仍可手动关防火墙或加规则）。
+        await FirewallService.EnsureRulesAsync();
+
         Directory.CreateDirectory(DataDirectory);
         var gatewayDir = Path.Combine(AppContext.BaseDirectory, "gateway");
         var exe = Path.Combine(gatewayDir, "steameya-gateway.exe");

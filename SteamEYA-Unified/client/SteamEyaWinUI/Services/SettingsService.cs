@@ -257,6 +257,12 @@ internal sealed class AppSettings
     /// </summary>
     public string NetworkMode { get; set; } = "Auto";
 
+    /// <summary>
+    /// 局域网防火墙入站规则（TCP 8898 / UDP 8899）是否已成功添加。成功一次后不再弹 UAC，
+    /// 规则被清掉时可在「局域网互传」页手动重新放行。
+    /// </summary>
+    public bool LanFirewallReady { get; set; }
+
     /// <summary>自定义背景默认不透明度。</summary>
     public const double DefaultCustomBackgroundOpacity = 0.4;
 
