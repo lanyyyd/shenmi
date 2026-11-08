@@ -85,4 +85,34 @@ object CookieHarvester {
         }
         return collected.values.toList()
     }
+
+    /**
+     * 把服务端下发的 Cookie 写回 WebView（云游戏上号用）。
+     *
+     * 收割时拿到的 domain 是"当时查询的域名"，不是 cookie 的真实域，直接按它写会漏掉
+     * passport / 游戏域。统一按游戏根域写（mihoyo.com / wanmei.com / bilibili.com），
+     * 和真实站点一样让子域共享，登录态才完整。
+     */
+    fun inject(game: String, url: String, cookies: List<CookieDto>) {
+        if (cookies.isEmpty()) return
+        val root = when (game) {
+            "genshin", "starrail" -> "mihoyo.com"
+            "yihuan" -> "wanmei.com"
+            "bilibili" -> "bilibili.com"
+            else -> runCatching { Uri.parse(url).host }.getOrNull().orEmpty()
+                .split(".").takeLast(2).joinToString(".")
+        }
+        if (root.isBlank() || !root.contains(".")) return
+
+        val manager = CookieManager.getInstance()
+        manager.setAcceptCookie(true)
+        val origin = "https://$root/"
+        cookies.forEach { c ->
+            if (c.name.isBlank() || c.value.isBlank()) return@forEach
+            runCatching {
+                manager.setCookie(origin, "${c.name}=${c.value}; domain=.$root; path=/")
+            }
+        }
+        manager.flush()
+    }
 }

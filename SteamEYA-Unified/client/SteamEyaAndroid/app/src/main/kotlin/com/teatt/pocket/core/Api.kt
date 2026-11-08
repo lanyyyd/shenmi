@@ -236,6 +236,20 @@ data class CloudGameDto(
 @Serializable
 data class CloudGamesDto(val ok: Boolean = false, val games: List<CloudGameDto> = emptyList())
 
+/** /api/cloud/download：注入 WebView 用的新鲜 Cookie（服务端已按需换票续期）。 */
+@Serializable
+data class CloudDownloadDto(
+    val ok: Boolean = false,
+    val cookies: List<CookieDto> = emptyList(),
+    @SerialName("combo_token") val comboToken: String = "",
+    @SerialName("game_uid") val gameUid: String = "",
+    @SerialName("updated_at") val updatedAt: Long? = null,
+    @SerialName("refresh_at") val refreshAt: Long? = null,
+    @SerialName("refresh_ok") val refreshOk: Boolean? = null,
+    @SerialName("refresh_msg") val refreshMsg: String = "",
+    @SerialName("need_stoken") val needStoken: Boolean = false
+)
+
 @Serializable
 data class CloudCheckDto(
     val ok: Boolean = false,

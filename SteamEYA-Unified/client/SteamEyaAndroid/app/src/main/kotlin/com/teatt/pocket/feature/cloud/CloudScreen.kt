@@ -1,8 +1,11 @@
 package com.teatt.pocket.feature.cloud
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +30,7 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -54,6 +58,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,12 +94,25 @@ fun CloudScreen(
     var captureTarget by remember { mutableStateOf<CloudGameDto?>(null) }
     var pasteTarget by remember { mutableStateOf<CloudGameDto?>(null) }
     var scanTarget by remember { mutableStateOf<CloudAccountDto?>(null) }
+    // 上号方式选择：账号 + 已解析好的游戏地址
+    var playTarget by remember { mutableStateOf<Pair<CloudAccountDto, String>?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<Pair<String, String>?>(null) }
     var gachaRoles by remember { mutableStateOf<List<GachaRoleDto>>(emptyList()) }
     var gachaOpen by remember { mutableStateOf(false) }
     var gachaLoading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    /** 上号地址：优先用服务端下发的游戏地址，内置游戏兜底。 */
+    fun playUrl(account: CloudAccountDto): String =
+        games.firstOrNull { it.key == account.game }?.url?.trim().orEmpty().ifBlank {
+            when (account.game) {
+                "genshin" -> "https://ys.mihoyo.com/cloud/#/"
+                "starrail" -> "https://sr.mihoyo.com/cloud/#/"
+                else -> ""
+            }
+        }
 
     suspend fun reload() {
         failed = false
@@ -267,6 +285,14 @@ fun CloudScreen(
                     AccountCard(
                         account = account,
                         busy = busyKey == account.game,
+                        onPlay = {
+                            val url = playUrl(account)
+                            if (url.isBlank()) {
+                                dialog = "无法上号" to "该游戏还没有配置打开地址"
+                            } else {
+                                playTarget = account to url
+                            }
+                        },
                         onCheck = {
                             busyKey = account.game
                             scope.launch {
@@ -329,6 +355,37 @@ fun CloudScreen(
             text = { Text(body) },
             confirmButton = {
                 TextButton(onClick = { dialog = null }) { Text("好") }
+            }
+        )
+    }
+
+    playTarget?.let { (account, url) ->
+        AlertDialog(
+            onDismissRequest = { playTarget = null },
+            title = { Text("上号 · ${account.gameName.ifBlank { account.nickname.ifBlank { account.game } }}") },
+            text = {
+                Text(
+                    "直接打开：在客户端内横屏全屏运行，自动带上当前账号的登录态。\n" +
+                        "用浏览器打开：交给系统浏览器，需要重新登录云游戏。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    playTarget = null
+                    context.startActivity(
+                        CloudPlayActivity.intent(context, account.game, account.gameUid, url)
+                    )
+                }) { Text("直接打开（推荐）") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    playTarget = null
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    }.onFailure {
+                        dialog = "无法打开浏览器" to "没有找到可用的浏览器，请先安装或改用其他方式"
+                    }
+                }) { Text("用浏览器打开") }
             }
         )
     }
@@ -619,6 +676,7 @@ private fun EmptyCard() {
 private fun AccountCard(
     account: CloudAccountDto,
     busy: Boolean,
+    onPlay: () -> Unit,
     onCheck: () -> Unit,
     onRecapture: () -> Unit,
     onPaste: () -> Unit,
@@ -682,34 +740,48 @@ private fun AccountCard(
 
             Spacer(Modifier.height(4.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = onCheck, enabled = !busy) {
-                    if (busy) {
-                        CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
-                    } else {
-                        Icon(Icons.Filled.Refresh, null, Modifier.size(15.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 按钮多，窄屏放不下：横向滚动，删除键固定在右侧
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    if (account.game in setOf("genshin", "starrail")) {
+                        TextButton(onClick = onPlay, enabled = !busy) {
+                            Icon(Icons.Filled.PlayArrow, null, Modifier.size(15.dp))
+                            Spacer(Modifier.size(4.dp))
+                            Text("上号", fontSize = 13.sp)
+                        }
+                    }
+                    TextButton(onClick = onCheck, enabled = !busy) {
+                        if (busy) {
+                            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+                        } else {
+                            Icon(Icons.Filled.Refresh, null, Modifier.size(15.dp))
+                            Spacer(Modifier.size(4.dp))
+                            Text("检测", fontSize = 13.sp)
+                        }
+                    }
+                    TextButton(onClick = onRecapture, enabled = !busy) {
+                        Icon(Icons.Filled.OpenInBrowser, null, Modifier.size(15.dp))
                         Spacer(Modifier.size(4.dp))
-                        Text("检测", fontSize = 13.sp)
+                        Text("重抓", fontSize = 13.sp)
+                    }
+                    TextButton(onClick = onPaste, enabled = !busy) {
+                        Icon(Icons.Filled.ContentPaste, null, Modifier.size(15.dp))
+                        Spacer(Modifier.size(4.dp))
+                        Text("粘贴", fontSize = 13.sp)
+                    }
+                    if (account.game in setOf("genshin", "starrail")) {
+                        TextButton(onClick = onStoken, enabled = !busy) {
+                            Icon(Icons.Filled.QrCodeScanner, null, Modifier.size(15.dp))
+                            Spacer(Modifier.size(4.dp))
+                            Text("扫码", fontSize = 13.sp)
+                        }
                     }
                 }
-                TextButton(onClick = onRecapture, enabled = !busy) {
-                    Icon(Icons.Filled.OpenInBrowser, null, Modifier.size(15.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("重抓", fontSize = 13.sp)
-                }
-                TextButton(onClick = onPaste, enabled = !busy) {
-                    Icon(Icons.Filled.ContentPaste, null, Modifier.size(15.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("粘贴", fontSize = 13.sp)
-                }
-                if (account.game in setOf("genshin", "starrail")) {
-                    TextButton(onClick = onStoken, enabled = !busy) {
-                        Icon(Icons.Filled.QrCodeScanner, null, Modifier.size(15.dp))
-                        Spacer(Modifier.size(4.dp))
-                        Text("扫码", fontSize = 13.sp)
-                    }
-                }
-                Spacer(Modifier.weight(1f))
                 IconButton(onClick = onDelete, enabled = !busy) {
                     Icon(
                         Icons.Filled.DeleteOutline,

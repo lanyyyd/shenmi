@@ -36,6 +36,15 @@
             </intent-filter>
         </activity>
 
+        <!-- 云游戏上号：独立 Activity 才能锁横屏、接管返回键；
+             configChanges 必须带上，否则转屏重建 Activity 会中断串流。 -->
+        <activity
+            android:name=".feature.cloud.CloudPlayActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density|layoutDirection"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/Theme.Pocket" />
+
         <!-- 更新包下载在 App 专属目录，下载完由这里交给系统安装器 -->
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -3,6 +3,7 @@ package com.teatt.pocket.data
 import com.teatt.pocket.core.Api
 import com.teatt.pocket.core.CloudAccountDto
 import com.teatt.pocket.core.CloudCheckDto
+import com.teatt.pocket.core.CloudDownloadDto
 import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CloudGamesDto
 import com.teatt.pocket.core.CloudMyDto
@@ -57,6 +58,15 @@ object CloudApi {
     suspend fun games(token: String): List<CloudGameDto> {
         val dto: CloudGamesDto = Api.decode(Api.get("/api/cloud/games", token))
         return dto.games
+    }
+
+    /** 拉某个账号的 Cookie（uid 为空取该游戏最新一条）；服务端会先按需用 stoken 换票。 */
+    suspend fun download(token: String, game: String, uid: String = ""): CloudDownloadDto {
+        val query = buildMap {
+            put("game", game)
+            if (uid.isNotBlank()) put("uid", uid)
+        }
+        return Api.decode(Api.get("/api/cloud/download", token, query))
     }
 
     /** 上传 Cookie。服务端会先跑一次有效性检测，用 game_uid 区分同游戏多账号。 */
