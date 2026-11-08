@@ -76,11 +76,6 @@ tbody tr:hover{background:var(--hover,rgba(0,0,0,.02))}
   <div class="top">
     <h1>🖼️ AI 生图设置 · 自动配图</h1>
     <span id="whoami" class="mono"></span>
-    <div class="spacer"></div>
-    <button class="btn" onclick="location.href='/admin.html'">← 聊天管理</button>
-    <button class="btn" onclick="location.href='/admin-ai.html'">🔥 小火人</button>
-    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
-    <button class="btn danger" onclick="logout()">退出</button>
   </div>
 
   <div id="deny" class="deny hidden">
@@ -493,5 +488,6 @@ async function logout(){ await fetch('/api/logout',{method:'POST'}); location.hr
   setInterval(loadJobs, 5000);
 })();
 </script>
+<script src="/js/admin-nav.js"></script>
 </body>
 </html>

@@ -56,17 +56,6 @@ html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
   <div class="top">
     <h1>🔥 AI 设置 · 小火人</h1>
     <span id="whoami" class="mono"></span>
-    <div class="spacer"></div>
-    <button class="btn" onclick="location.href='/admin.html'">← 聊天管理</button>
-    <button class="btn" onclick="location.href='/admin-steam.html'">Steam 账号</button>
-    <button class="btn" onclick="location.href='/admin-cloud.html'">云游戏账号</button>
-    <button class="btn" onclick="location.href='/admin-points.html'">积分管理</button>
-    <button class="btn" onclick="location.href='/admin-level.html'">🏅 等级管理</button>
-    <button class="btn" onclick="location.href='/admin-gacha.html'">🎴 抽卡管理</button>
-    <button class="btn" onclick="location.href='/admin-update.html'">📦 更新管理</button>
-    <button class="btn" onclick="location.href='/admin-ai-image.html'">🖼️ AI 生图</button>
-    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
-    <button class="btn danger" onclick="logout()">退出</button>
   </div>
 
   <div id="deny" class="deny hidden">
@@ -260,5 +249,6 @@ async function logout(){ await fetch('/api/logout',{method:'POST'}); location.hr
   loadConfig();
 })();
 </script>
+<script src="/js/admin-nav.js"></script>
 </body>
 </html>

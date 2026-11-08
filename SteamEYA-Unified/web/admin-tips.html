@@ -79,11 +79,6 @@ input.num:focus{border-color:var(--primary);outline:none}
   <div class="top">
     <h1>💬 导航 tips</h1>
     <span id="whoami" class="mono"></span>
-    <div class="spacer"></div>
-    <button class="btn" onclick="location.href='/admin.html'">← 聊天管理</button>
-    <button class="btn" onclick="location.href='/admin-update.html'">📦 更新管理</button>
-    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
-    <button class="btn danger" onclick="logout()">退出</button>
   </div>
 
   <div id="deny" class="deny hidden">
@@ -310,5 +305,6 @@ async function logout(){ await fetch('/api/logout',{method:'POST'}); location.hr
   loadAll();
 })();
 </script>
+<script src="/js/admin-nav.js"></script>
 </body>
 </html>

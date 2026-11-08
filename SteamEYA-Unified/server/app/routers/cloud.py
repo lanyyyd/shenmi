@@ -189,9 +189,14 @@ def _get_mihoyo_free_duration(combo_token: str, game: str) -> dict:
             "coin": (d.get("coin") or {}).get("coin_num"), "msg": "查询成功"}
 
 
+# B 站风控/限流类返回码：这些不是「Cookie 失效」，而是这次请求被拦了，不能覆盖成失效。
+BILI_RISK_CODES = {-352: "风控校验失败", -412: "请求被拦截", -400: "请求参数错误",
+                   -799: "请求过于频繁", -509: "请求过于频繁", -504: "服务调用超时"}
+
+
 def _check_bilibili_valid(cookie_str: str, cmap: dict) -> dict:
-    if not (cmap.get("SESSDATA") or cmap.get("DedeUserID")):
-        return {"valid": False, "msg": "Cookie 中缺少 SESSDATA / DedeUserID，未登录"}
+    if not cmap.get("SESSDATA"):
+        return {"valid": False, "msg": "Cookie 中缺少 SESSDATA，未登录"}
     headers = {"Cookie": cookie_str, "User-Agent": UA, "Referer": "https://www.bilibili.com/",
                "Accept": "application/json, text/plain, */*"}
     try:
@@ -201,11 +206,19 @@ def _check_bilibili_valid(cookie_str: str, cmap: dict) -> dict:
     code = data.get("code")
     d = data.get("data") or {}
     if code == 0 and d.get("isLogin"):
-        return {"valid": True, "msg": "有效", "nickname": d.get("uname", ""),
+        vip = d.get("vipStatus") == 1
+        return {"valid": True, "msg": "有效" + ("（大会员）" if vip else ""),
+                "nickname": d.get("uname", ""),
                 "game_uid": str(d.get("mid", "") or ""),
-                "level": (d.get("level_info") or {}).get("current_level"), "free_duration": None}
+                "level": (d.get("level_info") or {}).get("current_level"),
+                "coin": d.get("money"), "vip": vip, "free_duration": None}
     if code == -101:
         return {"valid": False, "msg": "账号未登录，Cookie 已失效"}
+    if code == 0 and not d.get("isLogin"):
+        return {"valid": False, "msg": "账号未登录，Cookie 已失效"}
+    if code in BILI_RISK_CODES:
+        # 风控拦截时无法判断真实登录态，保留上一次的检测结果，不要误判成失效。
+        return {"valid": None, "msg": f"B 站风控拦截（{BILI_RISK_CODES[code]}，code={code}），请稍后再试"}
     return {"valid": False, "msg": f"{data.get('message', '验证失败')}（code={code}）"}
 
 
@@ -732,15 +745,23 @@ def admin_check(payload: dict = Body(...), admin: dict = Depends(require_admin))
         raise HTTPException(404, "记录不存在")
     cookies = security.decrypt_blob(row["data"])
     result = check_cookie_valid(cookies, row["game"], row["combo_token"] or "")
-    valid_val = 1 if result.get("valid") else (0 if result.get("valid") is False else None)
-    execute(
-        "UPDATE cloud_cookies SET valid=?, checked_at=?, game_uid=?, nickname=?, free_duration=?, total_duration=? "
-        "WHERE id=?",
-        (valid_val, security.now_s(), result.get("game_uid") or row["game_uid"] or "",
-         result.get("nickname") or row["nickname"] or "",
-         result.get("free_duration"), result.get("total_duration"), row_id),
-    )
-    return {"ok": True, **result}
+    valid_val = 1 if result.get("valid") is True else (0 if result.get("valid") is False else None)
+    if valid_val is None:
+        # 无法判定（网络异常 / 风控拦截）时只更新时间与资料，不覆盖原来的有效性结论。
+        execute(
+            "UPDATE cloud_cookies SET checked_at=?, game_uid=?, nickname=? WHERE id=?",
+            (security.now_s(), result.get("game_uid") or row["game_uid"] or "",
+             result.get("nickname") or row["nickname"] or "", row_id),
+        )
+    else:
+        execute(
+            "UPDATE cloud_cookies SET valid=?, checked_at=?, game_uid=?, nickname=?, free_duration=?, total_duration=? "
+            "WHERE id=?",
+            (valid_val, security.now_s(), result.get("game_uid") or row["game_uid"] or "",
+             result.get("nickname") or row["nickname"] or "",
+             result.get("free_duration"), result.get("total_duration"), row_id),
+        )
+    return {"ok": True, "id": row_id, "valid_state": valid_val, **result}
 
 
 @router.delete("/admin/accounts/{row_id}")

@@ -83,15 +83,6 @@ html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c
   <div class="top">
     <h1>☁️ 云游戏账号管理</h1>
     <span id="whoami" class="mono"></span>
-    <div class="spacer"></div>
-    <button class="btn" onclick="location.href='/admin.html'">← 聊天管理</button>
-    <button class="btn" onclick="location.href='/admin-steam.html'">Steam 账号</button>
-    <button class="btn" onclick="location.href='/admin-update.html'">更新管理</button>
-    <button class="btn" onclick="location.href='/admin-points.html'">积分管理</button>
-    <button class="btn" onclick="location.href='/admin-level.html'">🏅 等级管理</button>
-    <button class="btn" onclick="location.href='/admin-gacha.html'">🎴 抽卡管理</button>
-    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
-    <button class="btn danger" onclick="logout()">退出</button>
   </div>
 
   <div id="deny" class="deny hidden">
@@ -103,7 +94,7 @@ html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c
   <div id="main" class="hidden">
     <div class="stats">
       <div class="stat"><div class="k">Cookie 记录</div><div class="v" id="sTotal">0</div></div>
-      <div class="stat"><div class="k">有效记录</div><div class="v" id="sValid">0</div></div>
+      <div class="stat" title="最近一次检测为有效的账号数"><div class="k">有效记录</div><div class="v" id="sValid">0</div></div>
       <div class="stat"><div class="k">上传用户</div><div class="v" id="sUsers">0</div></div>
       <div class="stat"><div class="k">上号次数</div><div class="v" id="sLogs">0</div></div>
     </div>
@@ -122,7 +113,15 @@ html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c
         </select>
         <input id="filter" placeholder="搜索用户 / 昵称 / UID…" oninput="renderTable()"
           style="padding:8px 12px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);font-size:13px;color:var(--text)">
-        <button class="btn" onclick="loadAll()">刷新</button>
+        <select id="validFilter" onchange="renderTable()"
+          style="padding:8px 12px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);font-size:13px;color:var(--text)">
+          <option value="">全部有效性</option>
+          <option value="1">有效</option>
+          <option value="0">失效</option>
+          <option value="unknown">未检测</option>
+        </select>
+        <button class="btn" id="checkAllBtn" onclick="checkAll()">检测全部</button>
+        <button class="btn" onclick="loadAll()">刷新全部</button>
       </div>
       <div style="overflow-x:auto">
         <table class="tbl">
@@ -139,7 +138,6 @@ html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c
         <h2>游戏名管理</h2>
         <div class="spacer"></div>
         <span class="mono" style="font-size:12px;opacity:.7">删除后该游戏名不再出现在客户端游戏列表</span>
-        <button class="btn" onclick="loadGames()">刷新</button>
       </div>
       <div style="overflow-x:auto">
         <table class="tbl">
@@ -155,7 +153,6 @@ html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c
       <div class="card-h">
         <h2>上号日志</h2>
         <div class="spacer"></div>
-        <button class="btn" onclick="loadLogs()">刷新</button>
       </div>
       <div style="overflow-x:auto">
         <table class="tbl">
@@ -190,6 +187,8 @@ html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c
 <div id="toast"></div>
 <script>
 let ACCOUNTS = [], USERS = [];
+const CHECKING = new Set();
+let CHECKING_ALL = false;
 const $ = (id) => document.getElementById(id);
 let tTimer; function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(tTimer); tTimer=setTimeout(()=>t.classList.remove('on'),2200); }
 function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -224,7 +223,9 @@ async function loadAccounts(){
 function renderTable(){
   const kw = ($('filter').value||'').trim().toLowerCase();
   const game = $('gameFilter').value;
+  const vf = $('validFilter').value;
   const list = ACCOUNTS.filter(a => (!game || a.game===game)
+    && (!vf || (vf==='unknown' ? (a.valid!==1 && a.valid!==0) : Number(a.valid)===Number(vf)))
     && (!kw || (a.username||'').toLowerCase().includes(kw) || (a.user_name||'').toLowerCase().includes(kw)
         || (a.nickname||'').toLowerCase().includes(kw) || (a.game_uid||'').toLowerCase().includes(kw)));
   if(!list.length){ $('tbody').innerHTML = '<tr><td colspan="10" class="empty">暂无云端 Cookie 记录</td></tr>'; return; }
@@ -235,15 +236,29 @@ function renderTable(){
     <td data-l="UID"><span class="mono">${esc(a.game_uid||'—')}</span></td>
     <td data-l="Cookie 状态">${validChip(a.valid)}</td>
     <td data-l="stoken">${(a.game==='genshin'||a.game==='starrail')?(a.has_stoken?'<span class="chip">已补</span>':'<span class="chip gray">未补</span>'):'—'}</td>
-    <td data-l="剩余免费时长">${a.free_duration==null?'—':esc(a.free_duration)+' 分钟'}</td>
+    <td data-l="剩余免费时长">${(a.game==='bilibili'||a.free_duration==null)?'—':esc(a.free_duration)+' 分钟'}</td>
     <td data-l="更新时间"><span class="mono">${secToTime(a.updated_at)}</span></td>
     <td data-l="检测时间"><span class="mono">${secToTime(a.checked_at)}</span></td>
     <td data-l="操作"><div class="acts">
       <button onclick="openEdit(${a.id})">编辑</button>
-      <button onclick="checkOne(${a.id})">检测有效性</button>
+      <button data-check-id="${a.id}" ${CHECKING.has(a.id)?'disabled':''} onclick="checkOne(${a.id})">${CHECKING.has(a.id)?'检测中…':'检测有效性'}</button>
       <button class="dg" onclick="delOne(${a.id},'${esc(a.user_name||a.username||'')}','${esc(a.game_name||a.game)}')">删除</button>
     </div></td>
   </tr>`).join('');
+}
+function markChecking(id, on){
+  if(on) CHECKING.add(id); else CHECKING.delete(id);
+  const b = document.querySelector(`[data-check-id="${id}"]`);
+  if(b){ b.disabled = on; b.textContent = on ? '检测中…' : '检测有效性'; }
+}
+function filteredAccounts(){
+  const kw = ($('filter').value||'').trim().toLowerCase();
+  const game = $('gameFilter').value;
+  const vf = $('validFilter').value;
+  return ACCOUNTS.filter(a => (!game || a.game===game)
+    && (!vf || (vf==='unknown' ? (a.valid!==1 && a.valid!==0) : Number(a.valid)===Number(vf)))
+    && (!kw || (a.username||'').toLowerCase().includes(kw) || (a.user_name||'').toLowerCase().includes(kw)
+        || (a.nickname||'').toLowerCase().includes(kw) || (a.game_uid||'').toLowerCase().includes(kw)));
 }
 async function loadLogs(){
   const r = await fetch('/api/cloud/admin/logs'); if(!r.ok) return;
@@ -322,18 +337,73 @@ async function saveAssign(){
 function closeModal(id){ $(id).classList.remove('on'); }
 
 async function checkOne(id){
+  if(CHECKING.has(id)) return;
+  markChecking(id, true);
   toast('检测中…');
-  const r = await fetch('/api/cloud/admin/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
-  const d = await r.json().catch(()=>({}));
-  if(!r.ok){ toast(d.detail||'检测失败'); return; }
-  toast(d.msg || '检测完成');
+  try{
+    const r = await fetch('/api/cloud/admin/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ toast(d.detail||d.error||'检测失败'); return; }
+    toast(d.msg || '检测完成');
+  }catch(e){
+    toast('检测失败');
+    return;
+  }finally{
+    markChecking(id, false);
+  }
+  loadAll();
+}
+async function checkAll(){
+  if(CHECKING_ALL) return;
+  const list = filteredAccounts();
+  if(!list.length){ toast('当前筛选下没有可检测的账号'); return; }
+  CHECKING_ALL = true;
+  const btn = $('checkAllBtn');
+  btn.disabled = true;
+  const total = list.length;
+  let done = 0, ok = 0, bad = 0, unknown = 0;
+  const progress = () => { btn.textContent = `检测中 ${done}/${total}`; };
+  progress();
+  async function runOne(id){
+    markChecking(id, true);
+    try{
+      const r = await fetch('/api/cloud/admin/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+      const d = await r.json().catch(()=>({}));
+      if(!r.ok){ unknown++; }
+      else if(d.valid === true || d.valid === 1){ ok++; }
+      else if(d.valid === false || d.valid === 0){ bad++; }
+      else { unknown++; }
+    }catch(e){ unknown++; }
+    markChecking(id, false);
+    done++;
+    progress();
+  }
+  // B 站 nav 接口对并发很敏感，串行 + 间隔；其他游戏并发 2 提速。
+  const bili = list.filter(a => a.game === 'bilibili');
+  const other = list.filter(a => a.game !== 'bilibili');
+  let cursor = 0;
+  async function worker(){
+    while(cursor < other.length){
+      await runOne(other[cursor++].id);
+    }
+  }
+  await Promise.all([worker(), worker()]);
+  for(let i = 0; i < bili.length; i++){
+    if(i > 0) await new Promise(r => setTimeout(r, 1200));
+    await runOne(bili[i].id);
+  }
+  CHECKING_ALL = false;
+  btn.disabled = false;
+  btn.textContent = '检测全部';
+  toast(`已检测 ${total} 个：有效 ${ok} / 失效 ${bad} / 未知 ${unknown}`);
   loadAll();
 }
 async function delOne(id, user, game){
   if(!confirm(`确定删除「${user}」的「${game}」云端 Cookie ？`)) return;
   const r = await fetch('/api/cloud/admin/accounts/'+id,{method:'DELETE'});
-  if(!r.ok){ toast('删除失败'); return; }
-  toast('已删除'); loadAll();
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ toast(d.detail||d.error||'删除失败'); return; }
+  toast(`已删除 ${game} 账号`); loadAll();
 }
 async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
 
@@ -346,5 +416,6 @@ async function logout(){ await fetch('/api/logout',{method:'POST'}); location.hr
   loadAll();
 })();
 </script>
+<script src="/js/admin-nav.js"></script>
 </body>
 </html>

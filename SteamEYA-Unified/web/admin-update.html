@@ -80,15 +80,6 @@ html[data-theme="light"] .seg{background:#F4F5F7}
   <div class="top">
     <h1>📦 更新管理</h1>
     <span id="whoami" class="mono"></span>
-    <div class="spacer"></div>
-    <button class="btn" onclick="location.href='/admin.html'">← 聊天管理</button>
-    <button class="btn" onclick="location.href='/admin-steam.html'">Steam 账号</button>
-    <button class="btn" onclick="location.href='/admin-cloud.html'">云游戏账号</button>
-    <button class="btn" onclick="location.href='/admin-points.html'">积分管理</button>
-    <button class="btn" onclick="location.href='/admin-level.html'">🏅 等级管理</button>
-    <button class="btn" onclick="location.href='/admin-gacha.html'">🎴 抽卡管理</button>
-    <button class="btn" onclick="cycleTheme()" id="themeBtn">🌗 主题</button>
-    <button class="btn danger" onclick="logout()">退出</button>
   </div>
 
   <div id="deny" class="deny hidden">
@@ -269,5 +260,6 @@ async function logout(){ await fetch('/api/logout',{method:'POST'}); location.hr
   switchPlatform('windows');
 })();
 </script>
+<script src="/js/admin-nav.js"></script>
 </body>
 </html>

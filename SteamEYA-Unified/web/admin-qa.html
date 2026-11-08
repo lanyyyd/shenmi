@@ -74,10 +74,6 @@ tr:last-child td{border-bottom:none}
   <div class="top">
     <h1>📚 搜题题库</h1>
     <span id="whoami" class="mono"></span>
-    <div class="spacer"></div>
-    <button class="btn" onclick="location.href='/admin.html'">← 返回后台</button>
-    <button class="btn" onclick="loadAll()">刷新</button>
-    <button class="btn" onclick="logout()">退出</button>
   </div>
 
   <div id="deny" class="deny" style="display:none">
@@ -100,6 +96,7 @@ tr:last-child td{border-bottom:none}
       <button class="tab on" data-pane="models">AI 模型</button>
       <button class="tab" data-pane="questions">题库</button>
       <button class="tab" data-pane="prompts">提示词</button>
+      <button class="btn" style="margin-left:auto" onclick="loadAll()">↻ 刷新</button>
     </div>
 
     <!-- ===== 模型 ===== -->
@@ -454,5 +451,6 @@ function esc(s){
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 </script>
+<script src="/js/admin-nav.js"></script>
 </body>
 </html>
