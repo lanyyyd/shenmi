@@ -64,6 +64,7 @@ internal static partial class NotificationService
     private static long _lastRegisterAttemptTicks;   // 失败后 60 秒内不重复尝试，避免每条通知都卡一下
     private static bool _aumidRegistered;
     private static string? _aumidError;
+    private static bool _autoEnabled;   // 本次启动是否自动补开了系统通知
 
     // ---- 运行期状态 ----
     private static NotificationChannel _channel = NotificationChannel.Auto;
@@ -105,6 +106,8 @@ internal static partial class NotificationService
                 _initialized = true;
                 CaptureEnvironment();
                 EnsureAumidRegistry();
+                // 机房/新装 Win10 的系统通知默认是关的，启动时补开（HKCU，无需管理员）
+                AutoEnableSystemNotifications();
                 ReloadChannel();
             }
 
@@ -209,6 +212,89 @@ internal static partial class NotificationService
         catch
         {
             return true;    // 读不到就当作开启，交给后续实际发送去验证
+        }
+    }
+
+    /// <summary>组策略级禁用：程序无权覆盖，写了也没用，必须区分出来。</summary>
+    private static bool IsToastDisabledByPolicy()
+    {
+        try
+        {
+            using var machine = Registry.LocalMachine.OpenSubKey(
+                @"SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PushNotifications");
+            if (Convert.ToInt32(machine?.GetValue("NoToastApplicationNotification") ?? 0) == 1)
+            {
+                return true;
+            }
+
+            using var user = Registry.CurrentUser.OpenSubKey(
+                @"Software\Policies\Microsoft\Windows\Explorer");
+            return Convert.ToInt32(user?.GetValue("DisableNotificationCenter") ?? 0) == 1;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>应用级开关（按 AUMID 归档）；不存在时视为开启。</summary>
+    private static bool IsAppNotificationEnabled()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(
+                $@"Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\{AppUserModelId}");
+            var value = key?.GetValue("Enabled");
+            return value is null || Convert.ToInt32(value) != 0;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// 启动时自动补开系统通知。
+    ///
+    /// 机房和新装 Win10 的通知总开关默认关闭，表现就是「注册成功但什么都不弹」。
+    /// 这两个值都是 HKCU，普通用户权限即可写入，和系统设置里手动拨开关等价；写完即时生效。
+    /// 组策略禁用或提权运行时不写：前者程序无权覆盖，后者系统本身就不支持应用通知。
+    /// </summary>
+    private static void AutoEnableSystemNotifications()
+    {
+        if (_elevated)
+        {
+            AppLog.Info("跳过自动开启系统通知：当前以管理员身份运行，系统不支持应用通知。");
+            return;
+        }
+
+        if (IsToastDisabledByPolicy())
+        {
+            AppLog.Info("跳过自动开启系统通知：已被组策略禁用。");
+            return;
+        }
+
+        if (IsToastEnabledByPolicy() && IsAppNotificationEnabled())
+        {
+            return;
+        }
+
+        try
+        {
+            using var cloud = Registry.CurrentUser.CreateSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\PushNotifications");
+            cloud?.SetValue("ToastEnabled", 1, RegistryValueKind.DWord);
+
+            using var app = Registry.CurrentUser.CreateSubKey(
+                $@"Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\{AppUserModelId}");
+            app?.SetValue("Enabled", 1, RegistryValueKind.DWord);
+
+            _autoEnabled = true;
+            AppLog.Info("系统通知原为关闭状态，已在本次启动自动开启。");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"自动开启系统通知失败：{ex.Message}");
         }
     }
 
@@ -497,7 +583,8 @@ internal static partial class NotificationService
         var builder = new StringBuilder();
         builder.AppendLine($"系统：{_osText}");
         builder.AppendLine($"运行身份：{(_elevated ? "管理员（通知不可用）" : "普通用户")}");
-        builder.AppendLine($"系统通知总开关：{(IsToastEnabledByPolicy() ? "开启" : "已关闭")}");
+        builder.AppendLine($"系统通知总开关：{(IsToastEnabledByPolicy() ? (_autoEnabled ? "开启（本次启动自动开启）" : "开启") : "已关闭")}");
+        builder.AppendLine($"系统策略：{(IsToastDisabledByPolicy() ? "组策略已禁用应用通知，需管理员/IT 解除" : "正常")}");
         builder.AppendLine($"AUMID：{AppUserModelId}（注册表{(_aumidRegistered ? "已写入" : "未写入")}{(_aumidError is null ? "" : "：" + _aumidError)}）");
         builder.AppendLine($"系统通道：{(_systemRegistered ? "可用" : "不可用" + (_systemRegisterError is null ? "" : "：" + _systemRegisterError))}");
         builder.AppendLine($"当前方式：{ChannelText(_channel)}");
