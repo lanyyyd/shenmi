@@ -58,6 +58,13 @@ class CloudPlayActivity : ComponentActivity() {
                 putExtra(EXTRA_UID, uid)
                 putExtra(EXTRA_URL, url)
             }
+
+        // 小米浏览器 UA（Android 16 / 真机机型），带 Mobile 且不带 WebView 的 "; wv" 标记。
+        // 报成桌面 UA 会被云游戏平台当成 PC 客户端，下发 16:9 的键鼠流。
+        private const val MOBILE_UA =
+            "Mozilla/5.0 (Linux; U; Android 16; zh-cn; 2311DRK48C Build/BP2A.250605.031.A3) " +
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.7049.79 Mobile Safari/537.36 " +
+                "XiaoMi/MiuiBrowser/20.28.1020918"
     }
 
     private lateinit var root: FrameLayout
@@ -110,6 +117,11 @@ class CloudPlayActivity : ComponentActivity() {
             )
             setBackgroundColor(Color.BLACK)
             overScrollMode = View.OVER_SCROLL_NEVER
+            // 游戏里长按容易误触文字选择/上下文菜单，直接吃掉
+            isLongClickable = false
+            setOnLongClickListener { true }
+            isFocusable = true
+            requestFocus()
 
             with(settings) {
                 javaScriptEnabled = true
@@ -117,14 +129,15 @@ class CloudPlayActivity : ComponentActivity() {
                 databaseEnabled = true
                 mediaPlaybackRequiresUserGesture = false
                 useWideViewPort = true
-                loadWithOverviewMode = true
+                // 关掉整页缩放：开着时页面会按内容宽度整体缩放，游戏区两侧留白
+                loadWithOverviewMode = false
+                setInitialScale(0)
                 setSupportMultipleWindows(false)
                 javaScriptCanOpenWindowsAutomatically = true
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                 setSupportZoom(false)
                 builtInZoomControls = false
-                // 桌面 UA：云游戏网页版对移动 UA 可能跳去下载 App
-                userAgentString = userAgentString.replace("Mobile", "").replace("Android", "")
+                userAgentString = MOBILE_UA
             }
 
             CookieManager.getInstance().apply {

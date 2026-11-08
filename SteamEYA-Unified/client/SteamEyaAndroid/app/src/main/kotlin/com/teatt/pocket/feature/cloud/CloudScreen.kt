@@ -1,7 +1,5 @@
 package com.teatt.pocket.feature.cloud
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -94,8 +92,6 @@ fun CloudScreen(
     var captureTarget by remember { mutableStateOf<CloudGameDto?>(null) }
     var pasteTarget by remember { mutableStateOf<CloudGameDto?>(null) }
     var scanTarget by remember { mutableStateOf<CloudAccountDto?>(null) }
-    // 上号方式选择：账号 + 已解析好的游戏地址
-    var playTarget by remember { mutableStateOf<Pair<CloudAccountDto, String>?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<Pair<String, String>?>(null) }
     var gachaRoles by remember { mutableStateOf<List<GachaRoleDto>>(emptyList()) }
@@ -290,7 +286,14 @@ fun CloudScreen(
                             if (url.isBlank()) {
                                 dialog = "无法上号" to "该游戏还没有配置打开地址"
                             } else {
-                                playTarget = account to url
+                                context.startActivity(
+                                    CloudPlayActivity.intent(
+                                        context,
+                                        account.game,
+                                        account.gameUid,
+                                        url
+                                    )
+                                )
                             }
                         },
                         onCheck = {
@@ -355,37 +358,6 @@ fun CloudScreen(
             text = { Text(body) },
             confirmButton = {
                 TextButton(onClick = { dialog = null }) { Text("好") }
-            }
-        )
-    }
-
-    playTarget?.let { (account, url) ->
-        AlertDialog(
-            onDismissRequest = { playTarget = null },
-            title = { Text("上号 · ${account.gameName.ifBlank { account.nickname.ifBlank { account.game } }}") },
-            text = {
-                Text(
-                    "直接打开：在客户端内横屏全屏运行，自动带上当前账号的登录态。\n" +
-                        "用浏览器打开：交给系统浏览器，需要重新登录云游戏。"
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    playTarget = null
-                    context.startActivity(
-                        CloudPlayActivity.intent(context, account.game, account.gameUid, url)
-                    )
-                }) { Text("直接打开（推荐）") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    playTarget = null
-                    runCatching {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                    }.onFailure {
-                        dialog = "无法打开浏览器" to "没有找到可用的浏览器，请先安装或改用其他方式"
-                    }
-                }) { Text("用浏览器打开") }
             }
         )
     }
