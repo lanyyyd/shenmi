@@ -62,7 +62,7 @@ class CloudPlayActivity : ComponentActivity() {
 
     private lateinit var root: FrameLayout
     private lateinit var webView: WebView
-    private lateinit var progress: ProgressBar
+    private lateinit var progressBar: ProgressBar
     private lateinit var errorPane: LinearLayout
     private var fullscreenView: View? = null
     private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
@@ -154,8 +154,8 @@ class CloudPlayActivity : ComponentActivity() {
 
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                    progress.progress = newProgress
-                    progress.visibility =
+                    progressBar.progress = newProgress
+                    progressBar.visibility =
                         if (newProgress in 1..99) View.VISIBLE else View.GONE
                 }
 
@@ -193,7 +193,7 @@ class CloudPlayActivity : ComponentActivity() {
     }
 
     private fun buildOverlays() {
-        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+        progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             visibility = View.GONE
             layoutParams = FrameLayout.LayoutParams(
@@ -201,7 +201,7 @@ class CloudPlayActivity : ComponentActivity() {
                 3.dp()
             ).apply { gravity = Gravity.TOP }
         }
-        root.addView(progress)
+        root.addView(progressBar)
 
         errorPane = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -268,7 +268,7 @@ class CloudPlayActivity : ComponentActivity() {
     }
 
     private fun showError() {
-        progress.visibility = View.GONE
+        progressBar.visibility = View.GONE
         webView.visibility = View.INVISIBLE
         errorPane.visibility = View.VISIBLE
     }
