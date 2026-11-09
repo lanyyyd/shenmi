@@ -24,7 +24,7 @@ class Hub:
         self.clients: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
 
-    async def add(self, conn_id: str, ws, user: dict, device_id: str) -> None:
+    async def add(self, conn_id: str, ws, user: dict, device_id: str, ip: str = "") -> None:
         async with self._lock:
             self.clients[conn_id] = {
                 "ws": ws, "user_id": user["id"], "username": user["username"],
@@ -33,7 +33,7 @@ class Hub:
         execute(
             "INSERT INTO online (conn_id, user_id, device_id, ip, ua, connected_at, last_seen) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (conn_id, user["id"], device_id, "", "", security.now_ms(), security.now_ms()),
+            (conn_id, user["id"], device_id, ip, "", security.now_ms(), security.now_ms()),
         )
 
     async def remove(self, conn_id: str) -> None:

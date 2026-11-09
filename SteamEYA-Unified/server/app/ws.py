@@ -40,6 +40,11 @@ def _resolve(ws: WebSocket):
     return None, None
 
 
+def _client_ip(ws: WebSocket) -> str:
+    xf = (ws.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    return xf or (ws.client.host if ws.client else "")
+
+
 @router.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
@@ -49,7 +54,7 @@ async def ws_endpoint(ws: WebSocket):
         return
 
     conn_id = str(uuid.uuid4())
-    await hub.add(conn_id, ws, user, device_id or "web")
+    await hub.add(conn_id, ws, user, device_id or "web", _client_ip(ws))
     await ws.send_text(json.dumps({
         "type": "ready", "userId": user["id"], "username": user["username"],
         "nickname": user["nickname"], "avatar": user["avatar"] or "",

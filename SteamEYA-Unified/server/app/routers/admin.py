@@ -45,18 +45,25 @@ def _get_json_setting(key: str, default):
 # ---------------------------------------------------------------- 用户管理
 @router.get("/users")
 def list_users(admin: dict = Depends(require_admin)):
-    online_rows = query_all("SELECT user_id, device_id, ip, last_seen FROM online")
+    online_rows = query_all("SELECT user_id, device_id, ip, last_seen FROM online "
+                            "ORDER BY last_seen DESC")
     devices: dict[int, set] = {}
     last_seen: dict[int, int] = {}
+    online_ips: dict[int, list] = {}
     for r in online_rows:
         devices.setdefault(r["user_id"], set()).add(r["device_id"])
         last_seen[r["user_id"]] = max(last_seen.get(r["user_id"], 0), r["last_seen"] or 0)
+        if r["ip"]:
+            ips = online_ips.setdefault(r["user_id"], [])
+            if r["ip"] not in ips:
+                ips.append(r["ip"])
 
     sess_rows = query_all("SELECT user_id, ip, last_seen FROM sessions")
-    login_ips: dict[int, set] = {}
+    # 每个用户最近一次会话的 IP，用作「上次登录 IP」
+    last_ip: dict[int, tuple[int, str]] = {}
     for r in sess_rows:
-        if r["ip"]:
-            login_ips.setdefault(r["user_id"], set()).add(r["ip"])
+        if r["ip"] and (r["last_seen"] or 0) >= last_ip.get(r["user_id"], (0, ""))[0]:
+            last_ip[r["user_id"]] = (r["last_seen"] or 0, r["ip"])
         last_seen[r["user_id"]] = max(last_seen.get(r["user_id"], 0), r["last_seen"] or 0)
 
     rows = query_all("SELECT * FROM users ORDER BY created_at ASC")
@@ -81,7 +88,11 @@ def list_users(admin: dict = Depends(require_admin)):
             "banned": not bool(u["is_active"]),
             "createdAt": u["created_at"],
             "regIp": u["reg_ip"] or "",
-            "loginIps": sorted(login_ips.get(u["id"], ())),
+            # 在线优先显示当前 IP；离线时退回最近一次登录 IP（退出登录后仍保留）
+            "loginIp": ", ".join(online_ips.get(u["id"], ()))
+                       or (u["last_ip"] or "")
+                       or last_ip.get(u["id"], (0, ""))[1],
+            "loginIpOnline": bool(online_ips.get(u["id"])),
             "lastSeen": max(last_seen.get(u["id"], 0),
                             (u["last_login_at"] * 1000
                              if 0 < (u["last_login_at"] or 0) < 1_000_000_000_000

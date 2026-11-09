@@ -736,6 +736,9 @@ def init_db() -> None:
     ucols = {r["name"] for r in query_all("PRAGMA table_info(users)")}
     if "is_ai" not in ucols:
         execute("ALTER TABLE users ADD COLUMN is_ai INTEGER DEFAULT 0")
+    # users.last_ip：最近一次登录 IP，退出登录后仍保留，供后台「上次登录 IP」显示
+    if "last_ip" not in ucols:
+        execute("ALTER TABLE users ADD COLUMN last_ip TEXT DEFAULT ''")
     # eat_reviews.images：多图（JSON 数组）
     rcols = {r["name"] for r in query_all("PRAGMA table_info(eat_reviews)")}
     if rcols and "images" not in rcols:

@@ -127,8 +127,11 @@ def _issue_session(response: Response, user_id: int, device_id: str, request: Re
     token = security.gen_token(32)
     did = (device_id or "")[:64] or str(uuid.uuid4())
     t = _now()
+    ip = _client_ip(request)
     execute("INSERT INTO sessions (token, user_id, device_id, ua, ip, created_at, last_seen) VALUES (?,?,?,?,?,?,?)",
-            (token, user_id, did, (request.headers.get("user-agent") or "")[:200], _client_ip(request), t, t))
+            (token, user_id, did, (request.headers.get("user-agent") or "")[:200], ip, t, t))
+    # 会话在退出登录时会被删掉，单独存一份最近登录 IP，后台离线时也有得显示
+    execute("UPDATE users SET last_ip = ? WHERE id = ?", (ip, user_id))
     response.set_cookie("token", token, max_age=30 * 86400, httponly=True, samesite="lax", path="/")
     return token
 

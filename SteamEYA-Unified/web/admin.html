@@ -374,7 +374,7 @@ function renderTable(){
   const kw = ($('filter').value||'').trim().toLowerCase();
   const list = USERS.filter(u => !kw || u.username.toLowerCase().includes(kw)
     || (u.nickname||'').toLowerCase().includes(kw)
-    || (u.regIp||'').toLowerCase().includes(kw) || u.loginIps.some(i=>i.toLowerCase().includes(kw)));
+    || (u.regIp||'').toLowerCase().includes(kw) || (u.loginIp||'').toLowerCase().includes(kw));
   if(!list.length){ $('tbody').innerHTML = `<tr><td colspan="10" class="empty">没有匹配的用户</td></tr>`; return; }
   $('tbody').innerHTML = list.map(u=>{
     const lv = Math.max(0, Math.min(6, Number(u.level)||0));
@@ -387,7 +387,7 @@ function renderTable(){
       <td data-l="状态">${u.online?`<span style="color:var(--primary);font-weight:600">在线 · ${u.deviceCount} 设备</span>`:'<span style="color:var(--hint)">离线</span>'}</td>
       <td data-l="注册时间"><span class="mono">${fmtTime(u.createdAt)}</span></td>
       <td data-l="注册 IP"><span class="mono">${esc(u.regIp||'—')}</span></td>
-      <td data-l="登录 IP"><span class="mono">${esc(u.loginIps.join(', ')||'—')}</span></td>
+      <td data-l="登录 IP" title="${u.loginIpOnline?'当前在线 IP':'上次登录 IP'}"><span class="mono">${esc(u.loginIp||'—')}</span></td>
       <td data-l="最后活跃">${esc(relTime(u.lastSeen))}</td>
       <td data-l="积分"><b style="color:#F59E0B">${esc(u.points ?? 0)}</b></td>
       <td data-l="等级"><img class="lv-badge" src="/img/level/lv${lv}.svg" alt="" style="margin-right:5px">Lv${lv}

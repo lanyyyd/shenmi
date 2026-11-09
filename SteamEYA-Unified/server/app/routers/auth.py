@@ -27,9 +27,10 @@ def _client_ip(request: Request) -> str:
 
 def _create_user(username: str, password: str, nickname: str, email: str, ip: str) -> int:
     uid = execute(
-        "INSERT INTO users (username, password_hash, nickname, email, created_at, reg_ip) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (username, security.hash_password(password), nickname or username, email, security.now_ms(), ip),
+        "INSERT INTO users (username, password_hash, nickname, email, created_at, reg_ip, last_ip) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (username, security.hash_password(password), nickname or username, email,
+         security.now_ms(), ip, ip),
     )
     return uid
 
@@ -61,7 +62,7 @@ def register(request: Request, payload: dict = Body(...)):
 
 
 @router.post("/login")
-def login(payload: dict = Body(...)):
+def login(request: Request, payload: dict = Body(...)):
     username = str(payload.get("username", "")).strip()
     password = str(payload.get("password", ""))
     u = query_one("SELECT * FROM users WHERE username = ?", (username,))
@@ -72,7 +73,8 @@ def login(payload: dict = Body(...)):
     # 旧哈希登录成功后自动升级为 scrypt
     if security.needs_rehash(u["password_hash"]):
         execute("UPDATE users SET password_hash = ? WHERE id = ?", (security.hash_password(password), u["id"]))
-    execute("UPDATE users SET last_login_at = ? WHERE id = ?", (security.now_ms(), u["id"]))
+    execute("UPDATE users SET last_login_at = ?, last_ip = ? WHERE id = ?",
+            (security.now_ms(), _client_ip(request), u["id"]))
     try:
         LV.grant(u["id"], "daily_login", ref=LV.bj_day(), remark="每日首登")
     except Exception:
