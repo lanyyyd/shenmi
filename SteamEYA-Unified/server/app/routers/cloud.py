@@ -360,6 +360,24 @@ def _client_ip(request: Request) -> str:
     return xf or (request.client.host if request.client else "")
 
 
+# 同一用户同一游戏在这个时间窗内只记一条上号日志。
+# 电脑端上号会先 download 再 report_login，两处都记录会变成两条。
+CLOUD_LOGIN_DEDUPE_S = 60
+
+
+def _record_cloud_login(user_id: int, game: str, ip: str) -> None:
+    """记一条上号日志（含更新最近登录时间）；时间窗内重复调用只记一次。"""
+    now = security.now_s()
+    # users.last_login_at 全站统一用毫秒；cloud_login_logs.login_at 仍用秒（后台按秒展示）
+    execute("UPDATE users SET last_login_at=? WHERE id=?", (security.now_ms(), user_id))
+    last = query_one("SELECT login_at FROM cloud_login_logs WHERE user_id=? AND game=? "
+                     "ORDER BY login_at DESC, id DESC LIMIT 1", (user_id, game))
+    if last and last["login_at"] and now - last["login_at"] < CLOUD_LOGIN_DEDUPE_S:
+        return
+    execute("INSERT INTO cloud_login_logs (user_id, game, login_at, client_ip) VALUES (?,?,?,?)",
+            (user_id, game, now, ip))
+
+
 @router.post("/upload")
 def upload(payload: dict = Body(...), user: dict = Depends(get_current_user)):
     game = payload.get("game") or DEFAULT_GAME_KEY
@@ -486,11 +504,15 @@ def internal_relay(request: Request, payload: dict = Body(...)):
 
 
 @router.get("/download")
-def download(game: str = "genshin", uid: str = "", user: dict = Depends(get_current_user)):
+def download(request: Request, game: str = "genshin", uid: str = "",
+             user: dict = Depends(get_current_user)):
     """下载 Cookie；传 uid 指定账号，缺省取最近上传的那个。
 
     米哈游账号超过 12 小时没续期会先自动换票，客户端拿到的就是新鲜 Cookie，
     用户完全无感；换票失败不影响返回旧 Cookie，但会带上失败原因。
+
+    这里同时记一条上号日志：安卓端上号只调这个接口（不调 report_login），
+    在服务端补记才能让各端上号记录统一。
     """
     refresh_result = cloud_refresh.refresh_stored(user["id"], game, uid, force=False)
     need_stoken = bool(refresh_result.get("need_stoken"))
@@ -508,6 +530,7 @@ def download(game: str = "genshin", uid: str = "", user: dict = Depends(get_curr
         cookies = security.decrypt_blob(row["data"])
     except Exception:
         raise HTTPException(500, "数据解密失败")
+    _record_cloud_login(user["id"], game, _client_ip(request))
     return {"ok": True, "cookies": cookies, "combo_token": row["combo_token"] or "",
             "game_uid": row["game_uid"] or "", "updated_at": row["updated_at"],
             "refresh_at": row["refresh_at"],
@@ -570,11 +593,7 @@ def stoken_poll(payload: dict = Body(...), user: dict = Depends(get_current_user
 @router.post("/report_login")
 def report_login(request: Request, payload: dict = Body(...), user: dict = Depends(get_current_user)):
     game = payload.get("game") or "genshin"
-    now = security.now_s()
-    # users.last_login_at 全站统一用毫秒；cloud_login_logs.login_at 仍用秒（后台按秒展示）
-    execute("UPDATE users SET last_login_at=? WHERE id=?", (security.now_ms(), user["id"]))
-    execute("INSERT INTO cloud_login_logs (user_id, game, login_at, client_ip) VALUES (?,?,?,?)",
-            (user["id"], game, now, _client_ip(request)))
+    _record_cloud_login(user["id"], game, _client_ip(request))
     return {"ok": True}
 
 
