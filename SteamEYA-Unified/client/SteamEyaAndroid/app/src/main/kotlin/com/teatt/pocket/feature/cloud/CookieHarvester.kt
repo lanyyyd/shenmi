@@ -86,12 +86,26 @@ object CookieHarvester {
         return collected.values.toList()
     }
 
+    /** 决定登录态的 Cookie：换号上号前必须清掉旧值。 */
+    private val AUTH_COOKIE_NAMES = listOf(
+        "stoken", "stoken_v2", "ltoken", "ltoken_v2",
+        "cookie_token", "cookie_token_v2",
+        "account_id", "account_id_v2", "account_mid_v2",
+        "ltuid", "ltuid_v2", "ltmid_v2", "mid",
+        "login_ticket", "login_ticket_token", "login_uid"
+    )
+
     /**
      * 把服务端下发的 Cookie 写回 WebView（云游戏上号用）。
      *
      * 收割时拿到的 domain 是"当时查询的域名"，不是 cookie 的真实域，直接按它写会漏掉
      * passport / 游戏域。统一按游戏根域写（mihoyo.com / wanmei.com / bilibili.com），
      * 和真实站点一样让子域共享，登录态才完整。
+     *
+     * 写入前先删掉旧账号残留的登录 Cookie：CookieManager 按「名字 + 域名 + 路径」存，
+     * 以前在 sr.mihoyo.com 等具体域名下存过的同名旧值会盖过新注入的 .mihoyo.com 值，
+     * 表现就是必须手动清一次 Cookie 才能上号（电脑端同一个问题已在上号前清 profile）。
+     * 只删登录相关的 Cookie，不影响网页 tab 的会话。
      */
     fun inject(game: String, url: String, cookies: List<CookieDto>) {
         if (cookies.isEmpty()) return
@@ -107,6 +121,18 @@ object CookieHarvester {
         val manager = CookieManager.getInstance()
         manager.setAcceptCookie(true)
         val origin = "https://$root/"
+        // 每个具体域名删一次（清掉 host-only 的旧值），再按根域删一次（清掉 domain 级旧值）
+        val hosts = domainsFor(game, url).ifEmpty { listOf(origin) }
+        // 已知登录 Cookie + 本次要写入的 Cookie 名（异环/B站等非米哈游站点靠后半部分覆盖）
+        val names = (AUTH_COOKIE_NAMES + cookies.map { it.name }).filter { it.isNotBlank() }.distinct()
+        hosts.forEach { host ->
+            names.forEach { name ->
+                runCatching {
+                    manager.setCookie(host, "$name=deleted; Max-Age=0; path=/")
+                    manager.setCookie(host, "$name=deleted; Max-Age=0; domain=.$root; path=/")
+                }
+            }
+        }
         cookies.forEach { c ->
             if (c.name.isBlank() || c.value.isBlank()) return@forEach
             runCatching {
