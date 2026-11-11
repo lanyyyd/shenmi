@@ -334,36 +334,38 @@ def check_cookie_valid(cookies: list, game: str, combo_token: str = "") -> dict:
                   "role_count": len(roles)}
         if not roles:
             result["msg"] = "Cookie 有效（未查询到角色）"
-        # 没抓到 combo_token 时不能因此判 Cookie 无效：安卓 WebView / 粘贴来源经常只有 Cookie，
-        # 云游戏页面自己也能用 Cookie 换到凭证，只是后台暂时显示不了剩余时长。
+        # 原神 / 星穹铁道云游戏上号必须带 combo_token，拿不到就不算抓取成功
         if not combo_token:
-            result["msg"] = ("Cookie 有效（未查询到角色）" if not roles else "有效") + \
-                            "（未抓取云游戏凭证，剩余时长未知）"
-            result["free_duration"] = None
-            result["total_duration"] = None
-            return result
-        # 原神 / 星穹铁道：查不到剩余免费时长时区分「凭证过期」和「临时查询失败」
+            return {
+                "valid": False,
+                "msg": "未抓取到游戏凭证 combo_token，请先进入云游戏再抓取",
+                "nickname": result.get("nickname", ""),
+                "game_uid": result.get("game_uid", ""),
+                "level": result.get("level"),
+                "region": result.get("region", ""),
+                "role_count": result.get("role_count", 0),
+                "free_duration": None,
+                "total_duration": None,
+            }
         wr = _get_mihoyo_free_duration(combo_token, game)
         if not wr.get("ok") or wr.get("free_duration") is None:
             if wr.get("expired"):
                 msg = "云游戏凭证已失效，请重新抓取"
                 if wr.get("msg"):
                     msg += f"：{wr['msg']}"
-                return {
-                    "valid": False,
-                    "msg": msg,
-                    "nickname": result.get("nickname", ""),
-                    "game_uid": result.get("game_uid", ""),
-                    "level": result.get("level"),
-                    "region": result.get("region", ""),
-                    "role_count": result.get("role_count", 0),
-                    "free_duration": None,
-                    "total_duration": None,
-                }
-            result["msg"] = f"有效（剩余时长查询失败：{wr.get('msg') or '接口未返回时长'}）"
-            result["free_duration"] = None
-            result["total_duration"] = None
-            return result
+            else:
+                msg = f"未获取到剩余免费时长，判定 Cookie 无效：{wr.get('msg') or '接口未返回时长'}"
+            return {
+                "valid": False,
+                "msg": msg,
+                "nickname": result.get("nickname", ""),
+                "game_uid": result.get("game_uid", ""),
+                "level": result.get("level"),
+                "region": result.get("region", ""),
+                "role_count": result.get("role_count", 0),
+                "free_duration": None,
+                "total_duration": None,
+            }
         result["free_duration"] = wr["free_duration"]
         result["total_duration"] = wr.get("total_duration")
         result["msg"] = f"有效，剩余免费时长 {wr['free_duration']} 分钟"

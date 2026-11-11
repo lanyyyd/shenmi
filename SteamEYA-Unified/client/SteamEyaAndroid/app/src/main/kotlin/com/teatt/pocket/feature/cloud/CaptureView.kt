@@ -67,10 +67,39 @@ private const val COMBO_HOOK_JS = """
 (function () {
   try {
     window.__smCombo = window.__smCombo || '';
-    function notify(v) {
+    function looks(v) {
+      // combo_token 一般是 "ai=4;ci=1;..." 这种格式
+      if (typeof v !== 'string' || v.length < 13) return false;
+      var i = v.indexOf('ai=');
+      if (i < 0) return false;
+      if (i > 0 && v.charAt(i - 1) !== ';') return false;
+      var d = v.charAt(i + 3);
+      return d >= '0' && d <= '9' && v.indexOf(';', i) > 0;
+    }
+    function set(v) {
+      if (!v) return;
+      v = String(v);
+      if (v.length < 8 || v.length > 8000) return;
+      window.__smCombo = v;
       try {
-        if (window.top && window.top !== window) window.top.postMessage({ __smCombo: String(v) }, '*');
+        if (window.top && window.top !== window) window.top.postMessage({ __smCombo: v }, '*');
       } catch (e) {}
+    }
+    // 从任意 JSON 响应里挖 combo_token（云游戏登录返回体里就是这个字段）
+    function pick(obj, depth) {
+      if (!obj || depth > 6) return '';
+      if (typeof obj === 'string') return looks(obj) ? obj : '';
+      if (typeof obj !== 'object') return '';
+      for (var k in obj) {
+        try {
+          var v = obj[k];
+          if (/combo_token/i.test(k) && typeof v === 'string' && v.length > 8) return v;
+          if (looks(v)) return v;
+          var f = pick(v, depth + 1);
+          if (f) return f;
+        } catch (e) {}
+      }
+      return '';
     }
     try {
       window.addEventListener('message', function (e) {
@@ -83,15 +112,11 @@ private const val COMBO_HOOK_JS = """
       try {
         if (typeof headers.forEach === 'function' && !Array.isArray(headers)) {
           headers.forEach(function (v, k) {
-            if (k && String(k).toLowerCase() === 'x-rpc-combo_token' && v) {
-              window.__smCombo = String(v); notify(v);
-            }
+            if (k && String(k).toLowerCase() === 'x-rpc-combo_token' && v) set(v);
           });
         } else {
           Object.keys(headers).forEach(function (k) {
-            if (String(k).toLowerCase() === 'x-rpc-combo_token' && headers[k]) {
-              window.__smCombo = String(headers[k]); notify(headers[k]);
-            }
+            if (String(k).toLowerCase() === 'x-rpc-combo_token' && headers[k]) set(headers[k]);
           });
         }
       } catch (e) {}
@@ -103,17 +128,44 @@ private const val COMBO_HOOK_JS = """
           if (init && init.headers) hook(init.headers);
           if (input && input.headers) hook(input.headers);
         } catch (e) {}
-        return of.apply(this, arguments);
+        var p = of.apply(this, arguments);
+        try {
+          if (p && typeof p.then === 'function') {
+            p.then(function (res) {
+              try {
+                if (!res || typeof res.clone !== 'function') return;
+                res.clone().json().then(function (d) {
+                  var v = pick(d, 0);
+                  if (v) set(v);
+                }).catch(function () {});
+              } catch (e) {}
+            }).catch(function () {});
+          }
+        } catch (e) {}
+        return p;
       };
     }
     var ox = XMLHttpRequest.prototype.setRequestHeader;
     XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
       try {
-        if (name && String(name).toLowerCase() === 'x-rpc-combo_token' && value) {
-          window.__smCombo = String(value); notify(value);
-        }
+        if (name && String(name).toLowerCase() === 'x-rpc-combo_token' && value) set(value);
       } catch (e) {}
       return ox.apply(this, arguments);
+    };
+    var oo = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function () {
+      var x = this;
+      try {
+        x.addEventListener('load', function () {
+          try {
+            var t = x.responseText;
+            if (!t || t.length > 2000000 || t.indexOf('combo') < 0) return;
+            var v = pick(JSON.parse(t), 0);
+            if (v) set(v);
+          } catch (e) {}
+        });
+      } catch (e) {}
+      return oo.apply(this, arguments);
     };
   } catch (e) {}
 })();
@@ -126,24 +178,45 @@ private const val COMBO_HOOK_JS = """
 private const val COMBO_READ_JS = """
 (function () {
   try { if (window.__smCombo) return String(window.__smCombo); } catch (e) {}
+  function looks(v) {
+    if (typeof v !== 'string' || v.length < 13) return false;
+    var i = v.indexOf('ai=');
+    if (i < 0) return false;
+    if (i > 0 && v.charAt(i - 1) !== ';') return false;
+    var d = v.charAt(i + 3);
+    return d >= '0' && d <= '9' && v.indexOf(';', i) > 0;
+  }
+  function pick(obj, depth) {
+    if (!obj || depth > 6) return '';
+    if (typeof obj === 'string') return looks(obj) ? obj : '';
+    if (typeof obj !== 'object') return '';
+    for (var k in obj) {
+      try {
+        var v = obj[k];
+        if (/combo_token/i.test(k) && typeof v === 'string' && v.length > 8) return v;
+        if (looks(v)) return v;
+        var f = pick(v, depth + 1);
+        if (f) return f;
+      } catch (e) {}
+    }
+    return '';
+  }
   function scan(store) {
     try {
       for (var i = 0; i < store.length; i++) {
         var k = store.key(i) || '';
-        if (!/combo/i.test(k)) continue;
         var v = store.getItem(k);
         if (!v) continue;
         v = String(v);
         try {
-          var o = JSON.parse(v);
-          if (o && typeof o === 'object') {
-            for (var kk in o) if (/combo/i.test(kk) && o[kk]) return String(o[kk]);
-            if (o.value) return String(o.value);
-            if (o.token) return String(o.token);
-            if (o.data && typeof o.data === 'string') return o.data;
-          }
+          var got = pick(JSON.parse(v), 0);
+          if (got) return got;
         } catch (e) {}
-        return v;
+        if (/combo/i.test(k)) {
+          if (looks(v)) return v;
+          if (v.length > 8 && v.length < 8000) return v;
+        }
+        if (looks(v)) return v;
       }
     } catch (e) {}
     return '';
@@ -178,7 +251,9 @@ fun CaptureView(
 ) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var progress by remember { mutableStateOf(0) }
+    var comboHint by remember { mutableStateOf("") }
     val startUrl = game.url.ifBlank { "https://ys.mihoyo.com/cloud/" }
+    val needCombo = game.key == "genshin" || game.key == "starrail"
 
     BackHandler {
         val view = webView
@@ -308,6 +383,14 @@ fun CaptureView(
                 .navigationBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
+            if (comboHint.isNotBlank()) {
+                Text(
+                    comboHint,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            }
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -326,7 +409,14 @@ fun CaptureView(
                         }
                         // 先向页面要 combo_token，再连 Cookie 一起交给上传流程
                         view.evaluateJavascript(COMBO_READ_JS) { raw ->
-                            onHarvest(CookieHarvester.harvest(domains), jsString(raw))
+                            val combo = jsString(raw)
+                            if (needCombo && combo.isBlank()) {
+                                comboHint = "还没抓到云游戏凭证（combo_token）。请先在页面里点「开始游戏」，" +
+                                    "等云游戏画面出来后再点一次抓取。"
+                            } else {
+                                comboHint = ""
+                                onHarvest(CookieHarvester.harvest(domains), combo)
+                            }
                         }
                     },
                     modifier = Modifier.fillMaxSize()

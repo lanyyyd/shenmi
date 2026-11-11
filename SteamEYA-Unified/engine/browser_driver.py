@@ -706,8 +706,35 @@ def capture_mihoyo_cookies(driver: webdriver.Remote) -> list:
 _INTERCEPT_JS = """
 window.__captured_combo_token = '';
 (function(){
-  function notify(v){
-    try { if (window.top && window.top !== window) window.top.postMessage({__smCombo: String(v)}, '*'); } catch(e){}
+  function looks(v){
+    if (typeof v !== 'string' || v.length < 13) return false;
+    var i = v.indexOf('ai=');
+    if (i < 0) return false;
+    if (i > 0 && v.charAt(i - 1) !== ';') return false;
+    var d = v.charAt(i + 3);
+    return d >= '0' && d <= '9' && v.indexOf(';', i) > 0;
+  }
+  function set(v){
+    if (!v) return;
+    v = String(v);
+    if (v.length < 8 || v.length > 8000) return;
+    window.__captured_combo_token = v;
+    try { if (window.top && window.top !== window) window.top.postMessage({__smCombo: v}, '*'); } catch(e){}
+  }
+  function pick(o, depth){
+    if (!o || depth > 6) return '';
+    if (typeof o === 'string') return looks(o) ? o : '';
+    if (typeof o !== 'object') return '';
+    for (var k in o) {
+      try {
+        var v = o[k];
+        if (/combo_token/i.test(k) && typeof v === 'string' && v.length > 8) return v;
+        if (looks(v)) return v;
+        var f = pick(v, depth + 1);
+        if (f) return f;
+      } catch(e){}
+    }
+    return '';
   }
   try {
     window.addEventListener('message', function(e){
@@ -722,23 +749,52 @@ window.__captured_combo_token = '';
         const h = init.headers;
         if (h instanceof Headers) {
           h.forEach(function(v, k){
-            if (k.toLowerCase() === 'x-rpc-combo_token' && v) { window.__captured_combo_token = v; notify(v); }
+            if (k.toLowerCase() === 'x-rpc-combo_token' && v) set(v);
           });
         } else {
           Object.keys(h).forEach(function(k){
-            if (k.toLowerCase() === 'x-rpc-combo_token' && h[k]) { window.__captured_combo_token = h[k]; notify(h[k]); }
+            if (k.toLowerCase() === 'x-rpc-combo_token' && h[k]) set(h[k]);
           });
         }
       }
     } catch(e){}
-    return origFetch.apply(this, arguments);
+    const p = origFetch.apply(this, arguments);
+    try {
+      if (p && typeof p.then === 'function') {
+        p.then(function(res){
+          try {
+            if (!res || typeof res.clone !== 'function') return;
+            res.clone().json().then(function(d){
+              var v = pick(d, 0);
+              if (v) set(v);
+            }).catch(function(){});
+          } catch(e){}
+        }).catch(function(){});
+      }
+    } catch(e){}
+    return p;
   };
   const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
   XMLHttpRequest.prototype.setRequestHeader = function(name, value){
     try {
-      if (name.toLowerCase() === 'x-rpc-combo_token' && value) { window.__captured_combo_token = value; notify(value); }
+      if (name.toLowerCase() === 'x-rpc-combo_token' && value) set(value);
     } catch(e){}
     return origSetHeader.apply(this, arguments);
+  };
+  const origOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(){
+    const x = this;
+    try {
+      x.addEventListener('load', function(){
+        try {
+          const t = x.responseText;
+          if (!t || t.length > 2000000 || t.indexOf('combo') < 0) return;
+          var v = pick(JSON.parse(t), 0);
+          if (v) set(v);
+        } catch(e){}
+      });
+    } catch(e){}
+    return origOpen.apply(this, arguments);
   };
 })();
 """
@@ -747,24 +803,45 @@ window.__captured_combo_token = '';
 _READ_COMBO_JS = """
 (function () {
   try { if (window.__captured_combo_token) return String(window.__captured_combo_token); } catch (e) {}
+  function looks(v) {
+    if (typeof v !== 'string' || v.length < 13) return false;
+    var i = v.indexOf('ai=');
+    if (i < 0) return false;
+    if (i > 0 && v.charAt(i - 1) !== ';') return false;
+    var d = v.charAt(i + 3);
+    return d >= '0' && d <= '9' && v.indexOf(';', i) > 0;
+  }
+  function pick(o, depth) {
+    if (!o || depth > 6) return '';
+    if (typeof o === 'string') return looks(o) ? o : '';
+    if (typeof o !== 'object') return '';
+    for (var k in o) {
+      try {
+        var v = o[k];
+        if (/combo_token/i.test(k) && typeof v === 'string' && v.length > 8) return v;
+        if (looks(v)) return v;
+        var f = pick(v, depth + 1);
+        if (f) return f;
+      } catch (e) {}
+    }
+    return '';
+  }
   function scan(store) {
     try {
       for (var i = 0; i < store.length; i++) {
         var k = store.key(i) || '';
-        if (!/combo/i.test(k)) continue;
         var v = store.getItem(k);
         if (!v) continue;
         v = String(v);
         try {
-          var o = JSON.parse(v);
-          if (o && typeof o === 'object') {
-            for (var kk in o) if (/combo/i.test(kk) && o[kk]) return String(o[kk]);
-            if (o.value) return String(o.value);
-            if (o.token) return String(o.token);
-            if (o.data && typeof o.data === 'string') return o.data;
-          }
+          var got = pick(JSON.parse(v), 0);
+          if (got) return got;
         } catch (e) {}
-        return v;
+        if (/combo/i.test(k)) {
+          if (looks(v)) return v;
+          if (v.length > 8 && v.length < 8000) return v;
+        }
+        if (looks(v)) return v;
       }
     } catch (e) {}
     return '';
