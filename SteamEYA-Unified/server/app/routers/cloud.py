@@ -310,6 +310,8 @@ def check_cookie_valid(cookies: list, game: str, combo_token: str = "") -> dict:
         # 用户自定义游戏：没有对应的官方接口可查，只要 cookie 抓到了就当作可用。
         return {"valid": True, "msg": "自定义游戏不做有效性校验", "nickname": "", "game_uid": ""}
     cookie_str = "; ".join(f"{k}={v}" for k, v in cmap.items())
+    # 兼容只在 Cookie 里带了云游戏凭证的情况（部分 WebView / 粘贴来源会这样）
+    combo_token = combo_token or cmap.get("combo_token", "") or cmap.get("x-rpc-combo_token", "")
     if cfg.get("vendor") == "wanmei":
         return _check_wanmei_valid(cookie_str)
     if cfg.get("vendor") == "bilibili":
@@ -332,20 +334,36 @@ def check_cookie_valid(cookies: list, game: str, combo_token: str = "") -> dict:
                   "role_count": len(roles)}
         if not roles:
             result["msg"] = "Cookie 有效（未查询到角色）"
-        # 原神 / 星穹铁道：必须能查到剩余免费时长，查不到即判定 Cookie 无效
+        # 没抓到 combo_token 时不能因此判 Cookie 无效：安卓 WebView / 粘贴来源经常只有 Cookie，
+        # 云游戏页面自己也能用 Cookie 换到凭证，只是后台暂时显示不了剩余时长。
+        if not combo_token:
+            result["msg"] = ("Cookie 有效（未查询到角色）" if not roles else "有效") + \
+                            "（未抓取云游戏凭证，剩余时长未知）"
+            result["free_duration"] = None
+            result["total_duration"] = None
+            return result
+        # 原神 / 星穹铁道：查不到剩余免费时长时区分「凭证过期」和「临时查询失败」
         wr = _get_mihoyo_free_duration(combo_token, game)
         if not wr.get("ok") or wr.get("free_duration") is None:
-            return {
-                "valid": False,
-                "msg": f"未获取到剩余免费时长，判定 Cookie 无效：{wr.get('msg') or '接口未返回时长'}",
-                "nickname": result.get("nickname", ""),
-                "game_uid": result.get("game_uid", ""),
-                "level": result.get("level"),
-                "region": result.get("region", ""),
-                "role_count": result.get("role_count", 0),
-                "free_duration": None,
-                "total_duration": None,
-            }
+            if wr.get("expired"):
+                msg = "云游戏凭证已失效，请重新抓取"
+                if wr.get("msg"):
+                    msg += f"：{wr['msg']}"
+                return {
+                    "valid": False,
+                    "msg": msg,
+                    "nickname": result.get("nickname", ""),
+                    "game_uid": result.get("game_uid", ""),
+                    "level": result.get("level"),
+                    "region": result.get("region", ""),
+                    "role_count": result.get("role_count", 0),
+                    "free_duration": None,
+                    "total_duration": None,
+                }
+            result["msg"] = f"有效（剩余时长查询失败：{wr.get('msg') or '接口未返回时长'}）"
+            result["free_duration"] = None
+            result["total_duration"] = None
+            return result
         result["free_duration"] = wr["free_duration"]
         result["total_duration"] = wr.get("total_duration")
         result["msg"] = f"有效，剩余免费时长 {wr['free_duration']} 分钟"
@@ -383,6 +401,12 @@ def upload(payload: dict = Body(...), user: dict = Depends(get_current_user)):
     game = payload.get("game") or DEFAULT_GAME_KEY
     cookies = payload.get("cookies")
     combo_token = payload.get("combo_token") or ""
+    # 有些来源把云游戏凭证放在 Cookie 里，这里补到 combo_token，后续检测 / 续期才用得上
+    if not combo_token:
+        for c in cookies or []:
+            if str(c.get("name") or "").lower() in ("combo_token", "x-rpc-combo_token"):
+                combo_token = str(c.get("value") or "")
+                break
     if not game_exists(game):
         raise HTTPException(400, "未知游戏")
     if not cookies:
@@ -400,7 +424,9 @@ def upload(payload: dict = Body(...), user: dict = Depends(get_current_user)):
         "INSERT INTO cloud_cookies (user_id, game, game_uid, data, combo_token, updated_at, "
         "valid, checked_at, nickname, free_duration, total_duration) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(user_id, game, game_uid) DO UPDATE SET data=excluded.data, "
-        "combo_token=excluded.combo_token, updated_at=excluded.updated_at, valid=excluded.valid, "
+        # 新数据没带 combo_token 时保留旧的，别把之前能用的凭证清掉
+        "combo_token=COALESCE(NULLIF(excluded.combo_token,''), cloud_cookies.combo_token), "
+        "updated_at=excluded.updated_at, valid=excluded.valid, "
         "checked_at=excluded.checked_at, nickname=excluded.nickname, "
         "free_duration=excluded.free_duration, total_duration=excluded.total_duration",
         (user["id"], game, game_uid, blob, combo_token, now,
@@ -493,7 +519,9 @@ def internal_relay(request: Request, payload: dict = Body(...)):
         "INSERT INTO cloud_cookies (user_id, game, game_uid, data, combo_token, updated_at, valid, "
         "checked_at, nickname, free_duration, total_duration) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(user_id, game, game_uid) DO UPDATE SET data=excluded.data, "
-        "combo_token=excluded.combo_token, updated_at=excluded.updated_at, valid=excluded.valid, "
+        # 新数据没带 combo_token 时保留旧的，别把之前能用的凭证清掉
+        "combo_token=COALESCE(NULLIF(excluded.combo_token,''), cloud_cookies.combo_token), "
+        "updated_at=excluded.updated_at, valid=excluded.valid, "
         "checked_at=excluded.checked_at, nickname=excluded.nickname, "
         "free_duration=excluded.free_duration, total_duration=excluded.total_duration",
         (user["id"], game, game_uid, security.encrypt_blob(cookies),

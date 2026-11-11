@@ -48,20 +48,133 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CookieDto
 import com.teatt.pocket.ui.BrandPink
+import org.json.JSONTokener
 
 /**
  * 云游戏登录抓取页：WebView 里让用户手动登录，登录完点底部按钮，
  * 再从 CookieManager 收割各个域名下的 Cookie。
+ *
+ * 米哈游云游戏还需要 x-rpc-combo_token 才能判定账号有效 / 查剩余时长，
+ * 而它不在 Cookie 里（页面是放在请求头里的），所以要在页面脚本执行前注入钩子，
+ * 把 fetch / XHR 上的 x-rpc-combo_token 记下来，抓取时一并取走。
  */
+private const val COMBO_HOOK_JS = """
+(function () {
+  try {
+    window.__smCombo = window.__smCombo || '';
+    function notify(v) {
+      try {
+        if (window.top && window.top !== window) window.top.postMessage({ __smCombo: String(v) }, '*');
+      } catch (e) {}
+    }
+    try {
+      window.addEventListener('message', function (e) {
+        var d = e && e.data;
+        if (d && d.__smCombo) window.__smCombo = String(d.__smCombo);
+      });
+    } catch (e) {}
+    function hook(headers) {
+      if (!headers) return;
+      try {
+        if (typeof headers.forEach === 'function' && !Array.isArray(headers)) {
+          headers.forEach(function (v, k) {
+            if (k && String(k).toLowerCase() === 'x-rpc-combo_token' && v) {
+              window.__smCombo = String(v); notify(v);
+            }
+          });
+        } else {
+          Object.keys(headers).forEach(function (k) {
+            if (String(k).toLowerCase() === 'x-rpc-combo_token' && headers[k]) {
+              window.__smCombo = String(headers[k]); notify(headers[k]);
+            }
+          });
+        }
+      } catch (e) {}
+    }
+    var of = window.fetch;
+    if (of) {
+      window.fetch = function (input, init) {
+        try {
+          if (init && init.headers) hook(init.headers);
+          if (input && input.headers) hook(input.headers);
+        } catch (e) {}
+        return of.apply(this, arguments);
+      };
+    }
+    var ox = XMLHttpRequest.prototype.setRequestHeader;
+    XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
+      try {
+        if (name && String(name).toLowerCase() === 'x-rpc-combo_token' && value) {
+          window.__smCombo = String(value); notify(value);
+        }
+      } catch (e) {}
+      return ox.apply(this, arguments);
+    };
+  } catch (e) {}
+})();
+"""
+
+/**
+ * 抓取时兜底：先看网络钩子，再翻 localStorage / sessionStorage 里 key 含 combo 的值，
+ * 最后看 document.cookie。页面把凭证落到缓存里时（用户说的「重开 App 就能抓到」）靠这一段。
+ */
+private const val COMBO_READ_JS = """
+(function () {
+  try { if (window.__smCombo) return String(window.__smCombo); } catch (e) {}
+  function scan(store) {
+    try {
+      for (var i = 0; i < store.length; i++) {
+        var k = store.key(i) || '';
+        if (!/combo/i.test(k)) continue;
+        var v = store.getItem(k);
+        if (!v) continue;
+        v = String(v);
+        try {
+          var o = JSON.parse(v);
+          if (o && typeof o === 'object') {
+            for (var kk in o) if (/combo/i.test(kk) && o[kk]) return String(o[kk]);
+            if (o.value) return String(o.value);
+            if (o.token) return String(o.token);
+            if (o.data && typeof o.data === 'string') return o.data;
+          }
+        } catch (e) {}
+        return v;
+      }
+    } catch (e) {}
+    return '';
+  }
+  var v = scan(window.localStorage) || scan(window.sessionStorage);
+  if (v) return v;
+  var parts = (document.cookie || '').split(';');
+  for (var j = 0; j < parts.length; j++) {
+    var p = parts[j].trim();
+    var idx = p.indexOf('=');
+    if (idx > 0 && /combo/i.test(p.substring(0, idx))) {
+      try { return decodeURIComponent(p.substring(idx + 1)); } catch (e) { return p.substring(idx + 1); }
+    }
+  }
+  return '';
+})();
+"""
+
+/** evaluateJavascript 返回值是 JSON 字面量（字符串会带引号），这里解回普通字符串。 */
+private fun jsString(raw: String?): String {
+    val text = raw?.trim().orEmpty()
+    if (text.isEmpty() || text == "null") return ""
+    return runCatching { JSONTokener(text).nextValue() as? String }.getOrNull().orEmpty()
+}
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun CaptureView(
     game: CloudGameDto,
     onCancel: () -> Unit,
-    onHarvest: (List<CookieDto>) -> Unit
+    onHarvest: (List<CookieDto>, String) -> Unit
 ) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var progress by remember { mutableStateOf(0) }
@@ -98,7 +211,7 @@ fun CaptureView(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    "在下方页面完成登录，然后点底部按钮",
+                    "登录并进入云游戏后，点底部按钮抓取",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -148,6 +261,12 @@ fun CaptureView(
                         setAcceptThirdPartyCookies(web, true)
                     }
 
+                    // 在页面脚本执行前注入，才能拿到登录后第一次云游戏请求里的 combo_token
+                    val hooked = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) &&
+                        runCatching {
+                            WebViewCompat.addDocumentStartJavaScript(web, COMBO_HOOK_JS, setOf("*"))
+                        }.isSuccess
+
                     webChromeClient = object : WebChromeClient() {
                         override fun onProgressChanged(view: WebView?, newProgress: Int) {
                             progress = newProgress
@@ -155,6 +274,12 @@ fun CaptureView(
                     }
 
                     webViewClient = object : WebViewClient() {
+                        override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                            super.onPageStarted(view, url, favicon)
+                            // 老版本 WebView 不支持 document-start 时的降级：每次导航都补注一次
+                            if (!hooked) runCatching { view.evaluateJavascript(COMBO_HOOK_JS, null) }
+                        }
+
                         override fun shouldOverrideUrlLoading(
                             view: WebView,
                             request: WebResourceRequest
@@ -194,7 +319,15 @@ fun CaptureView(
                 TextButton(
                     onClick = {
                         val domains = CookieHarvester.domainsFor(game.key, startUrl)
-                        onHarvest(CookieHarvester.harvest(domains))
+                        val view = webView
+                        if (view == null) {
+                            onHarvest(CookieHarvester.harvest(domains), "")
+                            return@TextButton
+                        }
+                        // 先向页面要 combo_token，再连 Cookie 一起交给上传流程
+                        view.evaluateJavascript(COMBO_READ_JS) { raw ->
+                            onHarvest(CookieHarvester.harvest(domains), jsString(raw))
+                        }
                     },
                     modifier = Modifier.fillMaxSize()
                 ) {

@@ -127,7 +127,7 @@ fun CloudScreen(
 
     LaunchedEffect(token) { reload() }
 
-    fun upload(game: CloudGameDto, cookies: List<CookieDto>) {
+    fun upload(game: CloudGameDto, cookies: List<CookieDto>, comboToken: String = "") {
         if (cookies.isEmpty()) {
             dialog = "没抓到 Cookie" to "可能还没登录完成，返回页面确认登录后再试一次。"
             return
@@ -135,7 +135,7 @@ fun CloudScreen(
         busyKey = game.key
         scope.launch {
             try {
-                val result = CloudApi.upload(token, game.key, cookies)
+                val result = CloudApi.upload(token, game.key, cookies, comboToken)
                 val detail = buildString {
                     append("已保存 ")
                     append(cookies.size)
@@ -176,9 +176,9 @@ fun CloudScreen(
             CaptureView(
                 game = target,
                 onCancel = { captureTarget = null },
-                onHarvest = { cookies ->
+                onHarvest = { cookies, combo ->
                     captureTarget = null
-                    upload(target, cookies)
+                    upload(target, cookies, combo)
                 }
             )
         }

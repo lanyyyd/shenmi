@@ -706,6 +706,15 @@ def capture_mihoyo_cookies(driver: webdriver.Remote) -> list:
 _INTERCEPT_JS = """
 window.__captured_combo_token = '';
 (function(){
+  function notify(v){
+    try { if (window.top && window.top !== window) window.top.postMessage({__smCombo: String(v)}, '*'); } catch(e){}
+  }
+  try {
+    window.addEventListener('message', function(e){
+      var d = e && e.data;
+      if (d && d.__smCombo) window.__captured_combo_token = String(d.__smCombo);
+    });
+  } catch(e){}
   const origFetch = window.fetch;
   window.fetch = function(input, init){
     try {
@@ -713,11 +722,11 @@ window.__captured_combo_token = '';
         const h = init.headers;
         if (h instanceof Headers) {
           h.forEach(function(v, k){
-            if (k.toLowerCase() === 'x-rpc-combo_token' && v) window.__captured_combo_token = v;
+            if (k.toLowerCase() === 'x-rpc-combo_token' && v) { window.__captured_combo_token = v; notify(v); }
           });
         } else {
           Object.keys(h).forEach(function(k){
-            if (k.toLowerCase() === 'x-rpc-combo_token' && h[k]) window.__captured_combo_token = h[k];
+            if (k.toLowerCase() === 'x-rpc-combo_token' && h[k]) { window.__captured_combo_token = h[k]; notify(h[k]); }
           });
         }
       }
@@ -727,10 +736,50 @@ window.__captured_combo_token = '';
   const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
   XMLHttpRequest.prototype.setRequestHeader = function(name, value){
     try {
-      if (name.toLowerCase() === 'x-rpc-combo_token' && value) window.__captured_combo_token = value;
+      if (name.toLowerCase() === 'x-rpc-combo_token' && value) { window.__captured_combo_token = value; notify(value); }
     } catch(e){}
     return origSetHeader.apply(this, arguments);
   };
+})();
+"""
+
+
+_READ_COMBO_JS = """
+(function () {
+  try { if (window.__captured_combo_token) return String(window.__captured_combo_token); } catch (e) {}
+  function scan(store) {
+    try {
+      for (var i = 0; i < store.length; i++) {
+        var k = store.key(i) || '';
+        if (!/combo/i.test(k)) continue;
+        var v = store.getItem(k);
+        if (!v) continue;
+        v = String(v);
+        try {
+          var o = JSON.parse(v);
+          if (o && typeof o === 'object') {
+            for (var kk in o) if (/combo/i.test(kk) && o[kk]) return String(o[kk]);
+            if (o.value) return String(o.value);
+            if (o.token) return String(o.token);
+            if (o.data && typeof o.data === 'string') return o.data;
+          }
+        } catch (e) {}
+        return v;
+      }
+    } catch (e) {}
+    return '';
+  }
+  var v = scan(window.localStorage) || scan(window.sessionStorage);
+  if (v) return v;
+  var parts = (document.cookie || '').split(';');
+  for (var j = 0; j < parts.length; j++) {
+    var p = parts[j].trim();
+    var idx = p.indexOf('=');
+    if (idx > 0 && /combo/i.test(p.substring(0, idx))) {
+      try { return decodeURIComponent(p.substring(idx + 1)); } catch (e) { return p.substring(idx + 1); }
+    }
+  }
+  return '';
 })();
 """
 
@@ -761,6 +810,13 @@ def capture_combo_token(driver: webdriver.Remote, timeout: int = 30) -> str:
         except Exception:
             pass
         time.sleep(1)
+
+    if not token:
+        # 钩子没抓到（页面已提前发过请求）时，从 localStorage / sessionStorage / cookie 里翻缓存
+        try:
+            token = str(driver.execute_script(_READ_COMBO_JS) or "")
+        except Exception:
+            token = ""
 
     if not token:
         try:
