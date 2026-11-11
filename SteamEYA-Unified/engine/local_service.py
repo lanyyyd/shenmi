@@ -143,7 +143,9 @@ def login(payload: dict = Body(...)):
         try:
             drv = _drv()
             driver, reused = _get_login_driver(game, browser)
-            drv.inject_cookies(driver, cookies, game, url)
+            # 上号前先清掉登录 profile 里残留的 Cookie / 站点存储，否则上一个账号
+            # （或上次失败的登录态）会让云游戏页面继续弹登录框。
+            drv.inject_cookies(driver, cookies, game, url, reset=True)
             drv.navigate_to_game(driver, game, url)
             import time
             time.sleep(3)

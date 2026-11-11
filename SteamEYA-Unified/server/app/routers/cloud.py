@@ -438,13 +438,21 @@ def upload(payload: dict = Body(...), user: dict = Depends(get_current_user)):
     # 自定义游戏：首个成功上传的人让它对所有人可见，其他人就不用再自己建一遍。
     execute_update("UPDATE cloud_games SET visible=1 WHERE game_key=? AND visible=0", (game,))
 
-    # 米哈游账号：上传后立刻用 stoken 换一次票，验证「以后能长期无感续期」。
+    # 上传后不立刻强制换票：刚抓到的 Cookie 本身是最新鲜的，而浏览器 profile 里
+    # 可能残留别的/已注销账号的 stoken，强制换票会报「ltoken 续期失败 -100」，
+    # 甚至把新 Cookie 换成那个旧号的 token。这里只重置续期状态（避免客户端继续显示
+    # 旧错误），等真正上号 / 检测时再按需续期。
     # 会话型游戏（异环/哔哩哔哩）没有可换的票，refresh_ok 返回 null，客户端不提示。
     if game in cloud_refresh.MIHOYO_GAMES:
-        refreshed = cloud_refresh.refresh_stored(user["id"], game, game_uid, force=True)
-        refresh_ok = refreshed.get("ok")
-        refresh_msg = refreshed.get("msg") or ""
-        need_stoken = bool(refreshed.get("need_stoken"))
+        has_stoken = cloud_refresh.stoken_bound(user["id"], cookies)
+        execute(
+            "UPDATE cloud_cookies SET refresh_at=?, refresh_ok=NULL, refresh_msg='' "
+            "WHERE user_id=? AND game=? AND game_uid=?",
+            (now, user["id"], game, game_uid),
+        )
+        refresh_ok = None
+        refresh_msg = ""
+        need_stoken = not has_stoken
     else:
         refresh_ok = None
         refresh_msg = ""

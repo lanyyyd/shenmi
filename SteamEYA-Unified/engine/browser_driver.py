@@ -272,11 +272,36 @@ def launch_browser(
     return driver
 
 
-def inject_cookies(driver: webdriver.Remote, cookies: list, game: str = "genshin", url: str | None = None) -> None:
-    """向浏览器注入 Cookie（必须先访问目标域名一次）"""
+def reset_browser_state(driver: webdriver.Remote) -> None:
+    """清掉持久化 profile 里上一次的登录态（等价安卓端「清除 WebView 的 Cookies」）。
+
+    登录 profile 是按游戏复用的，上一次登录失败或别的账号留下的 Cookie / localStorage
+    会让云游戏页面继续停在登录框，即使这次注入的 Cookie 是新的。
+    """
+    try:
+        driver.execute_cdp_cmd("Network.clearBrowserCookies", {})
+    except Exception:
+        try:
+            driver.delete_all_cookies()
+        except Exception:
+            pass
+    try:
+        driver.execute_script("try{localStorage.clear();sessionStorage.clear();}catch(e){}")
+    except Exception:
+        pass
+
+
+def inject_cookies(driver: webdriver.Remote, cookies: list, game: str = "genshin", url: str | None = None,
+                   reset: bool = False) -> None:
+    """向浏览器注入 Cookie（必须先访问目标域名一次）。
+
+    reset=True 时先清空浏览器里残留的 Cookie 与站点存储（上号场景用）。
+    """
     cfg = _resolve_cfg(game, url)
     driver.get(cfg.get("home") or url or MIHOYO_HOME)
     time.sleep(1)
+    if reset:
+        reset_browser_state(driver)
 
     for cookie in cookies:
         cookie_dict = {

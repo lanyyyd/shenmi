@@ -33,6 +33,9 @@ UA = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) miHoYoBBS/{BBS_VERSION}"
 # 只有这两个内置游戏走米哈游账号体系；自定义游戏一律视为会话型。
 MIHOYO_GAMES = ("genshin", "starrail")
 
+# passport 表示「stoken 已注销/登录态失效」的返回码，这种 stoken 没必要再试。
+DEAD_STOKEN_CODES = (-100, -101, 10001)
+
 # 上号前懒续期：超过 12 小时没换过票就先续一次
 LAZY_REFRESH_SECONDS = 12 * 3600
 # 后台巡检：凌晨那一轮会把超过 24 小时没续期的账号全部换一遍
@@ -185,7 +188,8 @@ def _exchange(url: str, stoken: str, mid: str, device_id: str, client_type: str)
     if not isinstance(data, dict):
         return {"ok": False, "msg": "接口返回格式异常"}
     if data.get("retcode") != 0:
-        return {"ok": False, "msg": f"{data.get('message') or '续期失败'}（retcode={data.get('retcode')}）"}
+        return {"ok": False, "retcode": data.get("retcode"),
+                "msg": f"{data.get('message') or '续期失败'}（retcode={data.get('retcode')}）"}
     payload = data.get("data") or {}
     return {"ok": True, "value": payload, "msg": ""}
 
@@ -216,38 +220,100 @@ def _apply(cookies: list, ltoken: str, cookie_token: str) -> tuple[list, list]:
     return new_cookies, sorted(set(updated))
 
 
+def _without_stoken(cookies: list) -> list:
+    """摘掉已失效的 stoken（保留 mid/stuid，方便之后按账号补新的）。"""
+    return [dict(c) for c in cookies if str(c.get("name") or "") != "stoken"]
+
+
+def _with_stoken(cookies: list, stoken: str, rec: dict | None) -> list:
+    """把 Cookie 里的 stoken 换成指定的那个（顺带补 mid），返回新的 Cookie 数组。"""
+    new_cookies: list = []
+    names: set = set()
+    for c in cookies:
+        item = dict(c)
+        name = item.get("name")
+        names.add(name)
+        if name == "stoken":
+            item["value"] = stoken
+        new_cookies.append(item)
+    if "stoken" not in names:
+        new_cookies.append({"name": "stoken", "value": stoken, "domain": ".mihoyo.com", "path": "/"})
+    mid = str((rec or {}).get("mid") or "")
+    if mid and "mid" not in names:
+        new_cookies.append({"name": "mid", "value": mid, "domain": ".mihoyo.com", "path": "/"})
+    return new_cookies
+
+
 def refresh_cookies(cookies: list, user_id: int, game_uid: str = "", device_id: str = "") -> dict:
     """用 stoken 换一套新的 ltoken / cookie_token。
 
     返回 {"ok": bool, "cookies": [...], "msg": str, "updated": [字段名], "need_stoken": bool}。
     失败时仍返回原 Cookie，调用方可以继续用旧值（至少还能尝试登录）。
+
+    Cookie 里自带的 stoken 可能是浏览器 profile 残留的旧号/已注销账号（换票直接 -100）。
+    所以优先用扫码存下、按 mid 绑定的 stoken，失败再退回 Cookie 自带的那份。
     """
-    stoken, mid, _uid = credentials_from(cookies)
-    if not stoken:
+    stoken, mid, uid = credentials_from(cookies)
+    # 扫码拿到的 stoken 必须沿用扫码时的设备号，否则换票会被风控。
+    default_device = device_id or device_id_for(user_id, game_uid)
+    rec = stoken_record(user_id, mid, uid) if (mid or uid) else None
+
+    attempts: list[tuple[str, str, str]] = []
+    rec_stoken = str((rec or {}).get("stoken") or "")
+    # 扫码存下的 stoken 按 mid 绑定，归属确定，优先用它；Cookie 里夹带的那份可能是
+    # 浏览器 profile 残留的旧号，先换它反而会把凭据换成别的账号。
+    if rec_stoken and rec_stoken != stoken:
+        attempts.append((rec_stoken, str(rec.get("mid") or "") or mid,
+                         str(rec.get("device_id") or "") or default_device))
+    if stoken:
+        attempts.append((stoken, mid, default_device))
+
+    if not attempts:
         return {"ok": False, "need_stoken": True, "cookies": cookies, "updated": [],
                 "msg": "Cookie 中没有 stoken，无法自动续期（请在客户端用米游社 App 扫码补 stoken）"}
-    if stoken.startswith("v2_") and not mid:
-        return {"ok": False, "need_stoken": True, "cookies": cookies, "updated": [],
-                "msg": "v2 stoken 需要 mid，请在客户端重新扫码补 stoken"}
 
-    # 扫码拿到的 stoken 必须沿用扫码时的设备号，否则换票会被风控。
-    device_id = device_id or device_id_for(user_id, game_uid)
-    ltoken = _exchange(LTOKEN_URL, stoken, mid, device_id, "5")
-    if not ltoken.get("ok"):
-        return {"ok": False, "msg": f"ltoken 续期失败：{ltoken.get('msg')}",
-                "cookies": cookies, "updated": []}
-    cookie_token = _exchange(COOKIE_TOKEN_URL, stoken, mid, device_id, "2")
-    if not cookie_token.get("ok"):
-        return {"ok": False, "msg": f"cookie_token 续期失败：{cookie_token.get('msg')}",
-                "cookies": cookies, "updated": []}
+    fail_msg = ""
+    dead = False
+    for token, token_mid, dev in attempts:
+        if token.startswith("v2_") and not token_mid:
+            fail_msg = "v2 stoken 需要 mid，请在客户端重新扫码补 stoken"
+            continue
+        ltoken = _exchange(LTOKEN_URL, token, token_mid, dev, "5")
+        if not ltoken.get("ok"):
+            fail_msg = f"ltoken 续期失败：{ltoken.get('msg')}"
+            dead = dead or ltoken.get("retcode") in DEAD_STOKEN_CODES
+            continue
+        cookie_token = _exchange(COOKIE_TOKEN_URL, token, token_mid, dev, "2")
+        if not cookie_token.get("ok"):
+            fail_msg = f"cookie_token 续期失败：{cookie_token.get('msg')}"
+            dead = dead or cookie_token.get("retcode") in DEAD_STOKEN_CODES
+            continue
 
-    new_ltoken = str((ltoken.get("value") or {}).get("ltoken") or "")
-    new_cookie = str((cookie_token.get("value") or {}).get("cookie_token") or "")
-    if not new_ltoken or not new_cookie:
-        return {"ok": False, "msg": "续期接口未返回新 token", "cookies": cookies, "updated": []}
+        new_ltoken = str((ltoken.get("value") or {}).get("ltoken") or "")
+        new_cookie = str((cookie_token.get("value") or {}).get("cookie_token") or "")
+        if not new_ltoken or not new_cookie:
+            fail_msg = "续期接口未返回新 token"
+            continue
 
-    new_cookies, updated = _apply(cookies, new_ltoken, new_cookie)
-    return {"ok": True, "msg": "自动续期成功", "cookies": new_cookies, "updated": updated}
+        # 用扫码 stoken 才成功时，把它写回 Cookie，下次就不会再拿旧号换票。
+        base = cookies if token == stoken else _with_stoken(cookies, token, rec)
+        new_cookies, updated = _apply(base, new_ltoken, new_cookie)
+        return {"ok": True, "msg": "自动续期成功", "cookies": new_cookies, "updated": updated}
+
+    if dead:
+        # -100/-101 是「登录状态失效」，这个 stoken 已经彻底没用了：从 Cookie 里摘掉，
+        # 避免它被继续注入浏览器、也避免每次上号都弹同样的报错，改为提示用户扫码。
+        # 扫码入库的那份若已注销也要删掉，否则 merge_stoken 每次又会把它补回来。
+        if rec and rec.get("mid"):
+            try:
+                execute("DELETE FROM cloud_stokens WHERE user_id=? AND mid=?", (user_id, rec["mid"]))
+            except Exception:
+                log.exception("删除已失效 stoken 失败：user=%s mid=%s", user_id, rec["mid"])
+        return {"ok": False, "msg": "登录状态已失效，请重新扫码补 stoken",
+                "cookies": _without_stoken(cookies), "updated": [],
+                "need_stoken": True, "drop_stoken": True}
+    return {"ok": False, "msg": fail_msg, "cookies": cookies, "updated": [],
+            "need_stoken": fail_msg.startswith("v2 stoken")}
 
 
 def refresh_stored(user_id: int, game: str = "", uid: str = "", force: bool = False,
@@ -296,6 +362,12 @@ def refresh_stored(user_id: int, game: str = "", uid: str = "", force: bool = Fa
             execute("UPDATE cloud_cookies SET data=?, refresh_at=?, refresh_ok=1, refresh_msg=? WHERE id=?",
                     (security.encrypt_blob(result["cookies"]), now, msg, row["id"]))
             log.info("云游戏 Cookie 已自动续期：user=%s game=%s uid=%s", user_id, game, row["game_uid"])
+        elif result.get("drop_stoken"):
+            # stoken 已注销：把摘掉它的 Cookie 写回去，别再把废凭据注入浏览器。
+            execute("UPDATE cloud_cookies SET data=?, refresh_at=?, refresh_ok=0, refresh_msg=? WHERE id=?",
+                    (security.encrypt_blob(result["cookies"]), now, msg, row["id"]))
+            log.warning("云游戏 stoken 已失效，已从 Cookie 中移除：user=%s game=%s uid=%s",
+                        user_id, game, row["game_uid"])
         else:
             execute("UPDATE cloud_cookies SET refresh_at=?, refresh_ok=0, refresh_msg=? WHERE id=?",
                     (now, msg, row["id"]))
