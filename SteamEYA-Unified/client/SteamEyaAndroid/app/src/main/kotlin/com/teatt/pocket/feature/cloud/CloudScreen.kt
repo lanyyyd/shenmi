@@ -303,7 +303,9 @@ fun CloudScreen(
                                         CloudPlayActivity.intent(
                                             context,
                                             account.game,
+                                            account.displayName,
                                             account.gameUid,
+                                            account.nickname,
                                             url
                                         )
                                     )

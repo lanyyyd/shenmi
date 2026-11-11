@@ -411,8 +411,8 @@ fun CaptureView(
                         view.evaluateJavascript(COMBO_READ_JS) { raw ->
                             val combo = jsString(raw)
                             if (needCombo && combo.isBlank()) {
-                                comboHint = "还没抓到云游戏凭证（combo_token）。请先在页面里点「开始游戏」，" +
-                                    "等云游戏画面出来后再点一次抓取。"
+                                comboHint = "还没抓到云游戏凭证（combo_token）。可以尝试点击返回，重新进入抓取，" +
+                                    "然后重新点击下方抓取按钮。"
                             } else {
                                 comboHint = ""
                                 onHarvest(CookieHarvester.harvest(domains), combo)

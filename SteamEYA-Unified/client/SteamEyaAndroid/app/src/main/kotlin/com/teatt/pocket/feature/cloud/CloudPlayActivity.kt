@@ -16,6 +16,7 @@ import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -49,15 +50,25 @@ class CloudPlayActivity : ComponentActivity() {
 
     companion object {
         private const val EXTRA_GAME = "game"
+        private const val EXTRA_GAME_NAME = "game_name"
         private const val EXTRA_UID = "uid"
+        private const val EXTRA_NICKNAME = "nickname"
         private const val EXTRA_URL = "url"
 
-        fun intent(context: Context, game: String, uid: String, url: String): Intent =
-            Intent(context, CloudPlayActivity::class.java).apply {
-                putExtra(EXTRA_GAME, game)
-                putExtra(EXTRA_UID, uid)
-                putExtra(EXTRA_URL, url)
-            }
+        fun intent(
+            context: Context,
+            game: String,
+            gameName: String,
+            uid: String,
+            nickname: String,
+            url: String
+        ): Intent = Intent(context, CloudPlayActivity::class.java).apply {
+            putExtra(EXTRA_GAME, game)
+            putExtra(EXTRA_GAME_NAME, gameName)
+            putExtra(EXTRA_UID, uid)
+            putExtra(EXTRA_NICKNAME, nickname)
+            putExtra(EXTRA_URL, url)
+        }
 
         // 小米浏览器 UA（Android 16 / 真机机型），带 Mobile 且不带 WebView 的 "; wv" 标记。
         // 报成桌面 UA 会被云游戏平台当成 PC 客户端，下发 16:9 的键鼠流。
@@ -77,15 +88,24 @@ class CloudPlayActivity : ComponentActivity() {
     private var released = false
 
     private lateinit var game: String
+    private lateinit var gameName: String
     private lateinit var uid: String
+    private lateinit var nickname: String
     private lateinit var startUrl: String
+    private var gachaArmed = false
+    private var gachaCaptured = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         game = intent.getStringExtra(EXTRA_GAME).orEmpty()
+        gameName = intent.getStringExtra(EXTRA_GAME_NAME).orEmpty()
         uid = intent.getStringExtra(EXTRA_UID).orEmpty()
+        nickname = intent.getStringExtra(EXTRA_NICKNAME).orEmpty()
         startUrl = intent.getStringExtra(EXTRA_URL).orEmpty().ifBlank { "https://ys.mihoyo.com/cloud/" }
+        // 开关打开且是原神/星铁时，本次上号尝试顺手抓抽卡链接
+        gachaArmed = CloudGachaHistory.isEnabled(this) &&
+            game in setOf("genshin", "starrail")
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -96,6 +116,7 @@ class CloudPlayActivity : ComponentActivity() {
 
         buildWebView()
         buildOverlays()
+        if (gachaArmed) showGachaTip()
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -162,6 +183,20 @@ class CloudPlayActivity : ComponentActivity() {
                     error: WebResourceError?
                 ) {
                     if (request?.isForMainFrame == true) showError()
+                }
+
+                // 云游戏里打开「抽卡历史」时，页面会在本地 WebView 加载带 authkey 的 gacha 页；
+                // 这里截住这个请求就能拿到链接，不需要读游戏画面。
+                override fun shouldInterceptRequest(
+                    view: WebView?,
+                    request: WebResourceRequest?
+                ): WebResourceResponse? {
+                    // 这个回调在 WebView 的 IO 线程，写偏好/剪贴板/Toast 必须切回主线程
+                    val raw = request?.url?.toString()
+                    if (raw != null && gachaArmed && !gachaCaptured) {
+                        runOnUiThread { maybeCaptureGacha(raw) }
+                    }
+                    return super.shouldInterceptRequest(view, request)
                 }
             }
 
@@ -284,6 +319,47 @@ class CloudPlayActivity : ComponentActivity() {
         progressBar.visibility = View.GONE
         webView.visibility = View.INVISIBLE
         errorPane.visibility = View.VISIBLE
+    }
+
+    /** 顶部悬浮提示：只在本次上号开启抽卡抓取时出现，8 秒后自动消失。 */
+    private fun showGachaTip() {
+        val tip = TextView(this).apply {
+            text = "请前往抽卡历史记录页面，软件会尝试自动获取抽卡链接"
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setBackgroundColor(0xCC000000.toInt())
+            setPadding(24.dp(), 12.dp(), 24.dp(), 12.dp())
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { gravity = Gravity.TOP }
+        }
+        root.addView(tip)
+        tip.postDelayed({ runCatching { root.removeView(tip) } }, 8000)
+    }
+
+    /** 匹配 webstatic.mihoyo.com 上带 authkey 的抽卡历史页，抓到后复制并记录。 */
+    private fun maybeCaptureGacha(raw: String) {
+        if (!gachaArmed || gachaCaptured) return
+        val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return
+        if (uri.host != "webstatic.mihoyo.com") return
+        if (!uri.path.orEmpty().contains("gacha", ignoreCase = true)) return
+        val authkey = uri.getQueryParameter("authkey").orEmpty()
+        if (authkey.isBlank()) return
+        gachaCaptured = true
+        CloudGachaHistory.add(
+            this,
+            GachaCapture(
+                time = System.currentTimeMillis(),
+                link = raw,
+                gameName = gameName.ifBlank { if (game == "starrail") "星穹铁道" else "原神" },
+                gameUid = uid,
+                nickname = nickname
+            )
+        )
+        CloudGachaHistory.copy(this, raw)
+        Toast.makeText(this, "已获取抽卡链接，并复制到剪贴板", Toast.LENGTH_LONG).show()
     }
 
     private fun hideFullscreen() {
