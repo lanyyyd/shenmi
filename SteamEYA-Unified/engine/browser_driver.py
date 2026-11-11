@@ -291,11 +291,48 @@ def reset_browser_state(driver: webdriver.Remote) -> None:
         pass
 
 
+def _root_domain(game: str, url: str | None = None) -> str:
+    """Cookie 统一挂载的根域（与安卓端一致：写到根域上，各子域都能读到）。"""
+    if game in ("genshin", "starrail"):
+        return "mihoyo.com"
+    if game == "yihuan":
+        return "wanmei.com"
+    if game == "bilibili":
+        return "bilibili.com"
+    cfg = _resolve_cfg(game, url)
+    host = ""
+    for d in cfg.get("cookie_domains") or ():
+        host = str(d or "").strip(".").lower()
+        if host:
+            break
+    if not host and url:
+        host = (urlparse(url).netloc or "").lower()
+    parts = [p for p in host.split(".") if p]
+    return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
+
+def _cookie_domain(cookie_domain: str, root: str) -> str:
+    """按 Cookie 的真实归属选根域：hoyoverse 的凭据不要写到 mihoyo 上。"""
+    d = str(cookie_domain or "").lstrip(".").lower()
+    if "hoyoverse.com" in d:
+        return ".hoyoverse.com"
+    if "mihoyo.com" in d:
+        return ".mihoyo.com"
+    return f".{root}" if root else d
+
+
 def inject_cookies(driver: webdriver.Remote, cookies: list, game: str = "genshin", url: str | None = None,
                    reset: bool = False) -> None:
     """向浏览器注入 Cookie（必须先访问目标域名一次）。
 
     reset=True 时先清空浏览器里残留的 Cookie 与站点存储（上号场景用）。
+
+    两个关键点和安卓端保持一致，否则会「注入了但云原神还是登录不上」：
+    1. 域名统一改写成根域（.mihoyo.com）。抓到的 Cookie 里有些是 passport / 游戏子域
+       的 host-only Cookie，按原域名 add_cookie 会因 InvalidCookieDomain 被 Chromium
+       直接拒绝（以前只打 debug 日志，看起来像注入成功），登录态就缺了关键项。
+    2. 不写 expiry，按会话 Cookie 注入。服务端续期只替换了 value，expiry 还是抓取时的
+       旧过期时间，早就过期了，Chromium 会直接丢弃。
     """
     cfg = _resolve_cfg(game, url)
     driver.get(cfg.get("home") or url or MIHOYO_HOME)
@@ -303,25 +340,29 @@ def inject_cookies(driver: webdriver.Remote, cookies: list, game: str = "genshin
     if reset:
         reset_browser_state(driver)
 
+    root = _root_domain(game, url)
+    injected, failed = 0, 0
     for cookie in cookies:
-        cookie_dict = {
-            "name": cookie["name"],
-            "value": cookie["value"],
-        }
-        if cookie.get("domain"):
-            cookie_dict["domain"] = cookie["domain"]
-        if cookie.get("path"):
-            cookie_dict["path"] = cookie["path"]
+        name = str(cookie.get("name") or "")
+        value = str(cookie.get("value") or "")
+        if not name or not value:
+            continue
+        cookie_dict = {"name": name, "value": value, "path": "/"}
+        domain = _cookie_domain(cookie.get("domain"), root)
+        if domain:
+            cookie_dict["domain"] = domain
         if cookie.get("secure") is not None:
-            cookie_dict["secure"] = cookie["secure"]
+            cookie_dict["secure"] = bool(cookie["secure"])
         if cookie.get("httpOnly") is not None:
-            cookie_dict["httpOnly"] = cookie["httpOnly"]
-        if cookie.get("expiry"):
-            cookie_dict["expiry"] = cookie["expiry"]
+            cookie_dict["httpOnly"] = bool(cookie["httpOnly"])
         try:
             driver.add_cookie(cookie_dict)
+            injected += 1
         except Exception as e:
-            logger.debug(f"跳过 Cookie {cookie['name']}: {e}")
+            failed += 1
+            logger.debug(f"跳过 Cookie {name}（{domain}）: {e}")
+    if failed:
+        logger.warning("Cookie 注入完成：成功 %s 条，失败 %s 条", injected, failed)
 
 
 def display_name(game: str, url: str | None = None, name: str | None = None) -> str:
