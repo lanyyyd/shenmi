@@ -37,7 +37,6 @@
                 x:Name="AccountCombo"
                 Header="账号（同一游戏可存多个，按 UID 区分）"
                 HorizontalAlignment="Stretch"
-                DisplayMemberPath="PickerLabel"
                 PlaceholderText="该游戏还没有上传账号"
                 SelectionChanged="OnAccountChanged" />
             <ComboBox x:Name="BrowserCombo" Header="浏览器" HorizontalAlignment="Stretch" SelectedIndex="0">

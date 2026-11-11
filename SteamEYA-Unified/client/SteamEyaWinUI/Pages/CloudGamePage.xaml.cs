@@ -200,20 +200,28 @@ public sealed partial class CloudGamePage : Page
     private string CurrentGameName => CloudGameService.DisplayName(CurrentGame);
 
     /// <summary>当前游戏下选中的账号；同一游戏可以有多个，靠 UID 区分。</summary>
-    private CloudGameItem? CurrentAccount => AccountCombo.SelectedItem as CloudGameItem;
+    private CloudGameItem? CurrentAccount => (AccountCombo.SelectedItem as ComboBoxItem)?.Tag as CloudGameItem;
 
     private string CurrentAccountUid => CurrentAccount?.GameUid ?? string.Empty;
 
-    /// <summary>按当前游戏重建「账号」下拉，尽量保持原先选中的 UID。</summary>
+    /// <summary>
+    /// 按当前游戏重建「账号」下拉，尽量保持原先选中的 UID。
+    /// 用 ComboBoxItem + Tag 承载数据：WinUI 3 里直接给 ItemsSource 绑 internal 模型再指定
+    /// DisplayMemberPath，项会渲染成空白（左侧账号栏没内容就是这个原因），这里改为显式文本。
+    /// </summary>
     private void RebuildAccountCombo(string? preferUid = null)
     {
         var items = _status.Where(i => string.Equals(i.Game, CurrentGame, StringComparison.Ordinal)).ToList();
-        AccountCombo.ItemsSource = items;
+        AccountCombo.Items.Clear();
+        foreach (var it in items)
+        {
+            AccountCombo.Items.Add(new ComboBoxItem { Content = it.PickerLabel, Tag = it });
+        }
         var pick = (!string.IsNullOrEmpty(preferUid)
                        ? items.FirstOrDefault(i => string.Equals(i.GameUid, preferUid, StringComparison.Ordinal))
                        : null)
                    ?? items.FirstOrDefault();
-        AccountCombo.SelectedItem = pick;
+        AccountCombo.SelectedIndex = pick is null ? -1 : items.IndexOf(pick);
     }
 
     /// <summary>刷新右侧全部账号；preferUid 用于上传/点击后保持选中。</summary>
