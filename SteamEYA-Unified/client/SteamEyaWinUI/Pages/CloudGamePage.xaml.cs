@@ -40,20 +40,21 @@ public sealed partial class CloudGamePage : Page
     }
 
     /// <summary>
-    /// 打开页面时对已上传 Cookie 的游戏并行检测一次。
+    /// 打开页面时对已上传 Cookie 的账号并行检测一次。
     /// 剩余免费时长只在「检测」时由服务端向游戏方查询并回写，不检测就一直是空，
     /// 这里主动刷新一次，用户进来即可看到时长。
+    /// 同一游戏可能存了多个账号，必须按「游戏 + UID」逐个检测，否则只有一条有状态。
     /// </summary>
     private async Task AutoCheckAsync()
     {
-        var games = _status.Where(g => g.Valid != 0).Select(g => g.Game).ToArray();
-        if (games.Length == 0)
+        var accounts = _status.Where(g => g.Valid != 0).ToArray();
+        if (accounts.Length == 0)
         {
             return;
         }
         try
         {
-            await Task.WhenAll(games.Select(g => _cloud.CheckAsync(g)));
+            await Task.WhenAll(accounts.Select(g => _cloud.CheckAsync(g.Game, g.GameUid)));
             await RefreshStatusAsync();
         }
         catch (Exception ex)
@@ -198,8 +199,27 @@ public sealed partial class CloudGamePage : Page
     /// <summary>当前游戏的显示名，传给引擎做提示文案，避免出现 custom_xxxxxxxx。</summary>
     private string CurrentGameName => CloudGameService.DisplayName(CurrentGame);
 
-    private async Task RefreshStatusAsync()
+    /// <summary>当前游戏下选中的账号；同一游戏可以有多个，靠 UID 区分。</summary>
+    private CloudGameItem? CurrentAccount => AccountCombo.SelectedItem as CloudGameItem;
+
+    private string CurrentAccountUid => CurrentAccount?.GameUid ?? string.Empty;
+
+    /// <summary>按当前游戏重建「账号」下拉，尽量保持原先选中的 UID。</summary>
+    private void RebuildAccountCombo(string? preferUid = null)
     {
+        var items = _status.Where(i => string.Equals(i.Game, CurrentGame, StringComparison.Ordinal)).ToList();
+        AccountCombo.ItemsSource = items;
+        var pick = (!string.IsNullOrEmpty(preferUid)
+                       ? items.FirstOrDefault(i => string.Equals(i.GameUid, preferUid, StringComparison.Ordinal))
+                       : null)
+                   ?? items.FirstOrDefault();
+        AccountCombo.SelectedItem = pick;
+    }
+
+    /// <summary>刷新右侧全部账号；preferUid 用于上传/点击后保持选中。</summary>
+    private async Task RefreshStatusAsync(string? preferUid = null)
+    {
+        var keepUid = preferUid ?? CurrentAccountUid;
         try
         {
             var mine = await _cloud.MyAsync();
@@ -208,6 +228,7 @@ public sealed partial class CloudGamePage : Page
             {
                 _status.Add(item);
             }
+            RebuildAccountCombo(keepUid);
         }
         catch (Exception ex)
         {
@@ -217,18 +238,52 @@ public sealed partial class CloudGamePage : Page
 
     private async void OnRefreshStatus(object sender, RoutedEventArgs e) => await RefreshStatusAsync();
 
-    private void OnGameChanged(object sender, SelectionChangedEventArgs e) { }
+    private void OnGameChanged(object sender, SelectionChangedEventArgs e) => RebuildAccountCombo();
+
+    private void OnAccountChanged(object sender, SelectionChangedEventArgs e) { }
+
+    /// <summary>点右侧账号卡片：把左侧游戏和账号都切到这条，再点「一键上号」即可。</summary>
+    private void OnAccountItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is not CloudGameItem item)
+        {
+            return;
+        }
+
+        var match = GameCombo.Items
+            .OfType<ComboBoxItem>()
+            .FirstOrDefault(i => string.Equals(i.Tag as string, item.Game, StringComparison.Ordinal));
+        if (match is not null)
+        {
+            GameCombo.SelectedItem = match;   // 触发 OnGameChanged，先按游戏重建账号列表
+        }
+        RebuildAccountCombo(item.GameUid);
+
+        var name = string.IsNullOrWhiteSpace(item.Nickname) ? item.GameUid : item.Nickname;
+        ShowInfo($"已选择：{item.GameName} · {name} · UID {item.GameUid}，点「一键上号」开始",
+            InfoBarSeverity.Informational);
+    }
 
     private async void OnOneClickLogin(object sender, RoutedEventArgs e)
     {
         var game = CurrentGame;
+        var account = CurrentAccount;
+        if (account is null)
+        {
+            ShowInfo("该游戏还没有上传账号，请先「更新 Cookie」并「抓取并上传」，或在右侧选择已有账号",
+                InfoBarSeverity.Warning);
+            return;
+        }
+
+        var uid = account.GameUid;
         LoginButton.IsEnabled = false;
         try
         {
-            var data = await _cloud.DownloadAsync(game);
+            // 带 uid 下载，确保上的是选中的那个号，而不是该游戏最近上传的那个。
+            var data = await _cloud.DownloadAsync(game, uid);
             if (!data.Ok || data.Cookies is not { } cookies)
             {
-                ShowInfo(data.Msg ?? "该游戏尚未上传 Cookie，请先「更新 Cookie」", InfoBarSeverity.Warning);
+                ShowInfo(data.Msg ?? "该账号尚未上传 Cookie，请先「更新 Cookie」", InfoBarSeverity.Warning);
                 return;
             }
 
@@ -294,27 +349,44 @@ public sealed partial class CloudGamePage : Page
         };
         ShowInfo(result.Ok ? $"已上传（检测：{result.Detail}{refreshNote}）" : (result.Msg ?? "上传失败"),
             result.Ok && result.RefreshOk != false ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
-        await RefreshStatusAsync();
+        // 上传成功后选中刚上传的那个账号（同一个游戏可能已经有好几个号）
+        await RefreshStatusAsync(result.Uid);
     }
 
     private async void OnCheck(object sender, RoutedEventArgs e)
     {
-        var result = await _cloud.CheckAsync(CurrentGame);
-        // 服务端 check 的 msg 已含「有效，剩余免费时长 X 分钟」，优先展示它（detail 只有 upload 才返回）。
-        var text = result.Ok
-            ? (result.Msg ?? result.Detail ?? "检测完成")
-            : (result.Msg ?? result.Detail ?? "检测失败");
-        // 服务端检测到失效时会先用 stoken 续期再复检，把这一步的结果告诉用户。
-        if (!string.IsNullOrWhiteSpace(result.RefreshMsg))
+        var account = CurrentAccount;
+        if (account is null)
         {
-            text += $"\n{result.RefreshMsg}";
+            ShowInfo("该游戏还没有上传账号，请先「更新 Cookie」并「抓取并上传」", InfoBarSeverity.Warning);
+            return;
         }
-        if (result.NeedStoken)
+
+        var uid = account.GameUid;
+        CheckButton.IsEnabled = false;
+        try
         {
-            text += "\nCookie 里没有 stoken：请点「扫码补 stoken」用米游社 App 扫一次";
+            var result = await _cloud.CheckAsync(CurrentGame, uid);
+            // 服务端 check 的 msg 已含「有效，剩余免费时长 X 分钟」，优先展示它（detail 只有 upload 才返回）。
+            var text = result.Ok
+                ? (result.Msg ?? result.Detail ?? "检测完成")
+                : (result.Msg ?? result.Detail ?? "检测失败");
+            // 服务端检测到失效时会先用 stoken 续期再复检，把这一步的结果告诉用户。
+            if (!string.IsNullOrWhiteSpace(result.RefreshMsg))
+            {
+                text += $"\n{result.RefreshMsg}";
+            }
+            if (result.NeedStoken)
+            {
+                text += "\nCookie 里没有 stoken：请点「扫码补 stoken」用米游社 App 扫一次";
+            }
+            ShowInfo(text, result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Error);
+            await RefreshStatusAsync(uid);
         }
-        ShowInfo(text, result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Error);
-        await RefreshStatusAsync();
+        finally
+        {
+            CheckButton.IsEnabled = true;
+        }
     }
 
     // ---------------- 米游社扫码补 stoken ----------------

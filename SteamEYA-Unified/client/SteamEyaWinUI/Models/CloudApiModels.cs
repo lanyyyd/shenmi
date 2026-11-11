@@ -120,6 +120,23 @@ internal sealed class CloudGameItem
         ? "暂无账号信息"
         : $"{Nickname} {GameUid}".Trim();
 
+    /// <summary>左侧「账号」下拉的显示文本：同一游戏可以有多条，必须能靠昵称/UID 区分。</summary>
+    public string PickerLabel
+    {
+        get
+        {
+            var nick = string.IsNullOrWhiteSpace(Nickname) ? "未命名" : Nickname;
+            var uid = string.IsNullOrEmpty(GameUid) ? string.Empty : $" · UID {GameUid}";
+            var status = Valid switch
+            {
+                1 => "有效",
+                0 => "失效",
+                _ => "未检测"
+            };
+            return $"{nick}{uid} · {status}";
+        }
+    }
+
     public string DurationText => FreeDuration is not null
         ? $"剩余免费 {FreeDuration} 分钟"
         : (TotalDuration is not null ? $"剩余时长 {TotalDuration} 分钟" : string.Empty);
@@ -183,6 +200,9 @@ internal sealed class CloudActionResultDto
     public string? Detail { get; set; }
     public bool? Valid { get; set; }
     public string? Nickname { get; set; }
+
+    /// <summary>上传/检测后服务端识别出的账号 UID（同游戏多账号靠它区分）。</summary>
+    public string? Uid { get; set; }
 
     /// <summary>检测（/api/cloud/check）随结果一并返回的剩余免费时长（分钟）。</summary>
     [JsonPropertyName("free_duration")]

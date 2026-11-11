@@ -200,6 +200,9 @@ data class CloudAccountDto(
 ) {
     val displayName: String get() = gameName.ifBlank { game }
 
+    /** 同游戏多账号的唯一标识（busy 状态、列表 key 都用它区分）。 */
+    val key: String get() = "$game:$gameUid"
+
     /** 米哈游账号缺 stoken 时提示去扫码，会话型游戏不提示。 */
     val stokenHint: String get() = if (!hasStoken && game in setOf("genshin", "starrail")) {
         "stoken 未补，点「扫码」后 Cookie 可自动续期"

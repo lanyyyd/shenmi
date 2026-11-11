@@ -105,13 +105,27 @@ internal sealed class CloudGameService
         => await SendAsync(Auth(HttpMethod.Get, "/api/cloud/my"), CloudApiJsonContext.Default.CloudMyDto, ct)
            ?? new CloudMyDto();
 
-    public async Task<CloudDownloadDto> DownloadAsync(string game, CancellationToken ct = default)
-        => await SendAsync(Auth(HttpMethod.Get, $"/api/cloud/download?game={game}"),
-            CloudApiJsonContext.Default.CloudDownloadDto, ct) ?? new CloudDownloadDto();
-
-    public async Task<CloudActionResultDto> CheckAsync(string game, CancellationToken ct = default)
+    /// <summary>下载指定账号的 Cookie；uid 为空时服务端取该游戏最近上传的一条。</summary>
+    public async Task<CloudDownloadDto> DownloadAsync(string game, string uid = "", CancellationToken ct = default)
     {
-        var json = new JsonObject { ["game"] = game }.ToJsonString();
+        var query = $"/api/cloud/download?game={Uri.EscapeDataString(game)}";
+        if (!string.IsNullOrEmpty(uid))
+        {
+            query += $"&uid={Uri.EscapeDataString(uid)}";
+        }
+        return await SendAsync(Auth(HttpMethod.Get, query),
+            CloudApiJsonContext.Default.CloudDownloadDto, ct) ?? new CloudDownloadDto();
+    }
+
+    /// <summary>检测指定账号；uid 为空时检测该游戏最近上传的一条。</summary>
+    public async Task<CloudActionResultDto> CheckAsync(string game, string uid = "", CancellationToken ct = default)
+    {
+        var obj = new JsonObject { ["game"] = game };
+        if (!string.IsNullOrEmpty(uid))
+        {
+            obj["uid"] = uid;
+        }
+        var json = obj.ToJsonString();
         using var req = Auth(HttpMethod.Post, "/api/cloud/check");
         req.Content = new StringContent(json, Encoding.UTF8, "application/json");
         return await SendAsync(req, CloudApiJsonContext.Default.CloudActionResultDto, ct) ?? new CloudActionResultDto();

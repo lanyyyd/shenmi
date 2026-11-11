@@ -643,7 +643,8 @@ def check(payload: dict = Body(...), user: dict = Depends(get_current_user)):
 def my(user: dict = Depends(get_current_user)):
     rows = query_all(
         "SELECT game, updated_at, valid, checked_at, nickname, game_uid, free_duration, total_duration, "
-        "refresh_at, refresh_ok, refresh_msg, data FROM cloud_cookies WHERE user_id=?", (user["id"],),
+        "refresh_at, refresh_ok, refresh_msg, data FROM cloud_cookies WHERE user_id=? "
+        "ORDER BY game, updated_at DESC, id DESC", (user["id"],),
     )
     names = game_name_map()
     out = []

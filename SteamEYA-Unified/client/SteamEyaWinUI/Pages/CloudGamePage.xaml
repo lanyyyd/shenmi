@@ -33,6 +33,13 @@
                     Content="添加"
                     ToolTipService.ToolTip="添加自定义游戏（填写名称和默认打开地址）" />
             </Grid>
+            <ComboBox
+                x:Name="AccountCombo"
+                Header="账号（同一游戏可存多个，按 UID 区分）"
+                HorizontalAlignment="Stretch"
+                DisplayMemberPath="PickerLabel"
+                PlaceholderText="该游戏还没有上传账号"
+                SelectionChanged="OnAccountChanged" />
             <ComboBox x:Name="BrowserCombo" Header="浏览器" HorizontalAlignment="Stretch" SelectedIndex="0">
                 <ComboBoxItem Content="Edge（推荐）" Tag="edge" />
                 <ComboBoxItem Content="Chrome" Tag="chrome" />
@@ -67,7 +74,7 @@
             <InfoBar x:Name="PageInfoBar" IsOpen="False" IsClosable="True" />
 
             <TextBlock
-                Text="提示：云端模式下会自动取用你账号已上传的 Cookie 一键上号；若提示失效，请先「更新 Cookie」。网页抓到的 Cookie 通常没有 stoken，点「扫码补 stoken」用米游社 App 扫一次，之后就能长期自动续期。"
+                Text="提示：同一游戏可以存多个账号（例如两个云原神），上号时在「账号」里按 UID 选择；也可以直接点右侧账号卡片，左侧会自动选中。云端模式下会自动取用已上传的 Cookie；若提示失效，请先「更新 Cookie」。网页抓到的 Cookie 通常没有 stoken，点「扫码补 stoken」用米游社 App 扫一次，之后就能长期自动续期。"
                 TextWrapping="Wrap"
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
         </StackPanel>
@@ -79,10 +86,15 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
             <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10">
-                <TextBlock Text="账号状态" Style="{StaticResource SubtitleTextBlockStyle}" />
+                <TextBlock Text="账号状态（点任意账号即可选中）" Style="{StaticResource SubtitleTextBlockStyle}" />
                 <Button Content="刷新" Click="OnRefreshStatus" />
             </StackPanel>
-            <ListView x:Name="StatusList" Grid.Row="1" SelectionMode="None">
+            <ListView
+                x:Name="StatusList"
+                Grid.Row="1"
+                SelectionMode="None"
+                IsItemClickEnabled="True"
+                ItemClick="OnAccountItemClick">
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="models:CloudGameItem">
                         <Border

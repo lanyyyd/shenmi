@@ -277,64 +277,80 @@ fun CloudScreen(
             } else if (accounts.isEmpty()) {
                 item { EmptyCard() }
             } else {
-                items(accounts, key = { it.game + it.gameUid }) { account ->
-                    AccountCard(
-                        account = account,
-                        busy = busyKey == account.game,
-                        onPlay = {
-                            val url = playUrl(account)
-                            if (url.isBlank()) {
-                                dialog = "无法上号" to "该游戏还没有配置打开地址"
-                            } else {
-                                context.startActivity(
-                                    CloudPlayActivity.intent(
-                                        context,
-                                        account.game,
-                                        account.gameUid,
-                                        url
-                                    )
-                                )
-                            }
-                        },
-                        onCheck = {
-                            busyKey = account.game
-                            scope.launch {
-                                try {
-                                    val result = CloudApi.check(token, account.game, account.gameUid)
-                                    dialog = "检测完成" to buildString {
-                                        append("有效性：").append(if (result.valid == true) "通过" else "未通过")
-                                        if (result.nickname.isNotBlank()) append("\n昵称：${result.nickname}")
-                                        result.freeDuration?.let { append("\n剩余：$it 分钟") }
-                                        if (result.msg.isNotBlank()) append("\n").append(result.msg)
-                                        if (result.refreshMsg.isNotBlank()) append("\n").append(result.refreshMsg)
-                                    }
-                                    reload()
-                                } catch (e: Exception) {
-                                    dialog = "检测失败" to (e.message ?: "请稍后重试")
-                                } finally {
-                                    busyKey = null
-                                }
-                            }
-                        },
-                        onRecapture = { captureTarget = games.firstOrNull { it.key == account.game } },
-                        onPaste = {
-                            games.firstOrNull { it.key == account.game }?.let { pasteTarget = it }
-                        },
-                        onStoken = { scanTarget = account },
-                        onDelete = {
-                            busyKey = account.game
-                            scope.launch {
-                                try {
-                                    CloudApi.delete(token, account.game, account.gameUid)
-                                    reload()
-                                } catch (e: Exception) {
-                                    dialog = "删除失败" to (e.message ?: "请稍后重试")
-                                } finally {
-                                    busyKey = null
-                                }
-                            }
+                // 同一游戏可能存了多个账号（比如两个云原神），按游戏分组，多账号时显示数量。
+                accounts.groupBy { it.game }.forEach { (_, list) ->
+                    if (list.size > 1) {
+                        item(key = "hdr_" + list.first().game) {
+                            Text(
+                                "${list.first().displayName} · ${list.size} 个账号",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
                         }
-                    )
+                    }
+                    items(list, key = { it.game + ":" + it.gameUid }) { account ->
+                        AccountCard(
+                            account = account,
+                            busy = busyKey == account.game || busyKey == account.key,
+                            onPlay = {
+                                val url = playUrl(account)
+                                if (url.isBlank()) {
+                                    dialog = "无法上号" to "该游戏还没有配置打开地址"
+                                } else {
+                                    context.startActivity(
+                                        CloudPlayActivity.intent(
+                                            context,
+                                            account.game,
+                                            account.gameUid,
+                                            url
+                                        )
+                                    )
+                                }
+                            },
+                            onCheck = {
+                                busyKey = account.key
+                                scope.launch {
+                                    try {
+                                        val result = CloudApi.check(token, account.game, account.gameUid)
+                                        dialog = "检测完成" to buildString {
+                                            append("账号：").append(account.displayName)
+                                            if (account.gameUid.isNotBlank()) append(" · UID ${account.gameUid}")
+                                            append("\n有效性：").append(if (result.valid == true) "通过" else "未通过")
+                                            if (result.nickname.isNotBlank()) append("\n昵称：${result.nickname}")
+                                            result.freeDuration?.let { append("\n剩余：$it 分钟") }
+                                            if (result.msg.isNotBlank()) append("\n").append(result.msg)
+                                            if (result.refreshMsg.isNotBlank()) append("\n").append(result.refreshMsg)
+                                        }
+                                        reload()
+                                    } catch (e: Exception) {
+                                        dialog = "检测失败" to (e.message ?: "请稍后重试")
+                                    } finally {
+                                        busyKey = null
+                                    }
+                                }
+                            },
+                            onRecapture = { captureTarget = games.firstOrNull { it.key == account.game } },
+                            onPaste = {
+                                games.firstOrNull { it.key == account.game }?.let { pasteTarget = it }
+                            },
+                            onStoken = { scanTarget = account },
+                            onDelete = {
+                                busyKey = account.key
+                                scope.launch {
+                                    try {
+                                        CloudApi.delete(token, account.game, account.gameUid)
+                                        reload()
+                                    } catch (e: Exception) {
+                                        dialog = "删除失败" to (e.message ?: "请稍后重试")
+                                    } finally {
+                                        busyKey = null
+                                    }
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }
