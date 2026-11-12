@@ -123,6 +123,7 @@ async def admin_upload(file: UploadFile = File(...), version: str = Form(...), n
         "VALUES (?,?,?,?,?,?,?,1,?)",
         (version, notes or "", f"/uploads/releases/{name}", raw_name, len(data), sha, p, security.now_ms()),
     )
+    gh_update.prune_versions(p)
     return {"ok": True, "id": rid, "platform": p}
 
 
@@ -161,8 +162,9 @@ def _gh_config_out() -> dict:
 
 @router.get("/admin/gh-update")
 def gh_update_state(admin: dict = Depends(require_admin)):
-    """自动更新配置 + 最近一次检查/下载结果。"""
-    return {"ok": True, "config": _gh_config_out(), "status": gh_update.load_status()}
+    """自动更新配置 + 最近一次检查/下载结果 + 当前下载进度。"""
+    return {"ok": True, "config": _gh_config_out(), "status": gh_update.load_status(),
+            "progress": gh_update.download_progress()}
 
 
 @router.post("/admin/gh-update/config")

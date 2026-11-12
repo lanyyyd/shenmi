@@ -23,7 +23,7 @@ import requests
 
 from . import security
 from .config import UPDATE_DIR
-from .db import execute, execute_update, query_one
+from .db import execute, execute_update, query_all, query_one
 
 CONFIG_KEY = "gh_update_config"
 STATUS_KEY = "gh_update_status"
@@ -31,6 +31,7 @@ STATUS_KEY = "gh_update_status"
 DEFAULT_CONFIG = {
     "enabled": False,
     "interval": 360,                       # 分钟
+    "keep": 5,                             # 每个平台最多保留几个安装包，0=不限
     "repo": "lanyyyd/shenmi",
     "mirrors": ["https://gh.dayiu.cn"],    # 每行一个；可写 https://xxx/{url} 占位
     "token": "",                           # 可选，GitHub API 限流时用
@@ -39,9 +40,36 @@ DEFAULT_CONFIG = {
 UA = "SteamEYA-GH-Updater/1.0"
 MAX_INSTALLER = 500 * 1024 * 1024
 PROBE_TIMEOUT = 8
-DOWNLOAD_TIMEOUT = (10, 300)
+DOWNLOAD_TIMEOUT = (10, 60)   # 读超时压到 60 秒：卡住的源尽快判失败并切下一个
 
 _lock = threading.Lock()
+_progress_lock = threading.Lock()
+_progress: dict = {"active": False}
+
+
+def download_progress() -> dict:
+    """当前下载进度（内存态，不落库，避免每读一块都写 SQLite）。"""
+    with _progress_lock:
+        return dict(_progress)
+
+
+def _progress_start(version: str, asset: str) -> None:
+    with _progress_lock:
+        _progress.clear()
+        _progress.update({"active": True, "version": version, "asset": asset, "source": "",
+                          "downloaded": 0, "total": 0, "percent": 0, "speed": 0,
+                          "startedTs": int(time.time())})
+
+
+def _progress_update(**kw) -> None:
+    with _progress_lock:
+        _progress.update(kw)
+
+
+def _progress_end() -> None:
+    with _progress_lock:
+        _progress["active"] = False
+        _progress["speed"] = 0
 
 
 # ---------------------------------------------------------------- 配置读写
@@ -77,6 +105,10 @@ def load_config() -> dict:
     if isinstance(mirrors, str):
         mirrors = mirrors.splitlines()
     cfg["mirrors"] = [str(m).strip() for m in mirrors if str(m).strip()]
+    try:
+        cfg["keep"] = max(0, int(_get_setting("release_keep", str(DEFAULT_CONFIG["keep"]))))
+    except (TypeError, ValueError):
+        cfg["keep"] = DEFAULT_CONFIG["keep"]
     return cfg
 
 
@@ -103,6 +135,12 @@ def save_config(data: dict) -> dict:
         # 前端不回显 token；留空表示保持原值。
         if token and not token.startswith("*"):
             cfg["token"] = token
+    if "keep" in data:
+        try:
+            cfg["keep"] = max(0, int(data["keep"]))
+        except (TypeError, ValueError):
+            cfg["keep"] = DEFAULT_CONFIG["keep"]
+        _set_setting("release_keep", str(cfg["keep"]))
     _set_setting(CONFIG_KEY, json.dumps(cfg, ensure_ascii=False))
     return cfg
 
@@ -124,6 +162,45 @@ def _save_status(**kw) -> dict:
     st["updatedTs"] = security.now_ms()
     _set_setting(STATUS_KEY, json.dumps(st, ensure_ascii=False))
     return st
+
+
+def keep_limit() -> int:
+    try:
+        return max(0, int(_get_setting("release_keep", str(DEFAULT_CONFIG["keep"]))))
+    except (TypeError, ValueError):
+        return int(DEFAULT_CONFIG["keep"])
+
+
+def prune_versions(platform: str = "windows", keep: int | None = None) -> int:
+    """只保留最近 keep 个安装包（当前下发版本永远保留），返回清理条数。
+
+    keep=0 表示不限；被清理的版本连同磁盘文件一起删除。
+    """
+    keep = keep_limit() if keep is None else keep
+    if keep <= 0:
+        return 0
+    rows = query_all(
+        "SELECT id, file_path, active FROM app_releases WHERE platform=? ORDER BY id DESC",
+        (platform,),
+    )
+    if len(rows) <= keep:
+        return 0
+    keep_ids = {r["id"] for r in rows if r["active"]}
+    for r in rows:
+        if len(keep_ids) >= keep:
+            break
+        keep_ids.add(r["id"])
+    removed = 0
+    for r in rows:
+        if r["id"] in keep_ids:
+            continue
+        try:
+            (UPDATE_DIR / pathlib.Path(r["file_path"] or "").name).unlink(missing_ok=True)
+        except Exception:
+            pass
+        execute_update("DELETE FROM app_releases WHERE id = ?", (r["id"],))
+        removed += 1
+    return removed
 
 
 # ---------------------------------------------------------------- GitHub API
@@ -229,23 +306,27 @@ def probe_mirrors(asset_url: str, cfg: dict) -> list:
     return sorted(items, key=lambda x: (x["ms"] is None, x["ms"] or 0))
 
 
-def _download(asset: dict, cfg: dict) -> tuple[Optional[str], str, list]:
+def _download(asset: dict, cfg: dict, version: str = "") -> tuple[Optional[str], str, list]:
     """按延迟从快到慢依次尝试下载；返回 (本地文件名, 使用的源, 测速结果)。"""
-    probed = probe_mirrors(asset["assetUrl"], cfg)
-    errors = []
-    for it in probed:
-        if it["ms"] is None:
-            errors.append(f"{it['label']} 不可达")
-            continue
-        try:
-            name = _save_asset(it["url"], asset)
-            return name, it["label"], probed
-        except Exception as e:
-            errors.append(f"{it['label']}: {e}")
-    raise RuntimeError("全部下载源均失败：" + "；".join(errors[:4]))
+    _progress_start(version or asset.get("assetName", ""), asset.get("assetName", ""))
+    try:
+        probed = probe_mirrors(asset["assetUrl"], cfg)
+        errors = []
+        for it in probed:
+            if it["ms"] is None:
+                errors.append(f"{it['label']} 不可达")
+                continue
+            try:
+                name = _save_asset(it["url"], asset, label=it["label"])
+                return name, it["label"], probed
+            except Exception as e:
+                errors.append(f"{it['label']}: {e}")
+        raise RuntimeError("全部下载源均失败：" + "；".join(errors[:4]))
+    finally:
+        _progress_end()
 
 
-def _save_asset(url: str, asset: dict) -> str:
+def _save_asset(url: str, asset: dict, label: str = "") -> str:
     ext = pathlib.Path(asset["assetName"]).suffix.lower()[:12] or ".exe"
     name = f"{security.now_ms()}-{security.gen_token(6)}{ext}"
     dest = UPDATE_DIR / name
@@ -260,14 +341,24 @@ def _save_asset(url: str, asset: dict) -> str:
             if "text/html" in ctype:
                 raise RuntimeError("返回的是网页而不是安装包")
             expected = int(asset.get("assetSize") or 0)
+            total = int(resp.headers.get("Content-Length") or 0) or expected
+            _progress_update(source=label, downloaded=0, total=total, percent=0, speed=0)
+            last_t, last_written, speed = time.time(), 0, 0.0
             with open(tmp, "wb") as f:
-                for chunk in resp.iter_content(1024 * 1024):
+                for chunk in resp.iter_content(256 * 1024):
                     if not chunk:
                         continue
                     written += len(chunk)
                     if written > MAX_INSTALLER:
                         raise RuntimeError("安装包超过 500MB")
                     f.write(chunk)
+                    now = time.time()
+                    if now - last_t >= 0.5:
+                        inst = (written - last_written) / (now - last_t)
+                        speed = inst if speed <= 0 else speed * 0.6 + inst * 0.4
+                        last_t, last_written = now, written
+                        _progress_update(downloaded=written, speed=int(speed),
+                                         percent=round(written * 100.0 / total, 1) if total else 0)
         if expected and written != expected:
             raise RuntimeError(f"文件大小不符（{written}/{expected}）")
         tmp.replace(dest)
@@ -316,7 +407,7 @@ def run_once(force: bool = False) -> dict:
             _save_status(lastResult="skipped", message=msg, version=latest["version"])
             return {"ok": True, "skipped": True, "msg": msg, "version": latest["version"]}
 
-        saved, source, probed = _download(latest, cfg)
+        saved, source, probed = _download(latest, cfg, latest["version"])
         size = (UPDATE_DIR / saved).stat().st_size
         sha = _sha256(UPDATE_DIR / saved)
 
@@ -327,6 +418,7 @@ def run_once(force: bool = False) -> dict:
             (latest["version"], latest["notes"], f"/uploads/releases/{saved}",
              latest["assetName"], size, sha, "windows", security.now_ms()),
         )
+        prune_versions("windows")
         msg = f"已自动更新到 {latest['version']}（来源：{source}）"
         _save_status(lastResult="ok", message=msg, version=latest["version"],
                      releaseId=rid, asset=latest["assetName"], source=source,

@@ -112,6 +112,9 @@ html[data-theme="light"] .seg{background:#F4F5F7}
           <label style="display:flex;align-items:center;gap:8px;margin:0">间隔
             <input id="ghInterval" type="number" min="5" style="width:110px"> 分钟
           </label>
+          <label style="display:flex;align-items:center;gap:8px;margin:0">最多保留
+            <input id="ghKeep" type="number" min="0" style="width:90px"> 个版本
+          </label>
           <label style="display:flex;align-items:center;gap:8px;margin:0">仓库
             <input id="ghRepo" style="width:220px" placeholder="owner/repo">
           </label>
@@ -294,7 +297,7 @@ function ghStatusText(st){
   const map = { ok:'✅ 成功', skipped:'⏭ 已跳过', error:'❌ 失败', checking:'⏳ 检查中' };
   return map[st.lastResult] || '—';
 }
-function renderGh(st){
+function renderGh(st, prog){
   st = st || {};
   const lines = [];
   lines.push('状态：' + ghStatusText(st) + (st.message ? '　' + st.message : ''));
@@ -303,7 +306,22 @@ function renderGh(st){
   if(Array.isArray(st.mirrors) && st.mirrors.length){
     lines.push('下载源测速：' + st.mirrors.map(m => m.label + ' ' + (m.ms == null ? '不可达' : m.ms + 'ms')).join('　'));
   }
+  if(prog && prog.active){
+    const pct = prog.total ? Math.min(100, prog.downloaded * 100 / prog.total) : (prog.percent || 0);
+    lines.push('');
+    lines.push('正在下载版本：' + (prog.version || '—') + (prog.asset ? '（' + prog.asset + '）' : ''));
+    lines.push('下载源：' + (prog.source || '测速 / 连接中…'));
+    lines.push('下载进度：' + (prog.total ? pct.toFixed(1) + '%　' + fmtSize(prog.downloaded) + ' / ' + fmtSize(prog.total)
+                                               : fmtSize(prog.downloaded)));
+    lines.push('下载速度：' + fmtSpeed(prog.speed));
+  }
   $('ghStatus').textContent = lines.join('\n');
+}
+function fmtSpeed(bps){
+  const n = Number(bps) || 0;
+  if(n >= 1048576) return (n / 1048576).toFixed(1) + ' MB/s';
+  if(n >= 1024) return (n / 1024).toFixed(0) + ' KB/s';
+  return n + ' B/s';
 }
 async function loadGh(){
   const r = await fetch('/api/admin/gh-update');
@@ -312,18 +330,22 @@ async function loadGh(){
   const c = d.config || {};
   $('ghEnabled').checked = !!c.enabled;
   $('ghInterval').value = c.interval || 360;
+  $('ghKeep').value = (c.keep === 0 ? 0 : (c.keep || 5));
   $('ghRepo').value = c.repo || '';
   $('ghMirrors').value = (c.mirrors || []).join('\n');
   $('ghToken').value = '';
   $('ghToken').placeholder = c.hasToken ? '已配置，留空表示保持原值' : '可选，用于避免 GitHub API 限流';
-  renderGh(d.status || {});
-  // 正在检查时轮询刷新状态
+  renderGh(d.status || {}, d.progress || {});
+  // 检查/下载期间高频刷新，展示进度、速度与版本
   clearInterval(ghPollTimer);
-  if((d.status || {}).lastResult === 'checking'){
+  if((d.status || {}).lastResult === 'checking' || (d.progress || {}).active){
     ghPollTimer = setInterval(async () => {
       const rr = await fetch('/api/admin/gh-update'); const dd = await rr.json().catch(()=>({}));
-      if(dd.ok){ renderGh(dd.status || {}); if((dd.status||{}).lastResult !== 'checking') clearInterval(ghPollTimer); }
-    }, 3000);
+      if(dd.ok){
+        renderGh(dd.status || {}, dd.progress || {});
+        if((dd.status || {}).lastResult !== 'checking' && !(dd.progress || {}).active) clearInterval(ghPollTimer);
+      }
+    }, 1500);
   }
 }
 function ghMsg(text, bad){
@@ -334,6 +356,7 @@ async function saveGh(){
   const body = {
     enabled: $('ghEnabled').checked,
     interval: Number($('ghInterval').value) || 360,
+    keep: Number($('ghKeep').value) >= 0 ? Number($('ghKeep').value) : 5,
     repo: $('ghRepo').value.trim(),
     mirrors: $('ghMirrors').value,
     token: $('ghToken').value.trim(),
