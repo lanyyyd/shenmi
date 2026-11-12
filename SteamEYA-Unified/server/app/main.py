@@ -66,6 +66,10 @@ def _startup():
     #   - 离线模式（EYA_LAN_MODE=1）默认开启；
     #   - 在线模式可显式设 EYA_LAN_DISCOVERY=1 开启，以支持“在线状态下也能做局域网互传”。
     lan_mode = os.getenv("EYA_LAN_MODE") == "1"
+    if lan_mode and not os.getenv("EYA_INSTALL_ID"):
+        # 客户端会用自己持久化的 install_id 读取本机待同步消息；这里缺失会导致两边对不上，
+        # 现在 pending 已按本机库直接取（见 routers/sync.py），但仍把异常暴露到日志便于排查。
+        log.warning("离线网关未收到 EYA_INSTALL_ID，将使用本机默认值；如离线消息同步异常请检查客户端启动参数")
     lan_discovery = os.getenv("EYA_LAN_DISCOVERY", "1" if lan_mode else "0") == "1"
     if lan_discovery:
         port = int(os.getenv("EYA_LAN_PORT", "8898"))

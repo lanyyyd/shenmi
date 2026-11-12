@@ -12,6 +12,7 @@ from typing import Optional
 from fastapi import APIRouter, Body, Depends, Header, Request
 
 from .. import chat_logic as CL
+from .. import config
 from .. import security
 from ..db import execute, execute_update, query_all, query_one
 from ..deps import get_current_user, resolve_user
@@ -90,15 +91,28 @@ def pull(request: Request, since: int = 0, limit: int = 200,
 
 @router.get("/pending")
 def pending(install_id: str = ""):
-    """本机待同步消息（在本地网关读取，供客户端拿到后推送到远端）。"""
-    if not install_id:
-        return {"ok": False, "msg": "缺少 install_id"}
-    rows = query_all(
-        "SELECT m.*, COALESCE(NULLIF(w.nickname,''), w.username) AS from_name, COALESCE(w.avatar,'') AS from_avatar "
-        "FROM messages m JOIN users w ON w.id = m.from_id "
-        "WHERE m.install_id = ? AND m.synced = 0 ORDER BY m.created_at ASC",
-        (install_id,),
-    )
+    """本机待同步消息（在本地网关读取，供客户端拿到后推送到远端）。
+
+    本地网关（LAN_MODE）的库只存本机消息，直接按 synced=0 取，不再按 install_id 过滤：
+    消息入库用的是网关启动时的 EYA_INSTALL_ID（缺失时回落为 "local"），与客户端当次读取的
+    install_id 可能不一致，之前因此恒返回空列表、被客户端显示成「没有待同步的消息」。
+    """
+    if config.LAN_MODE:
+        rows = query_all(
+            "SELECT m.*, COALESCE(NULLIF(w.nickname,''), w.username) AS from_name, COALESCE(w.avatar,'') AS from_avatar "
+            "FROM messages m JOIN users w ON w.id = m.from_id "
+            "WHERE m.synced = 0 ORDER BY m.created_at ASC",
+        )
+    else:
+        # 在线网关是共享库，必须按 install_id 隔离，避免把别人的消息返回出去。
+        if not install_id:
+            return {"ok": False, "msg": "缺少 install_id"}
+        rows = query_all(
+            "SELECT m.*, COALESCE(NULLIF(w.nickname,''), w.username) AS from_name, COALESCE(w.avatar,'') AS from_avatar "
+            "FROM messages m JOIN users w ON w.id = m.from_id "
+            "WHERE m.install_id = ? AND m.synced = 0 ORDER BY m.created_at ASC",
+            (install_id,),
+        )
     out = []
     for r in rows:
         to_username = ""
@@ -125,10 +139,14 @@ def mark_synced(payload: dict = Body(...)):
     """标记本机消息已同步（在本地网关调用），保证第二个用户不再重复上传。"""
     install_id = str(payload.get("install_id") or "")
     ids = payload.get("client_msg_ids") or []
-    if not install_id or not ids:
+    if not ids or (not install_id and not config.LAN_MODE):
         return {"ok": False, "msg": "缺少参数"}
     marked = 0
     for cid in ids:
-        marked += execute_update("UPDATE messages SET synced = 1 WHERE install_id = ? AND client_msg_id = ?",
-                                 (install_id, str(cid)))
+        if config.LAN_MODE:
+            # 本机库只存本机消息，按消息号标记即可；入库时的 install_id 可能与客户端不同。
+            marked += execute_update("UPDATE messages SET synced = 1 WHERE client_msg_id = ?", (str(cid),))
+        else:
+            marked += execute_update("UPDATE messages SET synced = 1 WHERE install_id = ? AND client_msg_id = ?",
+                                     (install_id, str(cid)))
     return {"ok": True, "marked": marked}

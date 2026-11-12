@@ -34,9 +34,15 @@ internal sealed class SyncService
             var body = await HttpClient.GetStringAsync(url, ct);
             pending = JsonSerializer.Deserialize(body, CloudApiJsonContext.Default.SyncPendingDto)!;
         }
-        catch
+        catch (Exception ex)
         {
-            return (true, 0, null); // 本地网关未运行则视为无需同步
+            // 以前这里静默返回成功，导致「网关没起 / 接口报错」被显示成「没有待同步的消息」。
+            return (false, 0, "读取本地网关待同步消息失败：" + ex.Message);
+        }
+
+        if (pending is not { Ok: true })
+        {
+            return (false, 0, pending?.Msg ?? "本地网关未返回待同步数据");
         }
 
         var messages = pending.Messages ?? [];
@@ -57,7 +63,8 @@ internal sealed class SyncService
         }
         if (ready.Count == 0)
         {
-            return (true, 0, null);
+            // 有待同步消息，但文件全部转存失败：不能报「没有待同步」，否则用户永远不知道该重试。
+            return (false, 0, $"本地有 {messages.Length} 条待同步消息，但附件转存失败（本地网关或网络异常），请稍后重试");
         }
 
         // 2) 推送到远端（幂等：服务端按 install_id + client_msg_id 去重）

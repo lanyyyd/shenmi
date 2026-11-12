@@ -695,6 +695,24 @@ def init_db() -> None:
             with cursor() as cur:
                 cur.execute(ddl)
 
+    # 兼容旧库：messages 表早期没有离线同步三列（install_id / client_msg_id / synced），
+    # 缺列时 /api/sync/pending 会直接 SQL 报错，客户端又把这个异常吞成「没有待同步的消息」。
+    # 新加的 synced 默认 1，老消息不会被当成待同步全量重推。
+    msg_cols = {row["name"] for row in query_all("PRAGMA table_info(messages)")}
+    for col, ddl in (
+        ("install_id", "ALTER TABLE messages ADD COLUMN install_id TEXT DEFAULT ''"),
+        ("client_msg_id", "ALTER TABLE messages ADD COLUMN client_msg_id TEXT DEFAULT ''"),
+        ("synced", "ALTER TABLE messages ADD COLUMN synced INTEGER DEFAULT 1"),
+    ):
+        if msg_cols and col not in msg_cols:
+            with cursor() as cur:
+                cur.execute(ddl)
+    if msg_cols:
+        with cursor() as cur:
+            # 旧索引可能不存在；建成幂等形态，保证按 client_msg_id 标记已同步时走索引。
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_msg_client ON messages(install_id, client_msg_id) "
+                        "WHERE install_id <> '' AND client_msg_id <> ''")
+
     from .config import ADMIN_USERNAME, ADMIN_PASSWORD, INVITE_REQUIRED_DEFAULT
     from . import security
 

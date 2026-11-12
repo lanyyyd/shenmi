@@ -130,6 +130,7 @@
     "Settings_ChatSync_OnlineOnly": "Only available in online mode.",
     "Settings_ChatSync_Success_Format": "Synced {0} offline messages",
     "Settings_ChatSync_Nothing": "No offline messages to sync",
+    "Settings_ChatSync_GatewayFail": "Local gateway failed to start; cannot read offline messages (check whether security software blocks port 8898)",
     "Settings_ChatSync_Fail_Format": "Sync failed: {0}",
     "Settings_Data_Section": "Data",
     "Settings_Data_Desc": "Account history, profile pictures, cache, and logs are stored in the data folder.",

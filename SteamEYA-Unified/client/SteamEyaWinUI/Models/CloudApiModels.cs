@@ -340,6 +340,7 @@ internal sealed class SyncPendingDto
     public bool Ok { get; set; }
     public SyncMessage[]? Messages { get; set; }
     public int Count { get; set; }
+    public string? Msg { get; set; }
 }
 
 internal sealed class SyncPushRequest

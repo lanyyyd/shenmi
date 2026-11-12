@@ -215,6 +215,7 @@
     "Settings_ChatSync_OnlineOnly": "仅在线模式下可同步。",
     "Settings_ChatSync_Success_Format": "已同步 {0} 条离线聊天记录",
     "Settings_ChatSync_Nothing": "没有待同步的离线消息",
+    "Settings_ChatSync_GatewayFail": "本地网关启动失败，无法读取离线消息（请检查安全软件是否拦截了 8898 端口）",
     "Settings_ChatSync_Fail_Format": "同步失败：{0}",
     "Settings_Data_Section": "数据",
     "Settings_Data_Desc": "账号历史、头像、缓存与日志都保存在数据目录。",

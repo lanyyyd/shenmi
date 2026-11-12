@@ -902,7 +902,11 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         try
         {
             // 先拉起本地网关，否则读不到 /api/sync/pending
-            await GatewayLauncher.EnsureStartedAsync(SessionState.Nickname);
+            if (!await GatewayLauncher.EnsureStartedAsync(SessionState.Nickname))
+            {
+                AppState.ShowStatus(Loc.T("Settings_ChatSync_GatewayFail"), InfoBarSeverity.Error);
+                return;
+            }
             var (ok, pushed, msg) = await new SyncService().TrySyncAsync();
             if (ok && pushed > 0)
             {
