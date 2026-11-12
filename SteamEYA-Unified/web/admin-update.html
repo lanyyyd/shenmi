@@ -95,6 +95,42 @@ html[data-theme="light"] .seg{background:#F4F5F7}
       <button class="seg-btn" data-p="android" onclick="switchPlatform('android')">📱 手机端</button>
     </div>
 
+    <!-- GitHub Release 自动更新（仅电脑端） -->
+    <div class="card" id="ghCard" style="margin-bottom:20px">
+      <div class="card-h">
+        <h2>GitHub 自动更新</h2>
+        <span class="chip gray">电脑端 · 含极域版本</span>
+        <div class="spacer"></div>
+        <button class="btn" onclick="probeGh()">测速</button>
+        <button class="btn" onclick="runGh()">立即检查</button>
+      </div>
+      <div class="form">
+        <div class="fld" style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
+          <label style="display:flex;align-items:center;gap:8px;margin:0">
+            <input type="checkbox" id="ghEnabled" style="width:auto"> 开启定时自动下载
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;margin:0">间隔
+            <input id="ghInterval" type="number" min="5" style="width:110px"> 分钟
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;margin:0">仓库
+            <input id="ghRepo" style="width:220px" placeholder="owner/repo">
+          </label>
+        </div>
+        <div class="fld"><label>GitHub 加速源（每行一个，可留空）</label>
+          <textarea id="ghMirrors" rows="3" placeholder="https://gh.dayiu.cn"></textarea>
+          <div class="hint">每次下载前自动测延迟，优先用最快的源，失败自动切换下一个；也支持 <code>https://xxx/{url}</code> 占位写法。</div>
+        </div>
+        <div class="fld"><label>GitHub Token（可选，避免 API 限流）</label>
+          <input id="ghToken" type="password" placeholder="留空表示保持原值">
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <button class="btn pri" onclick="saveGh()">保存设置</button>
+        </div>
+        <div class="form-msg" id="ghMsg" style="text-align:left;white-space:pre-wrap"></div>
+        <div id="ghStatus" class="hint" style="white-space:pre-wrap;margin-top:10px"></div>
+      </div>
+    </div>
+
     <!-- 上传新版本 -->
     <div class="card">
       <div class="card-h"><h2>上传新版本</h2><span class="chip" id="platChip">电脑端</span></div>
@@ -174,6 +210,7 @@ function switchPlatform(p){
   if($('upFile')) $('upFile').accept = PLAT_EXT[p];
   if($('upHint')) $('upHint').textContent =
     `仅支持 ${PLAT_EXT[p]} 安装包；上传后该版本默认作为「历史版本」，可在下方设为当前下发版本。`;
+  if($('ghCard')) $('ghCard').style.display = (p === 'windows' ? '' : 'none');
   upStatus('');
   RELEASES = [];
   $('tbody').innerHTML = '<tr><td colspan="6" class="empty">加载中…</td></tr>';
@@ -251,6 +288,79 @@ async function deleteRelease(id, version){
 }
 async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
 
+/* ---------------- GitHub 自动更新 ---------------- */
+let ghPollTimer;
+function ghStatusText(st){
+  const map = { ok:'✅ 成功', skipped:'⏭ 已跳过', error:'❌ 失败', checking:'⏳ 检查中' };
+  return map[st.lastResult] || '—';
+}
+function renderGh(st){
+  st = st || {};
+  const lines = [];
+  lines.push('状态：' + ghStatusText(st) + (st.message ? '　' + st.message : ''));
+  if(st.version) lines.push('最新版本：' + st.version + (st.asset ? '（' + st.asset + '）' : ''));
+  if(st.updatedTs) lines.push('最近更新：' + fmtTime(st.updatedTs));
+  if(Array.isArray(st.mirrors) && st.mirrors.length){
+    lines.push('下载源测速：' + st.mirrors.map(m => m.label + ' ' + (m.ms == null ? '不可达' : m.ms + 'ms')).join('　'));
+  }
+  $('ghStatus').textContent = lines.join('\n');
+}
+async function loadGh(){
+  const r = await fetch('/api/admin/gh-update');
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ $('ghStatus').textContent = '加载失败：' + (d.detail || d.error || ''); return; }
+  const c = d.config || {};
+  $('ghEnabled').checked = !!c.enabled;
+  $('ghInterval').value = c.interval || 360;
+  $('ghRepo').value = c.repo || '';
+  $('ghMirrors').value = (c.mirrors || []).join('\n');
+  $('ghToken').value = '';
+  $('ghToken').placeholder = c.hasToken ? '已配置，留空表示保持原值' : '可选，用于避免 GitHub API 限流';
+  renderGh(d.status || {});
+  // 正在检查时轮询刷新状态
+  clearInterval(ghPollTimer);
+  if((d.status || {}).lastResult === 'checking'){
+    ghPollTimer = setInterval(async () => {
+      const rr = await fetch('/api/admin/gh-update'); const dd = await rr.json().catch(()=>({}));
+      if(dd.ok){ renderGh(dd.status || {}); if((dd.status||{}).lastResult !== 'checking') clearInterval(ghPollTimer); }
+    }, 3000);
+  }
+}
+function ghMsg(text, bad){
+  const el = $('ghMsg'); el.textContent = text || '';
+  el.style.color = bad ? '#e5484d' : '';
+}
+async function saveGh(){
+  const body = {
+    enabled: $('ghEnabled').checked,
+    interval: Number($('ghInterval').value) || 360,
+    repo: $('ghRepo').value.trim(),
+    mirrors: $('ghMirrors').value,
+    token: $('ghToken').value.trim(),
+  };
+  const r = await fetch('/api/admin/gh-update/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ ghMsg('保存失败：' + (d.detail || d.error || '未知错误'), true); return; }
+  ghMsg('✅ 已保存');
+  $('ghToken').value = '';
+  loadGh();
+}
+async function runGh(){
+  ghMsg('已开始检查，正在下载…');
+  const r = await fetch('/api/admin/gh-update/run', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ ghMsg(d.detail || d.msg || '启动失败', true); return; }
+  setTimeout(loadGh, 1500);
+}
+async function probeGh(){
+  ghMsg('测速中…');
+  const r = await fetch('/api/admin/gh-update/probe');
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ ghMsg(d.detail || d.msg || '测速失败', true); return; }
+  ghMsg('✅ ' + (d.version || '') + ' ' + (d.asset || '') + '\n' +
+    (d.mirrors || []).map(m => m.label + '：' + (m.ms == null ? '不可达' : m.ms + ' ms')).join('\n'));
+}
+
 /* 启动 */
 (async function(){
   const r = await fetch('/api/me'); const d = await r.json();
@@ -258,6 +368,7 @@ async function logout(){ await fetch('/api/logout',{method:'POST'}); location.hr
   $('whoami').textContent = '@' + d.user.username;
   $('main').classList.remove('hidden');
   switchPlatform('windows');
+  loadGh();
 })();
 </script>
 <script src="/js/admin-nav.js"></script>

@@ -47,6 +47,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 生成「更新公告」需要读取上个版本以来的提交记录
 
       # ---- 极域注入模块（原版 1.7.6 + 菜单修复）----
       # 原版 exe 只在 Hook DLL 不存在时才释放内置副本，所以把这里编译出的
@@ -278,9 +280,22 @@ jobs:
           $exes = @(Get-ChildItem artifacts/*.exe)
           if ($exes.Count -lt 2) { throw "安装包不全（期望标准版 + 无极域版，实际 $($exes.Count) 个）" }
 
+          # 更新公告：取上个 v1.0.x 版本以来的提交标题，转成简短、面向用户的中文条目。
+          # 服务端「更新管理」的 GitHub 自动更新会直接把这段正文当作更新公告下发给客户端。
+          $prev = git tag --list 'v1.0.*' --sort=-v:refname | Select-Object -First 1
+          $range = if ($prev) { "$prev..HEAD" } else { "HEAD" }
+          $notes = (git log $range --no-merges --pretty=format:%s |
+            Where-Object { $_ -and $_ -notmatch '^(chore|ci|docs|build|test|style|refactor)(\(|:)' } |
+            ForEach-Object {
+              $t = ($_ -replace '^[a-zA-Z]+(\([^)]*\))?!?:\s*', '').Trim()
+              if ($_ -match '^fix(\(|:)' -and $t -notmatch '^修复') { $t = "修复$t" }
+              if ($t) { "- $t" }
+            } | Select-Object -First 8) -join "`n"
+          if (-not $notes) { $notes = "- 常规更新与问题修复" }
+
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --title "茶π·次元口袋 $tag" --notes "自动构建 ${{ github.sha }}"
+            gh release create $tag --title "茶π·次元口袋 $tag" --notes $notes
             if ($LASTEXITCODE -ne 0) { throw "创建 Release 失败" }
           }
           gh release upload $tag $exes.FullName --clobber

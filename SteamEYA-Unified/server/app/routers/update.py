@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import hashlib
 import pathlib
+import threading
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
+from .. import gh_update
 from .. import security
 from ..config import UPDATE_DIR
 from ..db import execute, execute_update, query_all, query_one
@@ -147,3 +149,47 @@ def admin_delete(rid: int, admin: dict = Depends(require_admin)):
         pass
     execute_update("DELETE FROM app_releases WHERE id = ?", (rid,))
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- GitHub 自动更新
+def _gh_config_out() -> dict:
+    cfg = gh_update.load_config()
+    out = {k: v for k, v in cfg.items() if k != "token"}
+    out["hasToken"] = bool(cfg.get("token"))
+    return out
+
+
+@router.get("/admin/gh-update")
+def gh_update_state(admin: dict = Depends(require_admin)):
+    """自动更新配置 + 最近一次检查/下载结果。"""
+    return {"ok": True, "config": _gh_config_out(), "status": gh_update.load_status()}
+
+
+@router.post("/admin/gh-update/config")
+def gh_update_config(payload: dict = Body(...), admin: dict = Depends(require_admin)):
+    gh_update.save_config(payload)
+    return {"ok": True, "config": _gh_config_out()}
+
+
+@router.post("/admin/gh-update/run")
+def gh_update_run(payload: dict | None = Body(default=None), admin: dict = Depends(require_admin)):
+    """立即检查并下载（后台线程执行，接口立即返回）。"""
+    force = bool((payload or {}).get("force"))
+
+    def _work():
+        gh_update.run_once(force=force)
+
+    threading.Thread(target=_work, name="gh-update-manual", daemon=True).start()
+    return {"ok": True, "msg": "已开始检查，稍后刷新状态查看结果"}
+
+
+@router.get("/admin/gh-update/probe")
+def gh_update_probe(admin: dict = Depends(require_admin)):
+    """测试各下载源延迟，便于管理员判断加速源是否可用。"""
+    cfg = gh_update.load_config()
+    try:
+        latest = gh_update.fetch_latest(cfg)
+    except Exception as e:
+        return {"ok": False, "msg": f"获取 Release 失败：{e}"}
+    probed = gh_update.probe_mirrors(latest["assetUrl"], cfg)
+    return {"ok": True, "version": latest["version"], "asset": latest["assetName"], "mirrors": probed}

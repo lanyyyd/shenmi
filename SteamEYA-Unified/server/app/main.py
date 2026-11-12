@@ -79,6 +79,16 @@ def _startup():
         lan.set_discovery(discovery)
         log.info("局域网发现已启用：name=%s port=%d mode=%s", name, port, "lan" if lan_mode else "online")
 
+    # GitHub Release 自动更新：仅在线服务端启用（本机网关不该自己下载安装包）。
+    # 开关与间隔由后台「更新管理」页配置，默认关闭。
+    if not lan_mode:
+        try:
+            from . import gh_update
+            gh_update.start_loop()
+            log.info("GitHub Release 自动更新检查已启动（默认关闭，可在后台更新管理页开启）")
+        except Exception as e:
+            log.warning("GitHub 自动更新初始化失败：%s", e)
+
     # 红包到期结算：后台线程每分钟检查一次，把过期未领完的剩余退回发包者
     import threading
     import time as _time
