@@ -280,18 +280,26 @@ jobs:
           $exes = @(Get-ChildItem artifacts/*.exe)
           if ($exes.Count -lt 2) { throw "安装包不全（期望标准版 + 无极域版，实际 $($exes.Count) 个）" }
 
-          # 更新公告：取上个 v1.0.x 版本以来的提交标题，转成简短、面向用户的中文条目。
-          # 服务端「更新管理」的 GitHub 自动更新会直接把这段正文当作更新公告下发给客户端。
+          # 更新公告：只写面向用户的客户端变化（客户端/引擎/安装器相关提交），
+          # 纯服务端（server、web 后台）与 CI 改动一律不写进公告；最多 8 条。
           $prev = git tag --list 'v1.0.*' --sort=-v:refname | Select-Object -First 1
           $range = if ($prev) { "$prev..HEAD" } else { "HEAD" }
-          $notes = (git log $range --no-merges --pretty=format:%s |
-            Where-Object { $_ -and $_ -notmatch '^(chore|ci|docs|build|test|style|refactor)(\(|:)' } |
-            ForEach-Object {
-              $t = ($_ -replace '^[a-zA-Z]+(\([^)]*\))?!?:\s*', '').Trim()
-              if ($_ -match '^fix(\(|:)' -and $t -notmatch '^修复') { $t = "修复$t" }
-              if ($t) { "- $t" }
-            } | Select-Object -First 8) -join "`n"
-          if (-not $notes) { $notes = "- 常规更新与问题修复" }
+          $bullets = @()
+          foreach ($line in git log $range --no-merges --pretty=format:'%h%x09%s') {
+            if (-not $line) { continue }
+            $parts = $line -split "`t", 2
+            $sha = $parts[0]; $subj = $parts[1]
+            if (-not $subj -or $subj -match '^(chore|ci|docs|build|test|style|refactor)(\(|:)') { continue }
+            $paths = @(git show --name-only --pretty=format: $sha)
+            $clientPaths = @($paths | Where-Object { $_ -match '^SteamEYA-Unified/(client|engine)/' -or $_ -match '^build/' })
+            if ($clientPaths.Count -eq 0) { continue }
+            $t = ($subj -replace '^[a-zA-Z]+(\([^)]*\))?!?:\s*', '').Trim()
+            if ($subj -match '^fix(\(|:)' -and $t -notmatch '^修复') { $t = "修复$t" }
+            if ($t) { $bullets += "- $t" }
+            if ($bullets.Count -ge 8) { break }
+          }
+          $notes = $bullets -join "`n"
+          if (-not $notes) { $notes = "- 优化体验与稳定性" }
 
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
