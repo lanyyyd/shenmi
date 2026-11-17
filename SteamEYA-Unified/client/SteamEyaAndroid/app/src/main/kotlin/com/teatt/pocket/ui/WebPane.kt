@@ -7,6 +7,8 @@ import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.MimeTypeMap
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -14,6 +16,8 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -64,6 +68,17 @@ fun WebPane(
     var progress by remember { mutableIntStateOf(0) }
     // 主文档加载失败（断网 / 超时）：盖一层原生错误页，别让 WebView 自己那套「网页无法打开」露出来
     var failed by remember { mutableStateOf(false) }
+
+    // 网页里的 <input type="file"> 点击后由 WebChromeClient 转成系统选文件。
+    // 回调必须持有：用户取消也要回调空数组，否则这个 input 之后会永久点不动。
+    val chooser = remember { FileChooserBridge() }
+    val pickFiles = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        val cb = chooser.callback
+        chooser.callback = null
+        cb?.onReceiveValue(if (uris.isNullOrEmpty()) emptyArray() else uris.toTypedArray())
+    }
 
     // 用普通对象记录已加载地址：放 state 会在组合期写状态，多触发一轮重组
     val loaded = remember { UrlSlot() }
@@ -134,6 +149,23 @@ fun WebPane(
                     webChromeClient = object : WebChromeClient() {
                         override fun onProgressChanged(view: WebView?, newProgress: Int) {
                             progress = newProgress
+                        }
+
+                        override fun onShowFileChooser(
+                            view: WebView?,
+                            callback: ValueCallback<Array<Uri>>?,
+                            params: WebChromeClient.FileChooserParams?
+                        ): Boolean {
+                            if (callback == null) return false
+                            // 上一个请求还没结束就再次点击：先作废它，避免 input 被永久锁住
+                            runCatching { chooser.callback?.onReceiveValue(emptyArray()) }
+                            chooser.callback = callback
+                            runCatching { pickFiles.launch(mimeTypes(params?.acceptTypes)) }
+                                .onFailure {
+                                    chooser.callback = null
+                                    runCatching { callback.onReceiveValue(emptyArray()) }
+                                }
+                            return true
                         }
                     }
 
@@ -214,6 +246,9 @@ fun WebPane(
                 if (view.visibility != want) view.visibility = want
             },
             onRelease = { view ->
+                // 页面销毁时把挂起的选文件回调放掉，否则 WebView 内部会一直等结果
+                runCatching { chooser.callback?.onReceiveValue(emptyArray()) }
+                chooser.callback = null
                 CookieManager.getInstance().flush()
                 (view.parent as? ViewGroup)?.removeView(view)
                 view.stopLoading()
@@ -253,6 +288,29 @@ fun WebPane(
 /** 只用来存一个字符串，不参与重组。 */
 private class UrlSlot {
     var value: String? = null
+}
+
+/** 挂起的网页选文件请求：同一时刻只允许一个，新的会顶掉旧的。 */
+private class FileChooserBridge {
+    var callback: ValueCallback<Array<Uri>>? = null
+}
+
+/**
+ * 网页 accept 既可能是 MIME（image/*），也可能是扩展名（.exe / .jpg），
+ * 系统选择器只认 MIME，这里统一转换。
+ */
+private fun mimeTypes(accept: Array<String>?): Array<String> {
+    if (accept.isNullOrEmpty()) return arrayOf("*/*")
+    val mapped = accept.mapNotNull { raw ->
+        val s = raw.trim().lowercase()
+        when {
+            s.isEmpty() -> null
+            s.contains("/") -> s
+            s.startsWith(".") -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(s.drop(1))
+            else -> null
+        }
+    }.distinct()
+    return if (mapped.isEmpty()) arrayOf("*/*") else mapped.toTypedArray()
 }
 
 /**
