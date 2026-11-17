@@ -296,7 +296,7 @@ private class FileChooserBridge {
 }
 
 /**
- * 网页 accept 既可能是 MIME（image/*），也可能是扩展名（.exe / .jpg），
+ * 网页 accept 既可能是 MIME（如 image/png），也可能是扩展名（.exe / .jpg），
  * 系统选择器只认 MIME，这里统一转换。
  */
 private fun mimeTypes(accept: Array<String>?): Array<String> {
