@@ -257,7 +257,10 @@ data class CloudDownloadDto(
 data class CloudCheckDto(
     val ok: Boolean = false,
     val valid: Boolean? = null,
+    /** 接口自身的文案（上传接口这里是「上传成功」，不代表校验通过）。 */
     val msg: String = "",
+    /** 真正的检测结论：通过时是剩余时长，失败时是失效原因。 */
+    val detail: String = "",
     val nickname: String = "",
     @SerialName("game_uid") val gameUid: String = "",
     @SerialName("free_duration") val freeDuration: Int? = null,

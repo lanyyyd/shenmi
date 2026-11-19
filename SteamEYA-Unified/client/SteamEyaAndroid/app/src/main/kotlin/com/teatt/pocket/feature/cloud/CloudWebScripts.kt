@@ -18,6 +18,8 @@ internal const val COMBO_HOOK_JS = """
 (function () {
   try {
     window.__smCombo = window.__smCombo || '';
+    // 注入脚本的操作日志：iframe 里发生的步骤会 postMessage 到顶层，顶层汇总后由 App 读取
+    window.__smLog = window.__smLog || [];
     var lastCombo = window.__smCombo;
     function looks(v) {
       if (typeof v !== 'string' || v.length < 13) return false;
@@ -65,6 +67,13 @@ internal const val COMBO_HOOK_JS = """
         if (d.__smLoginError) window.__smLoginError = String(d.__smLoginError);
         if (d.__smCaptcha) window.__smCaptcha = true;
         if (d.__smLoginForm) window.__smLoginForm = true;
+        if (d.__smLog) {
+          try {
+            window.__smLog = window.__smLog || [];
+            window.__smLog.push(String(d.__smLog));
+            if (window.__smLog.length > 300) window.__smLog.shift();
+          } catch (err) {}
+        }
       });
     } catch (e) {}
     function hook(headers) {
@@ -313,6 +322,24 @@ private const val AUTO_FILL_TEMPLATE = """
     var fillRounds = 0;
     var halted = false;
     var clickedOnce = [];
+    var formLogged = false;
+    var fillLogged = false;
+    var errorLogged = false;
+    var capWas = false;
+    var limitLogged = false;
+
+    // 操作日志：同域直接挂到 __smLog，跨 frame postMessage 汇总到顶层
+    function L(msg) {
+      try {
+        if (window.top && window.top !== window) {
+          window.top.postMessage({ __smLog: String(msg) }, '*');
+        } else {
+          window.__smLog = window.__smLog || [];
+          window.__smLog.push(String(msg));
+          if (window.__smLog.length > 300) window.__smLog.shift();
+        }
+      } catch (e) {}
+    }
 
     function text(el) {
       return ((el && (el.innerText || el.textContent)) || '').replace(/\s+/g, '');
@@ -360,10 +387,10 @@ private const val AUTO_FILL_TEMPLATE = """
         if (!/同意|协议|条款|隐私/.test(t) && b !== only) continue;
         if (b.checked) return true;
         try { b.click(); } catch (e) {}
-        if (b.checked) return true;
+        if (b.checked) { L('已勾选「同意用户协议」'); return true; }
         var label = b.closest('label');
         if (label) clickEl(label);
-        if (b.checked) return true;
+        if (b.checked) { L('已勾选「同意用户协议」'); return true; }
       }
       var nodes = document.querySelectorAll('span,div,p,label,i');
       for (var j = 0; j < nodes.length; j++) {
@@ -377,6 +404,7 @@ private const val AUTO_FILL_TEMPLATE = """
         if (seen(el)) continue;
         clickedOnce.push(el);
         clickEl(el);
+        L('已勾选「同意用户协议」');
         return true;
       }
       return false;
@@ -391,6 +419,7 @@ private const val AUTO_FILL_TEMPLATE = """
         var box = el.closest('[class*="dialog"],[class*="modal"],[role="dialog"]') || el.parentElement;
         if (!/协议|条款|隐私/.test(text(box).slice(0, 300))) continue;
         clickEl(el);
+        L('已确认协议弹窗');
         return true;
       }
       return false;
@@ -404,6 +433,7 @@ private const val AUTO_FILL_TEMPLATE = """
           if (visible(nodes[i])) {
             pwdSwitched = true;
             clickEl(nodes[i]);
+            L('已切换到「密码登录」');
             return;
           }
         }
@@ -417,6 +447,7 @@ private const val AUTO_FILL_TEMPLATE = """
         if ((it.type || '').toLowerCase() === 'password' && visible(it)) { pw = it; break; }
       }
       if (!pw) return false;
+      if (!formLogged) { formLogged = true; L('检测到账号密码输入框'); }
       try { window.top.postMessage({ __smLoginForm: true }, '*'); } catch (e) {}
       var scope = pw.closest('form');
       var list = scope ? scope.querySelectorAll('input') : inputs;
@@ -433,6 +464,7 @@ private const val AUTO_FILL_TEMPLATE = """
       if (!user) return false;
       if (user.value !== ACC) setVal(user, ACC);
       if (pw.value !== PWD) setVal(pw, PWD);
+      if (!fillLogged) { fillLogged = true; L('已填写账号和密码'); }
       return user.value === ACC && pw.value === PWD;
     }
     function loginButton() {
@@ -457,6 +489,7 @@ private const val AUTO_FILL_TEMPLATE = """
       lastClick = now;
       clickedLogin++;
       clickEl(btn);
+      if (clickedLogin === 1) L('已点击「登录」按钮');
     }
     function report() {
       var bodyText = '';
@@ -464,6 +497,7 @@ private const val AUTO_FILL_TEMPLATE = """
         bodyText = ((document.body && (document.body.innerText || document.body.textContent)) || '').slice(0, 4000);
       } catch (e) {}
       if (/账号或密码错误|密码错误|密码不正确|账号不存在|账号未注册/.test(bodyText)) {
+        if (!errorLogged) { errorLogged = true; L('检测到「账号或密码错误」提示'); }
         try { window.top.postMessage({ __smLoginError: '账号或密码错误，请更新本机保存的账号密码' }, '*'); } catch (e) {}
       }
       var cap = false;
@@ -482,9 +516,11 @@ private const val AUTO_FILL_TEMPLATE = """
       if (cap) {
         // 出现人机验证时停下来，避免和用户手动操作抢输入框
         halted = true;
+        if (!capWas) { capWas = true; L('检测到安全验证，已暂停自动操作'); }
         try { window.top.postMessage({ __smCaptcha: true }, '*'); } catch (e) {}
-      } else if (halted) {
-        halted = false;
+      } else {
+        if (capWas) { capWas = false; L('安全验证已通过，继续自动登录'); }
+        if (halted) halted = false;
       }
     }
     function pass() {
@@ -492,7 +528,11 @@ private const val AUTO_FILL_TEMPLATE = """
         report();
         agreeBox() || agreeDialog();
         // 验证中 / 自动填充轮次用尽后不再抢输入框，交给用户手动完成
-        if (halted || fillRounds >= 30) return;
+        if (halted) return;
+        if (fillRounds >= 30) {
+          if (!limitLogged) { limitLogged = true; L('自动尝试次数用尽，转为手动接管'); }
+          return;
+        }
         passwordMode();
         if (fill()) {
           fillRounds++;
@@ -523,11 +563,13 @@ private const val AUTO_FILL_TEMPLATE = """
 internal const val SILENT_PROBE_JS = """
 (function () {
   function s(v) { return v ? String(v) : ''; }
-  var out = { combo: '', error: '', captcha: false, login: false };
+  var out = { combo: '', error: '', captcha: false, login: false, url: '', logs: [] };
   try { out.combo = s(window.__smCombo); } catch (e) {}
   try { out.error = s(window.__smLoginError); } catch (e) {}
   try { out.captcha = !!window.__smCaptcha; } catch (e) {}
   try { out.login = !!window.__smLoginForm; } catch (e) {}
+  try { out.url = s(location.href); } catch (e) {}
+  try { out.logs = (window.__smLog || []); } catch (e) {}
   if (!out.login) {
     try {
       var inputs = document.querySelectorAll('input[type="password"]');
@@ -549,7 +591,7 @@ internal const val SILENT_PROBE_JS = """
       }
     } catch (e) {}
   }
-  try { return JSON.stringify(out); } catch (e) { return '{"combo":"","error":"","captcha":false,"login":false}'; }
+  try { return JSON.stringify(out); } catch (e) { return '{"combo":"","error":"","captcha":false,"login":false,"url":"","logs":[]}'; }
 })();
 """
 

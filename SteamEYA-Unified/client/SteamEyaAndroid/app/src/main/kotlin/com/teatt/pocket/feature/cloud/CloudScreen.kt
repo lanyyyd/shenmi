@@ -150,7 +150,11 @@ fun CloudScreen(
                     append(" 项 Cookie")
                     if (result.nickname.isNotBlank()) append("\n账号：${result.nickname}")
                     if (result.gameUid.isNotBlank()) append("\nUID：${result.gameUid}")
-                    append("\n有效性：").append(if (result.valid == true) "通过" else "未通过（${result.msg}）")
+                    // msg 是接口文案（上传接口固定「上传成功」），检测结论在 detail 里
+                    append("\n有效性：").append(
+                        if (result.valid == true) "通过（${result.detail.ifBlank { "已登录" }}）"
+                        else "未通过（${result.detail.ifBlank { "服务端没返回原因" }}）"
+                    )
                     when {
                         result.refreshOk == true -> append("\n自动续期：已开启（stoken 换票）")
                         result.refreshOk == false && result.needStoken ->
@@ -159,7 +163,7 @@ fun CloudScreen(
                             append("\n自动续期失败：${result.refreshMsg}")
                     }
                 }
-                dialog = "抓取完成" to detail
+                dialog = (if (result.valid == true) "抓取完成" else "上传完成，检测未通过") to detail
                 reload()
             } catch (e: Exception) {
                 dialog = "上传失败" to (e.message ?: "请稍后重试")
@@ -304,6 +308,13 @@ fun CloudScreen(
                             busy = busyKey == account.game || busyKey == account.key,
                             credential = creds[account.key],
                             onCredential = { credTarget = account },
+                            onTest = {
+                                if (creds[account.key] == null) {
+                                    credTarget = account
+                                } else {
+                                    AutoRefreshCenter.testLogin(token, account)
+                                }
+                            },
                             onPlay = {
                                 val url = playUrl(account)
                                 if (url.isBlank()) {
@@ -433,6 +444,10 @@ fun CloudScreen(
             onRefreshNow = {
                 credTarget = null
                 AutoRefreshCenter.refreshNow(token, account)
+            },
+            onTest = {
+                credTarget = null
+                AutoRefreshCenter.testLogin(token, account)
             }
         )
     }
@@ -445,7 +460,8 @@ private fun CredentialDialog(
     existing: CloudCredential?,
     onDismiss: () -> Unit,
     onSaved: () -> Unit,
-    onRefreshNow: () -> Unit
+    onRefreshNow: () -> Unit,
+    onTest: () -> Unit
 ) {
     var user by remember { mutableStateOf(existing?.account.orEmpty()) }
     var password by remember { mutableStateOf(existing?.password.orEmpty()) }
@@ -453,7 +469,7 @@ private fun CredentialDialog(
     var hint by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
-    fun save(andRefresh: Boolean) {
+    fun persist(next: () -> Unit) {
         if (user.isBlank() || password.isBlank()) {
             hint = "请填写完整的账号和密码"
             return
@@ -472,7 +488,7 @@ private fun CredentialDialog(
                 hint = "保存失败（本机加密不可用），请重试"
                 return@launch
             }
-            if (andRefresh) onRefreshNow() else onSaved()
+            next()
         }
     }
 
@@ -535,10 +551,13 @@ private fun CredentialDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { save(andRefresh = true) }) { Text("保存并更新") }
+            TextButton(onClick = { persist(onRefreshNow) }) { Text("保存并更新") }
         },
         dismissButton = {
             Row {
+                TextButton(onClick = { persist(onTest) }) {
+                    Text("保存并测试", color = BrandPink)
+                }
                 if (existing != null) {
                     TextButton(onClick = {
                         scope.launch {
@@ -811,6 +830,7 @@ private fun AccountCard(
     busy: Boolean,
     credential: CloudCredential?,
     onCredential: () -> Unit,
+    onTest: () -> Unit,
     onPlay: () -> Unit,
     onCheck: () -> Unit,
     onRecapture: () -> Unit,
@@ -926,6 +946,12 @@ private fun AccountCard(
                     if (account.game in setOf("genshin", "starrail")) {
                         TextButton(onClick = onCredential, enabled = !busy) {
                             Text("续期", fontSize = 13.sp)
+                        }
+                        if (credential != null) {
+                            // 测试版排查用：展开 WebView，能看到自动操作和每一步日志
+                            TextButton(onClick = onTest, enabled = !busy) {
+                                Text("测试", fontSize = 13.sp, color = BrandPink)
+                            }
                         }
                         TextButton(onClick = onStoken, enabled = !busy) {
                             Icon(Icons.Filled.QrCodeScanner, null, Modifier.size(15.dp))

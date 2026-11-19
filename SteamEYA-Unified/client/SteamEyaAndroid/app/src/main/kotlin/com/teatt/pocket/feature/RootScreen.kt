@@ -32,8 +32,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -182,30 +180,26 @@ fun RootScreen(
                     content()
                 }
             }
+
+            // 云游戏静默续期：先在右侧显示 App 内悬浮窗（不需要悬浮窗权限），
+            // 点一下才展开成完整 WebView 手动接管。画在最后，盖住底部栏和覆盖页。
+            AutoRefreshCenter.job?.let { job ->
+                SilentLoginView(
+                    game = job.game,
+                    credential = job.credential,
+                    expanded = AutoRefreshCenter.expanded,
+                    debug = job.debug,
+                    onExpand = { AutoRefreshCenter.expand() },
+                    onCollapse = { AutoRefreshCenter.collapse() },
+                    onClose = { AutoRefreshCenter.closeView() }
+                ) { outcome ->
+                    AutoRefreshCenter.finish(outcome)
+                }
+            }
         }
 
         // 更新弹窗（独立 Window，不受层级影响）
         UpdateDialogHost(UpdateCenter.dialog) { UpdateCenter.dismiss() }
-    }
-
-    // 云游戏静默续期：后台登录过程用一个独立 Window 承载，不阻塞页面层级
-    AutoRefreshCenter.job?.let { job ->
-        Dialog(
-            onDismissRequest = { },
-            properties = DialogProperties(
-                usePlatformDefaultWidth = false,
-                decorFitsSystemWindows = false,
-                dismissOnClickOutside = false,
-                dismissOnBackPress = false
-            )
-        ) {
-            SilentLoginView(
-                game = job.game,
-                credential = job.credential
-            ) { outcome ->
-                AutoRefreshCenter.finish(outcome)
-            }
-        }
     }
 
     AutoRefreshCenter.notice?.let { text ->
