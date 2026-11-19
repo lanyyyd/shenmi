@@ -63,6 +63,9 @@ internal const val COMBO_HOOK_JS = """
         if (d.__smLoginError) window.__smLoginError = String(d.__smLoginError);
         if (d.__smCaptcha) window.__smCaptcha = true;
         if (d.__smLoginForm) window.__smLoginForm = true;
+        // 登录动作发生后作废旧凭证，只认登录之后新下发的 combo_token
+        if (d.__smClearCombo) window.__smCombo = '';
+        if (d.__smLoginClicked) window.__smLoginClicked = true;
         if (d.__smLog) {
           try {
             window.__smLog = window.__smLog || [];
@@ -310,6 +313,7 @@ private const val AUTO_FILL_TEMPLATE = """
       host === 'hoyoverse.com' || host.endsWith('.hoyoverse.com');
     if (!miHost) return;
     L('自动登录脚本已加载（' + (host || 'unknown') + '）');
+    L('页面加载完成后等待 3 秒再自动登录');
     var ACC = __SM_ACCOUNT__;
     var PWD = __SM_PASSWORD__;
     var rounds = 0;
@@ -326,6 +330,16 @@ private const val AUTO_FILL_TEMPLATE = """
     var capWas = false;
     var limitLogged = false;
     var pwdMissLogged = false;
+
+    // 页面 load 完成后再等 3 秒，等登录弹窗渲染稳定再切「密码登录」
+    var startAt = Date.now() + 3000;
+    try {
+      if (document.readyState !== 'complete') {
+        window.addEventListener('load', function () {
+          startAt = Date.now() + 3000;
+        });
+      }
+    } catch (e) {}
 
     // 操作日志：同域直接挂到 __smLog，跨 frame postMessage 汇总到顶层
     function L(msg) {
@@ -518,7 +532,19 @@ private const val AUTO_FILL_TEMPLATE = """
       lastClick = now;
       clickedLogin++;
       clickEl(btn);
-      if (clickedLogin === 1) L('已点击「登录」按钮');
+      if (clickedLogin === 1) {
+        L('已点击「登录」按钮');
+        // 点击登录后作废之前页面缓存里带出来的旧 combo_token，只认登录后新下发的
+        try { window.__smCombo = ''; } catch (e) {}
+        try {
+          if (window.top && window.top !== window) {
+            window.top.postMessage({ __smClearCombo: true }, '*');
+            window.top.postMessage({ __smLoginClicked: true }, '*');
+          } else {
+            window.__smLoginClicked = true;
+          }
+        } catch (e) {}
+      }
     }
     function report() {
       var bodyText = '';
@@ -554,6 +580,7 @@ private const val AUTO_FILL_TEMPLATE = """
     }
     function pass() {
       try {
+        if (Date.now() < startAt) return;
         report();
         agreeBox() || agreeDialog();
         // 验证中 / 自动填充轮次用尽后不再抢输入框，交给用户手动完成
@@ -592,13 +619,30 @@ private const val AUTO_FILL_TEMPLATE = """
 internal const val SILENT_PROBE_JS = """
 (function () {
   function s(v) { return v ? String(v) : ''; }
-  var out = { combo: '', error: '', captcha: false, login: false, url: '', logs: [] };
+  var out = { combo: '', error: '', captcha: false, login: false, autoLogin: false, url: '', logs: [] };
   try { out.combo = s(window.__smCombo); } catch (e) {}
   try { out.error = s(window.__smLoginError); } catch (e) {}
   try { out.captcha = !!window.__smCaptcha; } catch (e) {}
   try { out.login = !!window.__smLoginForm; } catch (e) {}
+  try { out.autoLogin = !!window.__smLoginClicked; } catch (e) {}
   try { out.url = s(location.href); } catch (e) {}
   try { out.logs = (window.__smLog || []); } catch (e) {}
+  if (!out.login) {
+    try {
+      // 短信验证码登录面板没有密码框，用手机号输入框判断登录弹窗是否已经出现
+      var tel = document.querySelector('input[type="tel"],input[placeholder*="手机"],input[placeholder*="验证码"]');
+      if (tel) {
+        var tr = tel.getBoundingClientRect();
+        if (tr.width > 2 && tr.height > 2) out.login = true;
+      }
+    } catch (e) {}
+  }
+  if (!out.login) {
+    try {
+      var bodyTxt = ((document.body && (document.body.innerText || document.body.textContent)) || '').slice(0, 2000);
+      if (/短信登录|验证码登录|短信验证码/.test(bodyTxt)) out.login = true;
+    } catch (e) {}
+  }
   if (!out.login) {
     try {
       var inputs = document.querySelectorAll('input[type="password"]');

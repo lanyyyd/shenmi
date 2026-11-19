@@ -172,6 +172,9 @@ fun SilentLoginView(
         var loggedForm = false
         var loggedCaptcha = false
         var loggedProbeIssue = false
+        var formSeen = false
+        var loginSubmitted = false
+        var ignoredComboLogged = false
         while (!finished) {
             delay(1000)
             val view = webView ?: continue
@@ -208,6 +211,14 @@ fun SilentLoginView(
             val error = probe.optString("error")
             val captcha = probe.optBoolean("captcha")
             val login = probe.optBoolean("login")
+            val autoLogin = probe.optBoolean("autoLogin")
+
+            if (login) formSeen = true
+            if (autoLogin && !loginSubmitted) {
+                loginSubmitted = true
+                setStatus("已提交登录，等待云游戏凭证…")
+                log("登录已提交，旧的 combo_token 已作废，等待新凭证")
+            }
 
             if (login && !loggedForm) {
                 loggedForm = true
@@ -228,11 +239,19 @@ fun SilentLoginView(
             }
 
             // 只认注入钩子从本次页面网络请求里抓到的凭证。
-            // 之前的 localStorage / sessionStorage 兜底会读到上一轮的旧 combo_token，
-            // 服务端判定失效时就变成「还没登录就提示测试完成」。
+            // 页面自己缓存的 combo_token 可能早就失效，所以：
+            // - 登录框出现过：必须等我们真的提交登录后再接受凭证；
+            // - 没出现登录框：等 8 秒页面稳定后再接受（已登录场景）。
             val comboValue = combo
+            val acceptCombo = comboValue.isNotBlank() && (
+                loginSubmitted || (elapsed >= 8_000L && !formSeen)
+            )
+            if (comboValue.isNotBlank() && !acceptCombo && !ignoredComboLogged) {
+                ignoredComboLogged = true
+                log("忽略登录前页面带出的旧凭证，继续自动登录")
+            }
 
-            if (comboValue.isNotBlank()) {
+            if (acceptCombo) {
                 log("捕获到本次会话的云游戏凭证（长度 ${comboValue.length}）")
                 val domains = CookieHarvester.domainsFor(game.key, startUrl)
                 val cookies = CookieHarvester.harvest(domains)
