@@ -330,6 +330,9 @@ private const val AUTO_FILL_TEMPLATE = """
     var capWas = false;
     var limitLogged = false;
     var pwdMissLogged = false;
+    var lastRouteTry = 0;
+    var lastIframeTry = 0;
+    var textsDumped = false;
 
     // 页面 load 完成后再等 3 秒，等登录弹窗渲染稳定再切「密码登录」
     var startAt = Date.now() + 3000;
@@ -464,8 +467,63 @@ private const val AUTO_FILL_TEMPLATE = """
       }
       return best;
     }
+    // 米哈游通行证是 hash 路由 SPA：#/login/captcha 是短信验证码登录，
+    // #/login/password 是密码登录。直接改路由比在页面上找「密码登录」按钮可靠。
+    function passwordRoute() {
+      var now = Date.now();
+      if (now - lastRouteTry < 2000) return false;
+      lastRouteTry = now;
+      try {
+        var h = String(location.hash || '');
+        if (/login\/(captcha|code|sms)/i.test(h)) {
+          location.hash = h.replace(/login\/(captcha|code|sms)/i, 'login/password');
+          L('直接切换通行证路由到密码登录');
+          return true;
+        }
+      } catch (e) {}
+      return false;
+    }
+    // 登录弹窗可能是 user.mihoyo.com 的 iframe，父页面改 src 的 hash 也能切过去
+    function passwordIframe() {
+      var now = Date.now();
+      if (now - lastIframeTry < 3000) return false;
+      lastIframeTry = now;
+      try {
+        var frames = document.querySelectorAll('iframe');
+        for (var i = 0; i < frames.length; i++) {
+          var src = frames[i].src || '';
+          if (!/user\.mihoyo\.com|mihoyo.*passport/i.test(src)) continue;
+          if (!/#\/login\/(captcha|code|sms)/i.test(src)) continue;
+          frames[i].src = src.replace(/#\/login\/(captcha|code|sms)/i, '#/login/password');
+          L('切换登录 iframe 到密码登录');
+          return true;
+        }
+      } catch (e) {}
+      return false;
+    }
+    // 找不到入口时把页面上可见的短文案打进日志，方便定位真实按钮叫什么
+    function dumpTexts() {
+      if (textsDumped) return;
+      textsDumped = true;
+      try {
+        var nodes = document.querySelectorAll('button,span,a,div,label');
+        var out = [];
+        var seenTxt = {};
+        for (var i = 0; i < nodes.length && out.length < 24; i++) {
+          var s = text(nodes[i]);
+          if (!s || s.length > 10) continue;
+          if (!visible(nodes[i])) continue;
+          if (seenTxt[s]) continue;
+          seenTxt[s] = 1;
+          out.push(s);
+        }
+        if (out.length) L('页面可见文案：' + out.join(' / '));
+      } catch (e) {}
+    }
     function passwordMode() {
       if (hasPasswordInput()) return;
+      if (passwordRoute() || passwordIframe()) return;
+      if (Date.now() > startAt + 2500) dumpTexts();
       if (pwdTries >= 20) return;
       var now = Date.now();
       if (now - lastPwdClick < 1800) return;
