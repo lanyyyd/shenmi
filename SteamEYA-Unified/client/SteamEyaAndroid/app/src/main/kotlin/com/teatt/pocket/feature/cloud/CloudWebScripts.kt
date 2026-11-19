@@ -313,11 +313,13 @@ private const val AUTO_FILL_TEMPLATE = """
     var miHost = host === 'mihoyo.com' || host.endsWith('.mihoyo.com') ||
       host === 'hoyoverse.com' || host.endsWith('.hoyoverse.com');
     if (!miHost) return;
+    L('自动登录脚本已加载（' + (host || 'unknown') + '）');
     var ACC = __SM_ACCOUNT__;
     var PWD = __SM_PASSWORD__;
     var rounds = 0;
     var clickedLogin = 0;
-    var pwdSwitched = false;
+    var pwdTries = 0;
+    var lastPwdClick = 0;
     var lastClick = 0;
     var fillRounds = 0;
     var halted = false;
@@ -327,6 +329,7 @@ private const val AUTO_FILL_TEMPLATE = """
     var errorLogged = false;
     var capWas = false;
     var limitLogged = false;
+    var pwdMissLogged = false;
 
     // 操作日志：同域直接挂到 __smLog，跨 frame postMessage 汇总到顶层
     function L(msg) {
@@ -424,20 +427,50 @@ private const val AUTO_FILL_TEMPLATE = """
       }
       return false;
     }
-    function passwordMode() {
-      if (pwdSwitched) return;
-      var nodes = document.querySelectorAll('div,span,a,button');
+    function hasPasswordInput() {
+      var inputs = document.querySelectorAll('input[type="password"]');
+      for (var i = 0; i < inputs.length; i++) {
+        if (visible(inputs[i])) return true;
+      }
+      return false;
+    }
+    // 登录页默认停在「短信验证码登录」，这里的文案在不同版本里不太一样，用包含匹配
+    function passwordTab() {
+      var nodes = document.querySelectorAll('div,span,a,button,p,li,em,strong,label');
+      var best = null;
+      var bestLen = 999;
       for (var i = 0; i < nodes.length; i++) {
-        var s = text(nodes[i]);
-        if (s === '密码登录' || s === '密码登陆' || s === '账号密码登录') {
-          if (visible(nodes[i])) {
-            pwdSwitched = true;
-            clickEl(nodes[i]);
-            L('已切换到「密码登录」');
-            return;
-          }
+        var el = nodes[i];
+        var s = text(el);
+        if (!s || s.length > 14) continue;
+        if (!/密码(登录|登陆)/.test(s) &&
+            s.indexOf('账号密码') < 0 && s.indexOf('帐号密码') < 0) continue;
+        if (!visible(el)) continue;
+        // 文案相同的情况下越靠后（越里层）越优先，避免点到大容器没点到 tab
+        if (s.length <= bestLen) {
+          bestLen = s.length;
+          best = el;
         }
       }
+      return best;
+    }
+    function passwordMode() {
+      if (hasPasswordInput()) return;
+      if (pwdTries >= 20) return;
+      var now = Date.now();
+      if (now - lastPwdClick < 1800) return;
+      var el = passwordTab();
+      if (!el) {
+        if (!pwdMissLogged) {
+          pwdMissLogged = true;
+          L('页面未找到「密码登录」入口，保持当前登录方式');
+        }
+        return;
+      }
+      lastPwdClick = now;
+      pwdTries++;
+      clickEl(el);
+      L('点击「密码登录」切换登录方式');
     }
     function fill() {
       var pw = null;
@@ -512,7 +545,7 @@ private const val AUTO_FILL_TEMPLATE = """
           if (cr.width > 40 && cr.height > 20) { cap = true; break; }
         }
       } catch (e) {}
-      if (/请完成验证|拖动滑块|安全验证|请选择所有符合/.test(bodyText)) cap = true;
+      if (/请完成验证|拖动滑块|滑动验证|请选择所有符合|请完成安全验证/.test(bodyText)) cap = true;
       if (cap) {
         // 出现人机验证时停下来，避免和用户手动操作抢输入框
         halted = true;

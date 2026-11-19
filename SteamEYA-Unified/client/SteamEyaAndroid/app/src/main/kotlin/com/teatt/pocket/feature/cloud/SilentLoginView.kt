@@ -13,8 +13,10 @@ import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -52,12 +54,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -74,6 +83,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.coroutines.resume
+import kotlin.math.roundToInt
 
 /** 静默登录的结果；由 [AutoRefreshCenter] 消费并上传服务端。 */
 sealed interface SilentOutcome {
@@ -155,17 +165,26 @@ fun SilentLoginView(
         onDispose { if (!finished) onResult(SilentOutcome.Cancelled) }
     }
 
-    LaunchedEffect(webView) {
-        val view = webView ?: return@LaunchedEffect
+    LaunchedEffect(Unit) {
         val startedAt = System.currentTimeMillis()
         var lastUrl = ""
         var jsLogSeen = 0
         var loggedForm = false
         var loggedCaptcha = false
+        var loggedProbeIssue = false
         while (!finished) {
             delay(1000)
+            val view = webView ?: continue
             val raw = runCatching { view.evalJs(SILENT_PROBE_JS) }.getOrNull()
-            val probe = runCatching { JSONObject(raw.orEmpty()) }.getOrNull() ?: continue
+            // evaluateJavascript 返回的是 JSON 字符串字面量，必须先解一层引号再当 JSON 解析
+            val probe = runCatching { JSONObject(jsString(raw)) }.getOrNull()
+            if (probe == null) {
+                if (!loggedProbeIssue) {
+                    loggedProbeIssue = true
+                    log("状态探针暂时读不到页面（WebView 未就绪），继续等待")
+                }
+                continue
+            }
             val elapsed = System.currentTimeMillis() - startedAt
 
             val url = probe.optString("url")
@@ -256,11 +275,33 @@ fun SilentLoginView(
 
     BackHandler(enabled = expanded) { onCollapse() }
 
-    Box(
+    // 悬浮窗位置：默认右侧居中，可拖拽；收起/展开切换时保留
+    var cardOffset by remember { mutableStateOf<Offset?>(null) }
+    var cardSize by remember { mutableStateOf(IntSize.Zero) }
+
+    BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .clipToBounds()
     ) {
+        val density = LocalDensity.current
+        val cardWidthPx = with(density) { 152.dp.toPx() }
+        val cardMarginPx = with(density) { 10.dp.toPx() }
+        val defaultCardOffset = Offset(
+            (constraints.maxWidth - cardWidthPx - cardMarginPx).coerceAtLeast(0f),
+            (constraints.maxHeight / 2f - with(density) { 60.dp.toPx() }).coerceAtLeast(0f)
+        )
+        fun clampCard(x: Float, y: Float): Offset {
+            val maxX = (constraints.maxWidth - cardSize.width).coerceAtLeast(0f)
+            val maxY = (constraints.maxHeight - cardSize.height).coerceAtLeast(0f)
+            return Offset(x.coerceIn(0f, maxX), y.coerceIn(0f, maxY))
+        }
+        LaunchedEffect(constraints.maxWidth, constraints.maxHeight, cardSize) {
+            val current = cardOffset ?: return@LaunchedEffect
+            if (cardSize == IntSize.Zero) return@LaunchedEffect
+            cardOffset = clampCard(current.x, current.y)
+        }
+        val cardPosition = cardOffset ?: defaultCardOffset
         Column(
             Modifier
                 .fillMaxSize()
@@ -381,6 +422,7 @@ fun SilentLoginView(
                                         log("开始加载 ${url.orEmpty()}")
                                         // 老 WebView 不支持 document-start 时，至少保证顶层页面能自动填写
                                         if (!hooked) {
+                                            log("WebView 不支持 document-start，改用加载后注入")
                                             runCatching { view.evaluateJavascript(COMBO_HOOK_JS, null) }
                                             runCatching {
                                                 view.evaluateJavascript(
@@ -486,13 +528,24 @@ fun SilentLoginView(
             }
         }
 
-        // 收起状态：只在 App 内右侧显示一个悬浮窗，点击展开
+        // 收起状态：App 内悬浮窗（可拖拽），点一下展开
         if (!expanded) {
             Surface(
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 10.dp)
+                    .offset {
+                        IntOffset(cardPosition.x.roundToInt(), cardPosition.y.roundToInt())
+                    }
                     .width(152.dp)
+                    .onSizeChanged { cardSize = it }
+                    // 悬浮窗整体 50% 透明，减少遮挡
+                    .graphicsLayer { alpha = 0.5f }
+                    .pointerInput(constraints.maxWidth, constraints.maxHeight) {
+                        detectDragGestures { change, drag ->
+                            change.consume()
+                            val base = cardOffset ?: defaultCardOffset
+                            cardOffset = clampCard(base.x + drag.x, base.y + drag.y)
+                        }
+                    }
                     .clickable(onClick = onExpand),
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surface,
