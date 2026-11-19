@@ -842,7 +842,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         {
             SelectionMode = ListViewSelectionMode.Single,
             Height = 430,
-            Width = 760,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         foreach (var item in items)
         {
@@ -868,13 +868,15 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         var dialog = new ContentDialog
         {
             Title = Loc.T("Settings_Background_Server"),
-            Content = new ScrollViewer { Content = grid },
+            Content = grid,
             PrimaryButtonText = Loc.T("Settings_Background_Apply"),
             CloseButtonText = Loc.T("Common_Cancel"),
             DefaultButton = ContentDialogButton.Primary,
-            MaxWidth = 820,
+            MaxWidth = 880,
             XamlRoot = XamlRoot
         };
+        // ContentDialog 模板自身用主题资源限宽（默认 548），只设 MaxWidth 会被裁掉第三列。
+        dialog.Resources["ContentDialogMaxWidth"] = 880d;
         if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
             grid.SelectedItem is not GridViewItem { Tag: WallpaperItem picked })
         {
