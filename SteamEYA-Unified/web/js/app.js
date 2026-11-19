@@ -1021,7 +1021,9 @@ function contactRowHTML(u, opt) {
   const n = unreadOf(room);
   const self = !!o.self;
   let sub;
+  const activity = isAi ? '' : (u.activity || '');
   if (isAi) sub = '在线';
+  else if (isOnline && activity) sub = activity;
   else if (isOnline) {
     const d = u.devices || [];
     sub = d.length > 1 ? `${d.length} 台设备` : ((d[0] && d[0].ip) ? d[0].ip : '在线');
@@ -1154,7 +1156,7 @@ function updateHead() {
     const isAiPeer = !!uid && uid === getAiId();
     nm.innerHTML = esc(label) + (anyU && anyU.level != null ? levelBadge(anyU.level) : '');
     st.innerHTML = isAiPeer ? '<span class="live">在线</span> · AI 助手'
-      : (onU ? `<span class="live">在线</span> · ${esc(onU.devices[0]?.ip || '')}` : '对方已离线（消息仍会保存）');
+      : (onU ? `<span class="live">${esc(onU.activity || '在线')}</span>${onU.activity ? '' : ` · ${esc(onU.devices[0]?.ip || '')}`}` : '对方已离线（消息仍会保存）');
   }
 }
 /* anchorId：定位到某条消息（搜索结果点击），加载该消息前后的一页而不是最新一页 */

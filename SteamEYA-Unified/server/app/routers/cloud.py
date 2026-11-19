@@ -16,6 +16,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from .. import security
 from .. import cloud_refresh
 from .. import mihoyo_qr
+from .. import presence
 from ..config import DATA_DIR
 from ..db import execute, execute_update, query_all, query_one
 from ..deps import get_current_user, require_admin
@@ -385,8 +386,10 @@ def _client_ip(request: Request) -> str:
 CLOUD_LOGIN_DEDUPE_S = 60
 
 
-def _record_cloud_login(user_id: int, game: str, ip: str) -> None:
+def _record_cloud_login(user_id: int, game: str, ip: str, uid: str = "") -> None:
     """记一条上号日志（含更新最近登录时间）；时间窗内重复调用只记一次。"""
+    # 不管是否命中日志去重，都要刷新「在玩云游戏」会话（换账号 / 重复上号都要生效）
+    presence.note_cloud_login(user_id, game, uid)
     now = security.now_s()
     # users.last_login_at 全站统一用毫秒；cloud_login_logs.login_at 仍用秒（后台按秒展示）
     execute("UPDATE users SET last_login_at=? WHERE id=?", (security.now_ms(), user_id))
@@ -568,7 +571,7 @@ def download(request: Request, game: str = "genshin", uid: str = "",
         cookies = security.decrypt_blob(row["data"])
     except Exception:
         raise HTTPException(500, "数据解密失败")
-    _record_cloud_login(user["id"], game, _client_ip(request))
+    _record_cloud_login(user["id"], game, _client_ip(request), row["game_uid"] or uid)
     return {"ok": True, "cookies": cookies, "combo_token": row["combo_token"] or "",
             "game_uid": row["game_uid"] or "", "updated_at": row["updated_at"],
             "refresh_at": row["refresh_at"],
@@ -795,12 +798,13 @@ def admin_accounts(admin: dict = Depends(require_admin)):
     return {"ok": True, "accounts": out}
 
 
-@router.post("/admin/check")
-def admin_check(payload: dict = Body(...), admin: dict = Depends(require_admin)):
-    row_id = int(payload.get("id") or 0)
-    row = query_one("SELECT * FROM cloud_cookies WHERE id = ?", (row_id,))
-    if not row:
-        raise HTTPException(404, "记录不存在")
+def check_account_row(row: dict) -> dict:
+    """检测一条 cloud_cookies 并回写状态。
+
+    返回原始检测结果，额外带 valid_state：1 有效 / 0 失效 / None 无法判定。
+    后台「检测有效性」和每日定时检测共用，避免两处逻辑跑偏。
+    """
+    row_id = row["id"]
     cookies = security.decrypt_blob(row["data"])
     result = check_cookie_valid(cookies, row["game"], row["combo_token"] or "")
     valid_val = 1 if result.get("valid") is True else (0 if result.get("valid") is False else None)
@@ -819,7 +823,63 @@ def admin_check(payload: dict = Body(...), admin: dict = Depends(require_admin))
              result.get("nickname") or row["nickname"] or "",
              result.get("free_duration"), result.get("total_duration"), row_id),
         )
-    return {"ok": True, "id": row_id, "valid_state": valid_val, **result}
+    result["valid_state"] = valid_val
+    return result
+
+
+@router.post("/admin/check")
+def admin_check(payload: dict = Body(...), admin: dict = Depends(require_admin)):
+    row_id = int(payload.get("id") or 0)
+    row = query_one("SELECT * FROM cloud_cookies WHERE id = ?", (row_id,))
+    if not row:
+        raise HTTPException(404, "记录不存在")
+    result = check_account_row(row)
+    return {"ok": True, "id": row_id, **result}
+
+
+# ---------------- 定时检测设置 ----------------
+CLOUD_SETTING_DEFAULT_AT = "04:30"
+
+
+def _setting(key: str, default: str = "") -> str:
+    row = query_one("SELECT value FROM settings WHERE key=?", (key,))
+    return row["value"] if row else default
+
+
+def _set_setting(key: str, value: str) -> None:
+    execute(
+        "INSERT INTO settings (key, value, updated_at) VALUES (?,?,?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+        (key, value, security.now_ms()),
+    )
+
+
+def daily_check_settings() -> dict:
+    return {
+        "daily_check_enabled": _setting("cloud_daily_check_enabled", "0") == "1",
+        "daily_check_at": _setting("cloud_daily_check_at", CLOUD_SETTING_DEFAULT_AT),
+        "last_run": _setting("cloud_daily_check_last", ""),
+    }
+
+
+@router.get("/admin/settings")
+def admin_settings(admin: dict = Depends(require_admin)):
+    return {"ok": True, **daily_check_settings()}
+
+
+@router.put("/admin/settings")
+def save_admin_settings(payload: dict = Body(...), admin: dict = Depends(require_admin)):
+    if "daily_check_enabled" in payload:
+        _set_setting("cloud_daily_check_enabled", "1" if payload.get("daily_check_enabled") else "0")
+    at = str(payload.get("daily_check_at") or "").strip()
+    if at:
+        try:
+            hh, mm = [int(x) for x in at.split(":")]
+            assert 0 <= hh < 24 and 0 <= mm < 60
+        except Exception:
+            raise HTTPException(400, "时间格式应为 HH:MM")
+        _set_setting("cloud_daily_check_at", f"{hh:02d}:{mm:02d}")
+    return {"ok": True, **daily_check_settings()}
 
 
 @router.delete("/admin/accounts/{row_id}")

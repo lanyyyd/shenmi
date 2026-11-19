@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Any, Optional
 
+from . import presence
 from . import security
 from .db import execute, query_all, query_one
 
@@ -83,6 +84,8 @@ class Hub:
                 users[r["user_id"]] = {
                     "id": u["id"], "username": u["username"], "nickname": u["nickname"],
                     "avatar": u["avatar"] or "", "displayName": display_name(u), "devices": [],
+                    # 在玩状态由 presence 计算（云游戏探测 / Steam Web API），没有时为空串
+                    "activity": presence.activity_of(r["user_id"]),
                 }
             users[r["user_id"]]["devices"].append({
                 "deviceId": r["device_id"], "ip": r["ip"], "ua": r["ua"], "at": r["connected_at"],

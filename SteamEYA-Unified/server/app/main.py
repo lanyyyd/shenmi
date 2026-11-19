@@ -120,6 +120,14 @@ def _startup():
     from . import cloud_refresh
     cloud_refresh.start_background()
 
+    # 在线状态：云游戏剩余时长探测 + Steam 在线状态；聊天室「在玩 xxx」用
+    from . import presence
+    presence.start_background()
+
+    # 云游戏账号每日定时有效性检测（时间在后台云游戏管理页设置，默认关闭）
+    from . import cloud_schedule
+    cloud_schedule.start_background()
+
 
 @app.get("/health")
 @app.get("/api/health")

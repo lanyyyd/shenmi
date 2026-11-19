@@ -135,6 +135,26 @@ html[data-theme="light"] .modal-c .field input,html[data-theme="light"] .modal-c
 
     <div class="card" style="margin-top:20px">
       <div class="card-h">
+        <h2>定时有效性检测</h2>
+        <div class="spacer"></div>
+        <span class="mono" style="font-size:12px;opacity:.7" id="dcLast">尚未执行</span>
+        <button class="btn pri" onclick="saveSchedule()">保存</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:2px 2px 8px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13.5px">
+          <input type="checkbox" id="dcEnabled"> 每天定时检测全部账号
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13.5px">
+          执行时间
+          <input type="time" id="dcAt" value="04:30"
+            style="padding:7px 10px;border-radius:9px;border:1.5px solid var(--line);background:var(--input-bg);color:var(--text)">
+        </label>
+      </div>
+      <div class="mono" style="font-size:12px;opacity:.7">到点后逐条检测全部云端账号（与「检测有效性」逻辑一致），每条间隔 1 秒，避免触发风控。</div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <div class="card-h">
         <h2>游戏名管理</h2>
         <div class="spacer"></div>
         <span class="mono" style="font-size:12px;opacity:.7">删除后该游戏名不再出现在客户端游戏列表</span>
@@ -301,7 +321,23 @@ async function delGame(key, name, cookieCount){
   toast(`已删除「${name}」`+(d.deleted_cookies?`，连带删除 ${d.deleted_cookies} 条 Cookie`:''));
   loadAll();
 }
-function loadAll(){ loadUsers(); loadStats(); loadAccounts(); loadLogs(); loadGames(); }
+/* 定时检测设置 */
+async function loadSchedule(){
+  const r = await fetch('/api/cloud/admin/settings'); if(!r.ok) return;
+  const d = await r.json().catch(()=>({}));
+  $('dcEnabled').checked = !!d.daily_check_enabled;
+  $('dcAt').value = d.daily_check_at || '04:30';
+  $('dcLast').textContent = d.last_run ? `上次：${d.last_run}` : '尚未执行';
+}
+async function saveSchedule(){
+  const r = await fetch('/api/cloud/admin/settings', {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({daily_check_enabled: $('dcEnabled').checked, daily_check_at: $('dcAt').value || '04:30'})});
+  const d = await r.json().catch(()=>({}));
+  toast(r.ok ? '已保存' : (d.detail || '保存失败'));
+  if(r.ok) loadSchedule();
+}
+
+function loadAll(){ loadUsers(); loadStats(); loadAccounts(); loadLogs(); loadGames(); loadSchedule(); }
 
 /* 用户下拉（编辑时选择把该云端账号分配给谁） */
 async function loadUsers(){
