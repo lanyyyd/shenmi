@@ -792,6 +792,10 @@
     "Settings_Background_Server": "服务器壁纸",
     "Settings_Background_Apply": "使用这张",
     "Settings_Background_ServerEmpty": "服务器还没有上传壁纸。",
-    "Settings_Background_ServerFail": "获取服务器壁纸失败，请检查网络后再试。"
+    "Settings_Background_ServerFail": "获取服务器壁纸失败，请检查网络后再试。",
+    "Settings_Background_ServerLoading": "正在获取服务器壁纸列表…",
+    "Settings_Background_Downloading": "正在下载壁纸…",
+    "Settings_Background_Downloading_Format": "正在下载壁纸… {0}%",
+    "Settings_Background_Applying": "正在应用壁纸…"
   }
 }

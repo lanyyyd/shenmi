@@ -807,86 +807,124 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
 
         MainWindow.Instance?.ApplyCustomBackground(settings);
         AppState.SettingsService.DeleteOtherCustomBackgroundImages(fileName);
+        // 服务器壁纸走这里时不会经过选择器的 finally，需主动刷新，否则透明度滑杆仍保持禁用态。
+        UpdateCustomBackgroundControls();
         return true;
+    }
+
+    /// <summary>显示背景卡片的进度条；percent 为 null 时显示不确定进度。</summary>
+    private void ShowServerWallpaperProgress(string text, double? percent)
+    {
+        ServerWallpaperProgressText.Text = text;
+        ServerWallpaperProgressBar.IsIndeterminate = percent is null;
+        ServerWallpaperProgressBar.Value = percent ?? 0;
+        ServerWallpaperProgressPanel.Visibility = Visibility.Visible;
+    }
+
+    private void HideServerWallpaperProgress()
+    {
+        ServerWallpaperProgressPanel.Visibility = Visibility.Collapsed;
     }
 
     /// <summary>从服务端壁纸库挑一张：预览列表 → 下载到临时文件 → 复用本地导入流程。</summary>
     private async void ChooseServerWallpaperButton_Click(object sender, RoutedEventArgs e)
     {
-        List<WallpaperItem> items;
-        try
-        {
-            items = await WallpaperService.ListAsync();
-        }
-        catch (Exception ex)
-        {
-            AppLog.Error("获取服务器壁纸列表失败。", ex);
-            AppState.ShowStatus(Loc.T("Settings_Background_ServerFail"), InfoBarSeverity.Error);
-            return;
-        }
-
-        if (items.Count == 0)
-        {
-            var empty = new ContentDialog
-            {
-                Title = Loc.T("Settings_Background_Server"),
-                Content = Loc.T("Settings_Background_ServerEmpty"),
-                CloseButtonText = Loc.T("Common_Confirm"),
-                XamlRoot = XamlRoot
-            };
-            await empty.ShowAsync();
-            return;
-        }
-
-        var grid = new GridView
-        {
-            SelectionMode = ListViewSelectionMode.Single,
-            Height = 430,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
-        foreach (var item in items)
-        {
-            // 直接看图选：不显示名字，缩略图铺满
-            var panel = new StackPanel { Width = 240 };
-            panel.Children.Add(new Border
-            {
-                CornerRadius = new CornerRadius(8),
-                Height = 135,
-                Child = new Image
-                {
-                    Stretch = Stretch.UniformToFill,
-                    Source = new BitmapImage(new Uri(item.FullUrl))
-                }
-            });
-            grid.Items.Add(new GridViewItem { Content = panel, Tag = item });
-        }
-        if (grid.Items.Count > 0)
-        {
-            grid.SelectedIndex = 0;
-        }
-
-        var dialog = new ContentDialog
-        {
-            Title = Loc.T("Settings_Background_Server"),
-            Content = grid,
-            PrimaryButtonText = Loc.T("Settings_Background_Apply"),
-            CloseButtonText = Loc.T("Common_Cancel"),
-            DefaultButton = ContentDialogButton.Primary,
-            MaxWidth = 880,
-            XamlRoot = XamlRoot
-        };
-        // ContentDialog 模板自身用主题资源限宽（默认 548），只设 MaxWidth 会被裁掉第三列。
-        dialog.Resources["ContentDialogMaxWidth"] = 880d;
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
-            grid.SelectedItem is not GridViewItem { Tag: WallpaperItem picked })
-        {
-            return;
-        }
+        ChooseServerWallpaperButton.IsEnabled = false;
+        ShowServerWallpaperProgress(Loc.T("Settings_Background_ServerLoading"), null);
 
         string? tempPath = null;
         try
         {
-            tempPath = await WallpaperService.DownloadAsync(picked);
+            List<WallpaperItem> items;
+            try
+            {
+                items = await WallpaperService.ListAsync();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error("获取服务器壁纸列表失败。", ex);
+                AppState.ShowStatus(Loc.T("Settings_Background_ServerFail"), InfoBarSeverity.Error);
+                return;
+            }
+
+            if (items.Count == 0)
+            {
+                var empty = new ContentDialog
+                {
+                    Title = Loc.T("Settings_Background_Server"),
+                    Content = Loc.T("Settings_Background_ServerEmpty"),
+                    CloseButtonText = Loc.T("Common_Confirm"),
+                    XamlRoot = XamlRoot
+                };
+                HideServerWallpaperProgress();
+                await empty.ShowAsync();
+                return;
+            }
+
+            var grid = new GridView
+            {
+                SelectionMode = ListViewSelectionMode.Single,
+                Height = 430,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+            };
+            foreach (var item in items)
+            {
+                // 直接看图选：不显示名字，缩略图铺满
+                var panel = new StackPanel { Width = 240 };
+                panel.Children.Add(new Border
+                {
+                    CornerRadius = new CornerRadius(8),
+                    Height = 135,
+                    Child = new Image
+                    {
+                        Stretch = Stretch.UniformToFill,
+                        Source = new BitmapImage(new Uri(item.FullUrl))
+                    }
+                });
+                grid.Items.Add(new GridViewItem { Content = panel, Tag = item });
+            }
+            if (grid.Items.Count > 0)
+            {
+                grid.SelectedIndex = 0;
+            }
+
+            var dialog = new ContentDialog
+            {
+                Title = Loc.T("Settings_Background_Server"),
+                Content = grid,
+                PrimaryButtonText = Loc.T("Settings_Background_Apply"),
+                CloseButtonText = Loc.T("Common_Cancel"),
+                DefaultButton = ContentDialogButton.Primary,
+                MaxWidth = 880,
+                XamlRoot = XamlRoot
+            };
+            // ContentDialog 模板自身用主题资源限宽（默认 548），只设 MaxWidth 会被裁掉第三列。
+            dialog.Resources["ContentDialogMaxWidth"] = 880d;
+            HideServerWallpaperProgress();
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
+                grid.SelectedItem is not GridViewItem { Tag: WallpaperItem picked })
+            {
+                return;
+            }
+
+            ShowServerWallpaperProgress(Loc.T("Settings_Background_Downloading"), null);
+            var progress = new Progress<WallpaperDownloadProgress>(p =>
+            {
+                if (p.Fraction is { } fraction)
+                {
+                    ShowServerWallpaperProgress(
+                        Loc.Tf("Settings_Background_Downloading_Format", (int)Math.Round(fraction * 100)),
+                        fraction * 100);
+                }
+                else
+                {
+                    ShowServerWallpaperProgress(Loc.T("Settings_Background_Downloading"), null);
+                }
+            });
+
+            tempPath = await WallpaperService.DownloadAsync(picked, progress);
+
+            ShowServerWallpaperProgress(Loc.T("Settings_Background_Applying"), null);
             await ApplyBackgroundFileAsync(tempPath);
         }
         catch (Exception ex)
@@ -896,6 +934,9 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         }
         finally
         {
+            HideServerWallpaperProgress();
+            ChooseServerWallpaperButton.IsEnabled = true;
+
             if (tempPath is not null)
             {
                 try

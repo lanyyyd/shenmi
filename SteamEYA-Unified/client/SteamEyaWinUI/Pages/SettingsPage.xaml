@@ -214,6 +214,20 @@
                             </Button>
                         </StackPanel>
                     </Grid>
+                    <!-- 服务器壁纸下载进度：取列表/下载/应用时显示 -->
+                    <StackPanel
+                        x:Name="ServerWallpaperProgressPanel"
+                        Spacing="6"
+                        Visibility="Collapsed">
+                        <ProgressBar
+                            x:Name="ServerWallpaperProgressBar"
+                            Minimum="0"
+                            Maximum="100" />
+                        <TextBlock
+                            x:Name="ServerWallpaperProgressText"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />

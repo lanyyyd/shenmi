@@ -3,6 +3,15 @@ using System.Text.Json;
 
 namespace SteamEyaWinUI.Services;
 
+/// <summary>壁纸下载进度；TotalBytes 为 null 表示服务器未返回文件大小。</summary>
+internal readonly record struct WallpaperDownloadProgress(long ReceivedBytes, long? TotalBytes)
+{
+    /// <summary>0~1 的下载比例；总大小未知时为 null。</summary>
+    public double? Fraction => TotalBytes is > 0
+        ? Math.Clamp((double)ReceivedBytes / TotalBytes.Value, 0, 1)
+        : null;
+}
+
 /// <summary>服务端壁纸库中的一张壁纸。</summary>
 internal sealed class WallpaperItem
 {
@@ -52,17 +61,54 @@ internal static class WallpaperService
         return items;
     }
 
-    /// <summary>下载到临时文件，返回本地路径（由调用方导入后自行清理）。</summary>
-    public static async Task<string> DownloadAsync(WallpaperItem item, CancellationToken cancellationToken = default)
+    /// <summary>流式下载到临时文件并上报进度，返回本地路径（由调用方导入后自行清理）。</summary>
+    public static async Task<string> DownloadAsync(
+        WallpaperItem item,
+        IProgress<WallpaperDownloadProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
-        var bytes = await Http.GetByteArrayAsync(item.FullUrl, cancellationToken);
+        using var response = await Http.GetAsync(
+            item.FullUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
         var extension = Path.GetExtension(new Uri(item.FullUrl).AbsolutePath);
         if (string.IsNullOrWhiteSpace(extension) || extension.Length > 6)
         {
             extension = ".jpg";
         }
         var tempPath = Path.Combine(Path.GetTempPath(), "eya-wallpaper-" + Guid.NewGuid().ToString("N") + extension);
-        await File.WriteAllBytesAsync(tempPath, bytes, cancellationToken);
-        return tempPath;
+
+        try
+        {
+            var totalBytes = response.Content.Headers.ContentLength;
+            await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var target = File.Create(tempPath);
+
+            var buffer = new byte[81920];
+            long receivedBytes = 0;
+            int read;
+            while ((read = await source.ReadAsync(buffer.AsMemory(), cancellationToken)) > 0)
+            {
+                await target.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                receivedBytes += read;
+                progress?.Report(new WallpaperDownloadProgress(receivedBytes, totalBytes));
+            }
+
+            return tempPath;
+        }
+        catch
+        {
+            // 下载中断时不留下半截临时文件。
+            try
+            {
+                File.Delete(tempPath);
+            }
+            catch
+            {
+                // 清理失败可忽略
+            }
+
+            throw;
+        }
     }
 }
