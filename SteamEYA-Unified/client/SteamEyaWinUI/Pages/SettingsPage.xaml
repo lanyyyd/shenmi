@@ -5,6 +5,7 @@
     xmlns:local="using:SteamEyaWinUI.Pages"
     NavigationCacheMode="Required">
 
+    <Grid>
     <ScrollViewer
         HorizontalScrollBarVisibility="Disabled"
         VerticalScrollBarVisibility="Auto"
@@ -682,4 +683,38 @@
             </Border>
         </StackPanel>
     </ScrollViewer>
+
+        <!-- 服务器壁纸下载 / 应用进度：盖在设置页上方，带百分比，避免选完图后毫无反馈 -->
+        <Border
+            x:Name="BackgroundProgressOverlay"
+            Visibility="Collapsed"
+            Background="#66000000">
+            <Border
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                MinWidth="360"
+                Padding="24,20"
+                CornerRadius="12"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1">
+                <StackPanel Spacing="12">
+                    <TextBlock
+                        x:Name="BackgroundProgressTitle"
+                        FontWeight="SemiBold"
+                        TextWrapping="Wrap" />
+                    <ProgressBar
+                        x:Name="BackgroundProgressBar"
+                        Minimum="0"
+                        Maximum="100"
+                        IsIndeterminate="True" />
+                    <TextBlock
+                        x:Name="BackgroundProgressPercent"
+                        HorizontalAlignment="Right"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+            </Border>
+        </Border>
+    </Grid>
 </Page>

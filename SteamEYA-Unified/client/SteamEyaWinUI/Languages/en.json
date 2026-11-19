@@ -619,6 +619,9 @@
     "Settings_Background_Server": "Server wallpapers",
     "Settings_Background_Apply": "Use this one",
     "Settings_Background_ServerEmpty": "No wallpapers have been uploaded yet.",
-    "Settings_Background_ServerFail": "Failed to load server wallpapers. Check your network and try again."
+    "Settings_Background_ServerFail": "Failed to load server wallpapers. Check your network and try again.",
+    "Settings_Background_ServerLoading": "Loading wallpapers…",
+    "Settings_Background_ServerDownloading": "Downloading wallpaper…",
+    "Settings_Background_ServerApplying": "Applying wallpaper…"
   }
 }

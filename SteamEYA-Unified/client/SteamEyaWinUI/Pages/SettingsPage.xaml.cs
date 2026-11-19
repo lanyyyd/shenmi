@@ -34,6 +34,8 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".mp4", ".m4v", ".mov", ".wmv", ".avi", ".mkv"];
 
     private bool _pickingBackground;
+    // 下载进度回调是排队到 UI 线程的，切到「应用」阶段后要屏蔽迟到的百分比
+    private bool _reportingWallpaperProgress;
     private bool _recordingScreenshotHotkey;
 
     // 更新镜像源列表（ListView 直接拖动重排这个集合）。
@@ -807,13 +809,47 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
 
         MainWindow.Instance?.ApplyCustomBackground(settings);
         AppState.SettingsService.DeleteOtherCustomBackgroundImages(fileName);
+        // 服务器壁纸走的是这条路径：这里必须刷新一次，否则透明度滑杆还停留在
+        // 「没有背景」时的禁用状态，用户得先关掉再打开开关才能拖。
+        UpdateCustomBackgroundControls();
         return true;
+    }
+
+    /// <summary>下载 / 应用服务器壁纸时的进度遮罩。</summary>
+    private void ShowBackgroundProgress(string title, bool indeterminate)
+    {
+        BackgroundProgressTitle.Text = title;
+        BackgroundProgressBar.IsIndeterminate = indeterminate;
+        BackgroundProgressBar.Value = 0;
+        BackgroundProgressPercent.Text = string.Empty;
+        BackgroundProgressOverlay.Visibility = Visibility.Visible;
+    }
+
+    private void UpdateBackgroundProgress(double fraction)
+    {
+        if (!_reportingWallpaperProgress)
+        {
+            return;
+        }
+
+        var percent = Math.Clamp(fraction, 0d, 1d) * 100;
+        BackgroundProgressBar.IsIndeterminate = false;
+        BackgroundProgressBar.Value = percent;
+        BackgroundProgressPercent.Text = $"{percent:0}%";
+    }
+
+    private void HideBackgroundProgress()
+    {
+        _reportingWallpaperProgress = false;
+        BackgroundProgressOverlay.Visibility = Visibility.Collapsed;
     }
 
     /// <summary>从服务端壁纸库挑一张：预览列表 → 下载到临时文件 → 复用本地导入流程。</summary>
     private async void ChooseServerWallpaperButton_Click(object sender, RoutedEventArgs e)
     {
-        List<WallpaperItem> items;
+        List<WallpaperItem> items = [];
+        ChooseServerWallpaperButton.IsEnabled = false;
+        ShowBackgroundProgress(Loc.T("Settings_Background_ServerLoading"), indeterminate: true);
         try
         {
             items = await WallpaperService.ListAsync();
@@ -823,6 +859,11 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
             AppLog.Error("获取服务器壁纸列表失败。", ex);
             AppState.ShowStatus(Loc.T("Settings_Background_ServerFail"), InfoBarSeverity.Error);
             return;
+        }
+        finally
+        {
+            HideBackgroundProgress();
+            ChooseServerWallpaperButton.IsEnabled = true;
         }
 
         if (items.Count == 0)
@@ -884,9 +925,19 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         }
 
         string? tempPath = null;
+        ChooseServerWallpaperButton.IsEnabled = false;
+        ShowBackgroundProgress(Loc.T("Settings_Background_ServerDownloading"), indeterminate: true);
+        _reportingWallpaperProgress = true;
         try
         {
-            tempPath = await WallpaperService.DownloadAsync(picked);
+            var progress = new Progress<double>(UpdateBackgroundProgress);
+            tempPath = await WallpaperService.DownloadAsync(picked, progress);
+
+            // 下载完切「应用」状态：导入 / 转码大图或视频还要一点时间
+            _reportingWallpaperProgress = false;
+            BackgroundProgressTitle.Text = Loc.T("Settings_Background_ServerApplying");
+            BackgroundProgressBar.IsIndeterminate = true;
+            BackgroundProgressPercent.Text = string.Empty;
             await ApplyBackgroundFileAsync(tempPath);
         }
         catch (Exception ex)
@@ -896,6 +947,8 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         }
         finally
         {
+            HideBackgroundProgress();
+            ChooseServerWallpaperButton.IsEnabled = true;
             if (tempPath is not null)
             {
                 try

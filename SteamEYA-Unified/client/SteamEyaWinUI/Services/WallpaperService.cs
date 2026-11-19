@@ -53,16 +53,57 @@ internal static class WallpaperService
     }
 
     /// <summary>下载到临时文件，返回本地路径（由调用方导入后自行清理）。</summary>
-    public static async Task<string> DownloadAsync(WallpaperItem item, CancellationToken cancellationToken = default)
+    /// <param name="progress">0~1 的下载进度；服务端没给 Content-Length 时不回调。</param>
+    public static async Task<string> DownloadAsync(
+        WallpaperItem item,
+        IProgress<double>? progress = null,
+        CancellationToken cancellationToken = default)
     {
-        var bytes = await Http.GetByteArrayAsync(item.FullUrl, cancellationToken);
         var extension = Path.GetExtension(new Uri(item.FullUrl).AbsolutePath);
         if (string.IsNullOrWhiteSpace(extension) || extension.Length > 6)
         {
             extension = ".jpg";
         }
         var tempPath = Path.Combine(Path.GetTempPath(), "eya-wallpaper-" + Guid.NewGuid().ToString("N") + extension);
-        await File.WriteAllBytesAsync(tempPath, bytes, cancellationToken);
+
+        try
+        {
+            using var response = await Http.GetAsync(
+                item.FullUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            var total = response.Content.Headers.ContentLength;
+            await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var output = File.Create(tempPath);
+
+            var buffer = new byte[81920];
+            long received = 0;
+            progress?.Report(0);
+            int read;
+            while ((read = await input.ReadAsync(buffer.AsMemory(), cancellationToken)) > 0)
+            {
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                received += read;
+                if (total is > 0)
+                {
+                    progress?.Report(Math.Clamp((double)received / total.Value, 0d, 1d));
+                }
+            }
+        }
+        catch
+        {
+            try
+            {
+                File.Delete(tempPath);
+            }
+            catch
+            {
+                // 下载失败时临时文件删不掉不影响后续
+            }
+
+            throw;
+        }
+
         return tempPath;
     }
 }

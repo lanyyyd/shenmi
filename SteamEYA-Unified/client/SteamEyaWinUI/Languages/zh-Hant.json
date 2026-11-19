@@ -619,6 +619,9 @@
     "Settings_Background_Server": "伺服器壁紙",
     "Settings_Background_Apply": "使用這張",
     "Settings_Background_ServerEmpty": "伺服器還沒有上傳壁紙。",
-    "Settings_Background_ServerFail": "取得伺服器壁紙失敗，請檢查網路後再試。"
+    "Settings_Background_ServerFail": "取得伺服器壁紙失敗，請檢查網路後再試。",
+    "Settings_Background_ServerLoading": "正在取得壁紙清單…",
+    "Settings_Background_ServerDownloading": "正在下載壁紙…",
+    "Settings_Background_ServerApplying": "正在套用壁紙…"
   }
 }
