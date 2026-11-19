@@ -28,7 +28,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -53,7 +52,6 @@ import androidx.webkit.WebViewFeature
 import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CookieDto
 import com.teatt.pocket.ui.BrandPink
-import org.json.JSONTokener
 
 /**
  * 云游戏登录抓取页：WebView 里让用户手动登录，登录完点底部按钮，
@@ -62,186 +60,10 @@ import org.json.JSONTokener
  * 米哈游云游戏还需要 x-rpc-combo_token 才能判定账号有效 / 查剩余时长，
  * 而它不在 Cookie 里（页面是放在请求头里的），所以要在页面脚本执行前注入钩子，
  * 把 fetch / XHR 上的 x-rpc-combo_token 记下来，抓取时一并取走。
+ *
+ * 登录页必须先勾选「同意用户协议」，这里顺带注入 AGREE_ONLY_JS 自动勾上，
+ * 用户只需要填账号密码。
  */
-private const val COMBO_HOOK_JS = """
-(function () {
-  try {
-    window.__smCombo = window.__smCombo || '';
-    function looks(v) {
-      // combo_token 一般是 "ai=4;ci=1;..." 这种格式
-      if (typeof v !== 'string' || v.length < 13) return false;
-      var i = v.indexOf('ai=');
-      if (i < 0) return false;
-      if (i > 0 && v.charAt(i - 1) !== ';') return false;
-      var d = v.charAt(i + 3);
-      return d >= '0' && d <= '9' && v.indexOf(';', i) > 0;
-    }
-    function set(v) {
-      if (!v) return;
-      v = String(v);
-      if (v.length < 8 || v.length > 8000) return;
-      window.__smCombo = v;
-      try {
-        if (window.top && window.top !== window) window.top.postMessage({ __smCombo: v }, '*');
-      } catch (e) {}
-    }
-    // 从任意 JSON 响应里挖 combo_token（云游戏登录返回体里就是这个字段）
-    function pick(obj, depth) {
-      if (!obj || depth > 6) return '';
-      if (typeof obj === 'string') return looks(obj) ? obj : '';
-      if (typeof obj !== 'object') return '';
-      for (var k in obj) {
-        try {
-          var v = obj[k];
-          if (/combo_token/i.test(k) && typeof v === 'string' && v.length > 8) return v;
-          if (looks(v)) return v;
-          var f = pick(v, depth + 1);
-          if (f) return f;
-        } catch (e) {}
-      }
-      return '';
-    }
-    try {
-      window.addEventListener('message', function (e) {
-        var d = e && e.data;
-        if (d && d.__smCombo) window.__smCombo = String(d.__smCombo);
-      });
-    } catch (e) {}
-    function hook(headers) {
-      if (!headers) return;
-      try {
-        if (typeof headers.forEach === 'function' && !Array.isArray(headers)) {
-          headers.forEach(function (v, k) {
-            if (k && String(k).toLowerCase() === 'x-rpc-combo_token' && v) set(v);
-          });
-        } else {
-          Object.keys(headers).forEach(function (k) {
-            if (String(k).toLowerCase() === 'x-rpc-combo_token' && headers[k]) set(headers[k]);
-          });
-        }
-      } catch (e) {}
-    }
-    var of = window.fetch;
-    if (of) {
-      window.fetch = function (input, init) {
-        try {
-          if (init && init.headers) hook(init.headers);
-          if (input && input.headers) hook(input.headers);
-        } catch (e) {}
-        var p = of.apply(this, arguments);
-        try {
-          if (p && typeof p.then === 'function') {
-            p.then(function (res) {
-              try {
-                if (!res || typeof res.clone !== 'function') return;
-                res.clone().json().then(function (d) {
-                  var v = pick(d, 0);
-                  if (v) set(v);
-                }).catch(function () {});
-              } catch (e) {}
-            }).catch(function () {});
-          }
-        } catch (e) {}
-        return p;
-      };
-    }
-    var ox = XMLHttpRequest.prototype.setRequestHeader;
-    XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
-      try {
-        if (name && String(name).toLowerCase() === 'x-rpc-combo_token' && value) set(value);
-      } catch (e) {}
-      return ox.apply(this, arguments);
-    };
-    var oo = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function () {
-      var x = this;
-      try {
-        x.addEventListener('load', function () {
-          try {
-            var t = x.responseText;
-            if (!t || t.length > 2000000 || t.indexOf('combo') < 0) return;
-            var v = pick(JSON.parse(t), 0);
-            if (v) set(v);
-          } catch (e) {}
-        });
-      } catch (e) {}
-      return oo.apply(this, arguments);
-    };
-  } catch (e) {}
-})();
-"""
-
-/**
- * 抓取时兜底：先看网络钩子，再翻 localStorage / sessionStorage 里 key 含 combo 的值，
- * 最后看 document.cookie。页面把凭证落到缓存里时（用户说的「重开 App 就能抓到」）靠这一段。
- */
-private const val COMBO_READ_JS = """
-(function () {
-  try { if (window.__smCombo) return String(window.__smCombo); } catch (e) {}
-  function looks(v) {
-    if (typeof v !== 'string' || v.length < 13) return false;
-    var i = v.indexOf('ai=');
-    if (i < 0) return false;
-    if (i > 0 && v.charAt(i - 1) !== ';') return false;
-    var d = v.charAt(i + 3);
-    return d >= '0' && d <= '9' && v.indexOf(';', i) > 0;
-  }
-  function pick(obj, depth) {
-    if (!obj || depth > 6) return '';
-    if (typeof obj === 'string') return looks(obj) ? obj : '';
-    if (typeof obj !== 'object') return '';
-    for (var k in obj) {
-      try {
-        var v = obj[k];
-        if (/combo_token/i.test(k) && typeof v === 'string' && v.length > 8) return v;
-        if (looks(v)) return v;
-        var f = pick(v, depth + 1);
-        if (f) return f;
-      } catch (e) {}
-    }
-    return '';
-  }
-  function scan(store) {
-    try {
-      for (var i = 0; i < store.length; i++) {
-        var k = store.key(i) || '';
-        var v = store.getItem(k);
-        if (!v) continue;
-        v = String(v);
-        try {
-          var got = pick(JSON.parse(v), 0);
-          if (got) return got;
-        } catch (e) {}
-        if (/combo/i.test(k)) {
-          if (looks(v)) return v;
-          if (v.length > 8 && v.length < 8000) return v;
-        }
-        if (looks(v)) return v;
-      }
-    } catch (e) {}
-    return '';
-  }
-  var v = scan(window.localStorage) || scan(window.sessionStorage);
-  if (v) return v;
-  var parts = (document.cookie || '').split(';');
-  for (var j = 0; j < parts.length; j++) {
-    var p = parts[j].trim();
-    var idx = p.indexOf('=');
-    if (idx > 0 && /combo/i.test(p.substring(0, idx))) {
-      try { return decodeURIComponent(p.substring(idx + 1)); } catch (e) { return p.substring(idx + 1); }
-    }
-  }
-  return '';
-})();
-"""
-
-/** evaluateJavascript 返回值是 JSON 字面量（字符串会带引号），这里解回普通字符串。 */
-private fun jsString(raw: String?): String {
-    val text = raw?.trim().orEmpty()
-    if (text.isEmpty() || text == "null") return ""
-    return runCatching { JSONTokener(text).nextValue() as? String }.getOrNull().orEmpty()
-}
-
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun CaptureView(
@@ -286,7 +108,7 @@ fun CaptureView(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    "登录并进入云游戏后，点底部按钮抓取",
+                    "登录并进入云游戏后，点底部按钮抓取（协议会自动勾选）",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -336,10 +158,12 @@ fun CaptureView(
                         setAcceptThirdPartyCookies(web, true)
                     }
 
-                    // 在页面脚本执行前注入，才能拿到登录后第一次云游戏请求里的 combo_token
+                    // 在页面脚本执行前注入，才能拿到登录后第一次云游戏请求里的 combo_token；
+                    // AGREE_ONLY_JS 负责自动勾选用户协议（登录页在 iframe 里也能生效）
                     val hooked = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) &&
                         runCatching {
                             WebViewCompat.addDocumentStartJavaScript(web, COMBO_HOOK_JS, setOf("*"))
+                            WebViewCompat.addDocumentStartJavaScript(web, AGREE_ONLY_JS, setOf("*"))
                         }.isSuccess
 
                     webChromeClient = object : WebChromeClient() {
@@ -352,7 +176,10 @@ fun CaptureView(
                         override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
                             super.onPageStarted(view, url, favicon)
                             // 老版本 WebView 不支持 document-start 时的降级：每次导航都补注一次
-                            if (!hooked) runCatching { view.evaluateJavascript(COMBO_HOOK_JS, null) }
+                            if (!hooked) {
+                                runCatching { view.evaluateJavascript(COMBO_HOOK_JS, null) }
+                                runCatching { view.evaluateJavascript(AGREE_ONLY_JS, null) }
+                            }
                         }
 
                         override fun shouldOverrideUrlLoading(
@@ -370,6 +197,7 @@ fun CaptureView(
                 }
             },
             onRelease = { view ->
+                // 只落盘，绝对不要清 Cookie：清了会重置设备信任，下次登录又要验证码
                 CookieManager.getInstance().flush()
                 (view.parent as? ViewGroup)?.removeView(view)
                 view.stopLoading()
@@ -438,4 +266,3 @@ fun CaptureView(
         }
     }
 }
-

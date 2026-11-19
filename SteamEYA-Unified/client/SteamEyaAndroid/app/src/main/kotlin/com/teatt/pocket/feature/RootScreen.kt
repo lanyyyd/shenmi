@@ -13,7 +13,10 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -29,11 +32,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.teatt.pocket.core.Session
+import com.teatt.pocket.feature.cloud.AutoRefreshCenter
 import com.teatt.pocket.feature.cloud.CloudScreen
+import com.teatt.pocket.feature.cloud.SilentLoginView
 import com.teatt.pocket.feature.eat.EatScreen
 import com.teatt.pocket.feature.profile.ProfileScreen
 import com.teatt.pocket.feature.update.UpdateCenter
@@ -75,7 +82,11 @@ fun RootScreen(
     // 每次进入主界面（冷启动 / 登录成功）自动查一次更新，有新版本才弹窗。
     // 只在这里挂一次：切 tab 不会重复请求。
     LaunchedEffect(state.token) {
-        if (state.token.isNotBlank()) UpdateCenter.check(state.token, manual = false)
+        if (state.token.isNotBlank()) {
+            UpdateCenter.check(state.token, manual = false)
+            // 冷启动检测一次云原神 / 云崩铁登录态，失效且有本机凭据时后台静默续期
+            AutoRefreshCenter.startIfNeeded(state.token)
+        }
     }
 
     // 只记住"访问过的 tab"，没点过的 WebView 不创建：一进主界面就同时拉起两个 WebView
@@ -175,6 +186,37 @@ fun RootScreen(
 
         // 更新弹窗（独立 Window，不受层级影响）
         UpdateDialogHost(UpdateCenter.dialog) { UpdateCenter.dismiss() }
+    }
+
+    // 云游戏静默续期：后台登录过程用一个独立 Window 承载，不阻塞页面层级
+    AutoRefreshCenter.job?.let { job ->
+        Dialog(
+            onDismissRequest = { },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false,
+                dismissOnClickOutside = false,
+                dismissOnBackPress = false
+            )
+        ) {
+            SilentLoginView(
+                game = job.game,
+                credential = job.credential
+            ) { outcome ->
+                AutoRefreshCenter.finish(outcome)
+            }
+        }
+    }
+
+    AutoRefreshCenter.notice?.let { text ->
+        AlertDialog(
+            onDismissRequest = { AutoRefreshCenter.dismissNotice() },
+            title = { Text("静默续期") },
+            text = { Text(text) },
+            confirmButton = {
+                TextButton(onClick = { AutoRefreshCenter.dismissNotice() }) { Text("好") }
+            }
+        )
     }
 }
 

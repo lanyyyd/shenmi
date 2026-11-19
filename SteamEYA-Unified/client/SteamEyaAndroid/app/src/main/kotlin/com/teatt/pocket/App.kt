@@ -8,6 +8,7 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import com.teatt.pocket.core.CloudCredentialStore
 import com.teatt.pocket.core.Session
 import com.teatt.pocket.feature.wireguard.WgSession
 import okhttp3.OkHttpClient
@@ -21,6 +22,8 @@ class App : Application(), SingletonImageLoader.Factory {
         instance = this
         // 启动即恢复登录态：首帧就要判断进登录页还是主界面
         Session.init(this)
+        // 云游戏静默续期用的本机账号密码（Keystore 加密存储）
+        CloudCredentialStore.init(this)
         // 「小工具」里 WiFi 账号的登录态（与主账号独立）
         WgSession.init(this)
 

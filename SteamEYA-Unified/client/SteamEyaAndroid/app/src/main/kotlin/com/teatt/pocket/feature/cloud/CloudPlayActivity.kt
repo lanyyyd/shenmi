@@ -32,6 +32,8 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.teatt.pocket.core.Session
 import com.teatt.pocket.data.CloudApi
 import kotlinx.coroutines.launch
@@ -166,7 +168,23 @@ class CloudPlayActivity : ComponentActivity() {
                 setAcceptThirdPartyCookies(web, true)
             }
 
+            // Cookie 失效时页面会要求重新登录并勾选用户协议，这里自动勾上，其余保持人工
+            val agreeHooked = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) &&
+                runCatching {
+                    WebViewCompat.addDocumentStartJavaScript(web, AGREE_ONLY_JS, setOf("*"))
+                }.isSuccess
+
             webViewClient = object : WebViewClient() {
+                override fun onPageStarted(
+                    view: WebView?,
+                    url: String?,
+                    favicon: android.graphics.Bitmap?
+                ) {
+                    super.onPageStarted(view, url, favicon)
+                    if (!agreeHooked && view != null) {
+                        runCatching { view.evaluateJavascript(AGREE_ONLY_JS, null) }
+                    }
+                }
                 override fun shouldOverrideUrlLoading(
                     view: WebView,
                     request: WebResourceRequest

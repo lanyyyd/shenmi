@@ -41,6 +41,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -59,6 +60,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -66,6 +68,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.teatt.pocket.core.ApiException
 import com.teatt.pocket.core.CloudAccountDto
+import com.teatt.pocket.core.CloudCredential
+import com.teatt.pocket.core.CloudCredentialStore
 import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CookieDto
 import com.teatt.pocket.core.GachaLinkDto
@@ -97,6 +101,8 @@ fun CloudScreen(
     var gachaRoles by remember { mutableStateOf<List<GachaRoleDto>>(emptyList()) }
     var gachaOpen by remember { mutableStateOf(false) }
     var gachaLoading by remember { mutableStateOf(false) }
+    var credTarget by remember { mutableStateOf<CloudAccountDto?>(null) }
+    var creds by remember { mutableStateOf<Map<String, CloudCredential>>(emptyMap()) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -122,10 +128,12 @@ fun CloudScreen(
                 dialog = "加载失败" to (it.message ?: "请稍后重试")
             }
         }
+        creds = runCatching { CloudCredentialStore.list() }
+            .getOrNull().orEmpty().associateBy { it.key }
         loading = false
     }
 
-    LaunchedEffect(token) { reload() }
+    LaunchedEffect(token, AutoRefreshCenter.revision) { reload() }
 
     fun upload(game: CloudGameDto, cookies: List<CookieDto>, comboToken: String = "") {
         if (cookies.isEmpty()) {
@@ -294,6 +302,8 @@ fun CloudScreen(
                         AccountCard(
                             account = account,
                             busy = busyKey == account.game || busyKey == account.key,
+                            credential = creds[account.key],
+                            onCredential = { credTarget = account },
                             onPlay = {
                                 val url = playUrl(account)
                                 if (url.isBlank()) {
@@ -410,6 +420,139 @@ fun CloudScreen(
             onDismiss = { gachaOpen = false }
         )
     }
+
+    credTarget?.let { account ->
+        CredentialDialog(
+            account = account,
+            existing = creds[account.key],
+            onDismiss = { credTarget = null },
+            onSaved = {
+                credTarget = null
+                scope.launch { reload() }
+            },
+            onRefreshNow = {
+                credTarget = null
+                AutoRefreshCenter.refreshNow(token, account)
+            }
+        )
+    }
+}
+
+/** 设置本机保存的账号密码：只用于 App 冷启动时的静默续期。 */
+@Composable
+private fun CredentialDialog(
+    account: CloudAccountDto,
+    existing: CloudCredential?,
+    onDismiss: () -> Unit,
+    onSaved: () -> Unit,
+    onRefreshNow: () -> Unit
+) {
+    var user by remember { mutableStateOf(existing?.account.orEmpty()) }
+    var password by remember { mutableStateOf(existing?.password.orEmpty()) }
+    var enabled by remember { mutableStateOf(existing?.enabled ?: true) }
+    var hint by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    fun save(andRefresh: Boolean) {
+        if (user.isBlank() || password.isBlank()) {
+            hint = "请填写完整的账号和密码"
+            return
+        }
+        scope.launch {
+            val saved = CloudCredentialStore.save(
+                CloudCredential(
+                    game = account.game,
+                    gameUid = account.gameUid,
+                    account = user.trim(),
+                    password = password,
+                    enabled = enabled
+                )
+            )
+            if (!saved) {
+                hint = "保存失败（本机加密不可用），请重试"
+                return@launch
+            }
+            if (andRefresh) onRefreshNow() else onSaved()
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("静默续期 · ${account.displayName}") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "App 冷启动时如果检测到该账号登录态失效，会用这里的账号密码在后台重新登录并更新 Cookie。" +
+                        "密码用系统 Keystore 加密后只保存在本机，不会上传服务器。",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = user,
+                    onValueChange = { user = it },
+                    label = { Text("米哈游账号（手机号 / 邮箱）") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("密码") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("启用自动静默续期", fontSize = 13.sp)
+                    Switch(checked = enabled, onCheckedChange = { enabled = it })
+                }
+                Text(
+                    "登录页的「同意用户协议」会自动勾选；如果仍然遇到验证码，会在后台弹出页面让你手动完成一次。",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (hint.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(hint, fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                }
+                if (existing?.lastError?.isNotBlank() == true) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "上次失败：${existing.lastError}",
+                        fontSize = 11.sp,
+                        color = Color(0xFFB45309)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { save(andRefresh = true) }) { Text("保存并更新") }
+        },
+        dismissButton = {
+            Row {
+                if (existing != null) {
+                    TextButton(onClick = {
+                        scope.launch {
+                            CloudCredentialStore.delete(account.game, account.gameUid)
+                            onSaved()
+                        }
+                    }) {
+                        Text("删除凭据", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        }
+    )
 }
 
 /** 用扫码 stoken 生成抽卡链接：选角色 -> 生成 -> 复制。 */
@@ -666,6 +809,8 @@ private fun EmptyCard() {
 private fun AccountCard(
     account: CloudAccountDto,
     busy: Boolean,
+    credential: CloudCredential?,
+    onCredential: () -> Unit,
     onPlay: () -> Unit,
     onCheck: () -> Unit,
     onRecapture: () -> Unit,
@@ -728,6 +873,20 @@ private fun AccountCard(
                 )
             }
 
+            if (account.game in setOf("genshin", "starrail")) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    when {
+                        credential == null -> "静默续期：未设置"
+                        credential.enabled -> "静默续期：已开启"
+                        else -> "静默续期：已暂停"
+                    },
+                    fontSize = 11.sp,
+                    color = if (credential?.enabled == true) Color(0xFF15803D)
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
             Spacer(Modifier.height(4.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -765,6 +924,9 @@ private fun AccountCard(
                         Text("粘贴", fontSize = 13.sp)
                     }
                     if (account.game in setOf("genshin", "starrail")) {
+                        TextButton(onClick = onCredential, enabled = !busy) {
+                            Text("续期", fontSize = 13.sp)
+                        }
                         TextButton(onClick = onStoken, enabled = !busy) {
                             Icon(Icons.Filled.QrCodeScanner, null, Modifier.size(15.dp))
                             Spacer(Modifier.size(4.dp))
