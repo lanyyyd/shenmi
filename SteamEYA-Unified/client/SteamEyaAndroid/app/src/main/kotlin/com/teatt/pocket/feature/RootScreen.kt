@@ -23,6 +23,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -184,16 +185,18 @@ fun RootScreen(
             // 云游戏静默续期：先在右侧显示 App 内悬浮窗（不需要悬浮窗权限），
             // 点一下才展开成完整 WebView 手动接管。画在最后，盖住底部栏和覆盖页。
             AutoRefreshCenter.job?.let { job ->
-                SilentLoginView(
-                    game = job.game,
-                    credential = job.credential,
-                    expanded = AutoRefreshCenter.expanded,
-                    debug = job.debug,
-                    onExpand = { AutoRefreshCenter.expand() },
-                    onCollapse = { AutoRefreshCenter.collapse() },
-                    onClose = { AutoRefreshCenter.closeView() }
-                ) { outcome ->
-                    AutoRefreshCenter.finish(outcome)
+                key(job.id) {
+                    SilentLoginView(
+                        game = job.game,
+                        credential = job.credential,
+                        expanded = AutoRefreshCenter.expanded,
+                        debug = job.debug,
+                        onExpand = { AutoRefreshCenter.expand() },
+                        onCollapse = { AutoRefreshCenter.collapse() },
+                        onClose = { AutoRefreshCenter.closeView() }
+                    ) { outcome ->
+                        AutoRefreshCenter.finish(outcome)
+                    }
                 }
             }
         }

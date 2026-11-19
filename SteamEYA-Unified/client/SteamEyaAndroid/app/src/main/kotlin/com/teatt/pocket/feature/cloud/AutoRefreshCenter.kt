@@ -17,6 +17,8 @@ import kotlinx.coroutines.launch
 
 /** 一次静默续期要加载的页面与凭据。 */
 data class SilentJob(
+    /** 每次任务唯一，用作 Compose key，避免重复测试复用上一次的 WebView 状态。 */
+    val id: Long,
     val game: CloudGameDto,
     val credential: CloudCredential,
     /** 测试模式：默认展开页面并显示操作日志，不写失败退避。 */
@@ -70,12 +72,8 @@ object AutoRefreshCenter {
         private set
 
     fun dismissNotice() {
+        // 测试模式的页面不在这里关，右上角「关闭」才收，方便看完结果继续翻日志
         notice = null
-        // 测试模式结束后页面留着，等用户看完日志再关
-        if (job?.debug == true) {
-            job = null
-            expanded = false
-        }
     }
 
     /** 冷启动只触发一次。 */
@@ -164,7 +162,7 @@ object AutoRefreshCenter {
 
                 val deferred = CompletableDeferred<SilentOutcome>()
                 waiter = deferred
-                job = SilentJob(game, credential, debug)
+                job = SilentJob(System.nanoTime(), game, credential, debug)
                 expanded = debug
                 val outcome = deferred.await()
                 // 正式静默流程拿到结果就收掉页面；测试模式留在原地，方便看日志
