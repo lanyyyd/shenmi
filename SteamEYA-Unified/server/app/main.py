@@ -23,7 +23,7 @@ from .config import UPLOAD_DIR, WEB_DIR
 from .db import init_db
 from .lan import LanDiscovery
 from .routers import (admin, ai, ai_image, auth, chat, cloud, eat, gacha, lan, lan_transfer, level, mihoyo,
-                      points, qa, redpacket, save, steam, sync, tips, update)
+                      points, qa, redpacket, save, steam, sync, tips, update, wallpapers)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("gateway")
@@ -159,6 +159,7 @@ app.include_router(ws_module.router)
 
 # QuickAnswer 题库（搜题客户端用）
 app.include_router(qa.router)
+app.include_router(wallpapers.router)
 
 # 上传文件（聊天图片/文件/头像/表情）
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")

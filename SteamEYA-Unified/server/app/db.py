@@ -629,6 +629,16 @@ CREATE TABLE IF NOT EXISTS contact_notes (
     updated_at INTEGER,
     PRIMARY KEY (owner_id, peer_id)
 );
+
+-- 客户端壁纸库：后台统一上传，客户端设置页挑选
+CREATE TABLE IF NOT EXISTS wallpapers (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    title      TEXT NOT NULL DEFAULT '',
+    file_name  TEXT NOT NULL,
+    size       INTEGER NOT NULL DEFAULT 0,
+    created_by INTEGER,
+    created_at INTEGER NOT NULL
+);
 """
 
 

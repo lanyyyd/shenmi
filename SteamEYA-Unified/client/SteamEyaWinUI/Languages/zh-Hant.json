@@ -616,5 +616,9 @@
     "Tools_Mode_Sent": "切換指令已傳送。",
     "Tools_Mode_Failed": "傳送失敗：未連線伺服器且區域網路不可用。",
     "Lan_Conn_Error_Tip": "區域網路連線異常，請檢查房主及您的防火牆設定，請保持防火牆關閉狀態喵～"
-  }
+  },
+  "Settings_Background_Server": "伺服器壁紙",
+  "Settings_Background_Apply": "使用這張",
+  "Settings_Background_ServerEmpty": "伺服器還沒有上傳壁紙。",
+  "Settings_Background_ServerFail": "取得伺服器壁紙失敗，請檢查網路後再試。"
 }

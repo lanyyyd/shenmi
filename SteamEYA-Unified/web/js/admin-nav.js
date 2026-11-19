@@ -6,6 +6,7 @@
     { label: '首页', href: '/admin.html', title: '管理首页 · 用户与聊天' },
     { label: 'Steam', href: '/admin-steam.html', title: 'Steam 账号管理' },
     { label: '云游戏', href: '/admin-cloud.html', title: '云游戏账号管理' },
+    { label: '壁纸', href: '/admin-wallpapers.html', title: '客户端壁纸库' },
     { label: '更新', href: '/admin-update.html', title: '客户端更新管理' },
     { label: '积分', href: '/admin-points.html', title: '积分管理' },
     { label: '等级', href: '/admin-level.html', title: '等级管理' },

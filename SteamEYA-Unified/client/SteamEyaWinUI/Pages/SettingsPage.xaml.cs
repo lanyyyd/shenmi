@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
 using SteamEyaWinUI.Localization;
 using SteamEyaWinUI.Services;
@@ -763,44 +764,153 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
                 return false;
             }
 
-            string fileName;
-            try
-            {
-                var sourcePath = file.Path;
-                fileName = await Task.Run(() => AppState.SettingsService.ImportCustomBackgroundImage(sourcePath));
-            }
-            catch (Exception ex)
-            {
-                AppLog.Error("导入自定义背景失败。", ex);
-                AppState.ShowStatus(Loc.T("Settings_Background_ChooseFail"), InfoBarSeverity.Error);
-                return false;
-            }
-
-            var settings = AppState.SettingsService.Load();
-            settings.CustomBackgroundImageFileName = fileName;
-            settings.CustomBackgroundEnabled = true;
-            settings.CustomBackgroundOpacity = Math.Clamp(CustomBackgroundOpacitySlider.Value, 0.1, 0.9);
-            AppState.SettingsService.Save(settings);
-
-            _syncing = true;
-            try
-            {
-                CustomBackgroundToggle.IsOn = true;
-                CustomBackgroundOpacitySlider.Value = settings.CustomBackgroundOpacity;
-            }
-            finally
-            {
-                _syncing = false;
-            }
-
-            MainWindow.Instance?.ApplyCustomBackground(settings);
-            AppState.SettingsService.DeleteOtherCustomBackgroundImages(fileName);
-            return true;
+            return await ApplyBackgroundFileAsync(file.Path);
         }
         finally
         {
             _pickingBackground = false;
             UpdateCustomBackgroundControls();
+        }
+    }
+
+    /// <summary>本地文件 → 导入数据目录 → 落盘设置 → 立刻应用。服务器壁纸下载后也走这里。</summary>
+    private async Task<bool> ApplyBackgroundFileAsync(string sourcePath)
+    {
+        string fileName;
+        try
+        {
+            fileName = await Task.Run(() => AppState.SettingsService.ImportCustomBackgroundImage(sourcePath));
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("导入自定义背景失败。", ex);
+            AppState.ShowStatus(Loc.T("Settings_Background_ChooseFail"), InfoBarSeverity.Error);
+            return false;
+        }
+
+        var settings = AppState.SettingsService.Load();
+        settings.CustomBackgroundImageFileName = fileName;
+        settings.CustomBackgroundEnabled = true;
+        settings.CustomBackgroundOpacity = Math.Clamp(CustomBackgroundOpacitySlider.Value, 0.1, 0.9);
+        AppState.SettingsService.Save(settings);
+
+        _syncing = true;
+        try
+        {
+            CustomBackgroundToggle.IsOn = true;
+            CustomBackgroundOpacitySlider.Value = settings.CustomBackgroundOpacity;
+        }
+        finally
+        {
+            _syncing = false;
+        }
+
+        MainWindow.Instance?.ApplyCustomBackground(settings);
+        AppState.SettingsService.DeleteOtherCustomBackgroundImages(fileName);
+        return true;
+    }
+
+    /// <summary>从服务端壁纸库挑一张：预览列表 → 下载到临时文件 → 复用本地导入流程。</summary>
+    private async void ChooseServerWallpaperButton_Click(object sender, RoutedEventArgs e)
+    {
+        List<WallpaperItem> items;
+        try
+        {
+            items = await WallpaperService.ListAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("获取服务器壁纸列表失败。", ex);
+            AppState.ShowStatus(Loc.T("Settings_Background_ServerFail"), InfoBarSeverity.Error);
+            return;
+        }
+
+        if (items.Count == 0)
+        {
+            var empty = new ContentDialog
+            {
+                Title = Loc.T("Settings_Background_Server"),
+                Content = Loc.T("Settings_Background_ServerEmpty"),
+                CloseButtonText = Loc.T("Common_Confirm"),
+                XamlRoot = XamlRoot
+            };
+            await empty.ShowAsync();
+            return;
+        }
+
+        var grid = new GridView
+        {
+            SelectionMode = ListViewSelectionMode.Single,
+            Height = 430,
+            Width = 760,
+        };
+        foreach (var item in items)
+        {
+            var panel = new StackPanel { Width = 220 };
+            panel.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(8),
+                Height = 124,
+                Child = new Image
+                {
+                    Stretch = Stretch.UniformToFill,
+                    Source = new BitmapImage(new Uri(item.FullUrl))
+                }
+            });
+            panel.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(item.Title) ? "未命名" : item.Title,
+                FontSize = 12,
+                Margin = new Thickness(2, 6, 2, 0),
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+            grid.Items.Add(new GridViewItem { Content = panel, Tag = item });
+        }
+        if (grid.Items.Count > 0)
+        {
+            grid.SelectedIndex = 0;
+        }
+
+        var dialog = new ContentDialog
+        {
+            Title = Loc.T("Settings_Background_Server"),
+            Content = new ScrollViewer { Content = grid },
+            PrimaryButtonText = Loc.T("Settings_Background_Apply"),
+            CloseButtonText = Loc.T("Common_Cancel"),
+            DefaultButton = ContentDialogButton.Primary,
+            MaxWidth = 820,
+            XamlRoot = XamlRoot
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
+            grid.SelectedItem is not GridViewItem { Tag: WallpaperItem picked })
+        {
+            return;
+        }
+
+        string? tempPath = null;
+        try
+        {
+            tempPath = await WallpaperService.DownloadAsync(picked);
+            await ApplyBackgroundFileAsync(tempPath);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("下载服务器壁纸失败。", ex);
+            AppState.ShowStatus(Loc.T("Settings_Background_ServerFail"), InfoBarSeverity.Error);
+        }
+        finally
+        {
+            if (tempPath is not null)
+            {
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch
+                {
+                    // 临时文件删不掉不影响已导入的背景
+                }
+            }
         }
     }
 

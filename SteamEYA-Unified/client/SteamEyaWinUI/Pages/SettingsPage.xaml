@@ -197,6 +197,14 @@
                                 </StackPanel>
                             </Button>
                             <Button
+                                x:Name="ChooseServerWallpaperButton"
+                                Click="ChooseServerWallpaperButton_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE774;" FontSize="16" />
+                                    <TextBlock Text="{x:Bind Strings.Get('Settings_Background_Server'), Mode=OneWay}" />
+                                </StackPanel>
+                            </Button>
+                            <Button
                                 x:Name="ClearCustomBackgroundButton"
                                 Click="ClearCustomBackgroundButton_Click">
                                 <StackPanel Orientation="Horizontal" Spacing="8">

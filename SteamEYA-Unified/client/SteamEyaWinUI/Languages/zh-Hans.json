@@ -789,5 +789,9 @@
     "Tools_Mode_Sent": "切换指令已发送。",
     "Tools_Mode_Failed": "发送失败：未连接服务器且局域网不可用。",
     "Lan_Conn_Error_Tip": "局域网连接异常，请检查房主及您的防火墙设置，请保持防火墙关闭状态喵～"
-  }
+  },
+  "Settings_Background_Server": "服务器壁纸",
+  "Settings_Background_Apply": "使用这张",
+  "Settings_Background_ServerEmpty": "服务器还没有上传壁纸。",
+  "Settings_Background_ServerFail": "获取服务器壁纸失败，请检查网络后再试。"
 }
