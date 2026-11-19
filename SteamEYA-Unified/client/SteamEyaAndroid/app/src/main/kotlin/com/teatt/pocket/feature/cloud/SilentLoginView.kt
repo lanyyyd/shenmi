@@ -222,7 +222,7 @@ fun SilentLoginView(
 
             if (login && !loggedForm) {
                 loggedForm = true
-                log("检测到账号密码输入框")
+                log("检测到登录界面")
             }
             if (captcha) {
                 if (!loggedCaptcha) {

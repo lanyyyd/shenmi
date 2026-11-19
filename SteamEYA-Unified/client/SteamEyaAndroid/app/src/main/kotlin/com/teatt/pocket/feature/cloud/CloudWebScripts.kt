@@ -63,6 +63,7 @@ internal const val COMBO_HOOK_JS = """
         if (d.__smLoginError) window.__smLoginError = String(d.__smLoginError);
         if (d.__smCaptcha) window.__smCaptcha = true;
         if (d.__smLoginForm) window.__smLoginForm = true;
+        if (d.__smLoginUi) window.__smLoginUi = true;
         // 登录动作发生后作废旧凭证，只认登录之后新下发的 combo_token
         if (d.__smClearCombo) window.__smCombo = '';
         if (d.__smLoginClicked) window.__smLoginClicked = true;
@@ -333,6 +334,19 @@ private const val AUTO_FILL_TEMPLATE = """
     var lastRouteTry = 0;
     var lastIframeTry = 0;
     var textsDumped = false;
+    var uiPosted = false;
+
+    // 登录页 iframe 一打开就告诉顶层「登录界面已出现」，避免 App 把旧凭证当成已登录
+    try {
+      if (/login/i.test(String(location.href || ''))) {
+        uiPosted = true;
+        if (window.top && window.top !== window) {
+          window.top.postMessage({ __smLoginUi: true }, '*');
+        } else {
+          window.__smLoginUi = true;
+        }
+      }
+    } catch (e) {}
 
     // 页面 load 完成后再等 3 秒，等登录弹窗渲染稳定再切「密码登录」
     var startAt = Date.now() + 3000;
@@ -616,7 +630,9 @@ private const val AUTO_FILL_TEMPLATE = """
       var cap = false;
       try {
         // 只认「真的显示出来」的验证码，避免页面上预埋的隐藏 geetest 容器导致误判
-        var cands = document.querySelectorAll('.geetest_holder,.geetest_panel,.geetest_widget,iframe[src*="captcha"],[class*="captcha"],[id*="captcha"]');
+        // 只认真正的 geetest 组件；登录页自身的 class/id 里也可能带 captcha（短信登录路由），
+        // 之前用 [class*="captcha"] 会误判成验证码，导致自动登录直接停住。
+        var cands = document.querySelectorAll('.geetest_holder,.geetest_panel,.geetest_widget,[class*="geetest"],iframe[src*="geetest"]');
         for (var ci = 0; ci < cands.length; ci++) {
           var ce = cands[ci];
           var cs = window.getComputedStyle(ce);
@@ -626,6 +642,19 @@ private const val AUTO_FILL_TEMPLATE = """
         }
       } catch (e) {}
       if (/请完成验证|拖动滑块|滑动验证|请选择所有符合|请完成安全验证/.test(bodyText)) cap = true;
+      if (!uiPosted) {
+        try {
+          var telEl = document.querySelector('input[type="tel"],input[placeholder*="手机"],input[placeholder*="验证码"]');
+          if ((telEl && visible(telEl)) || /短信登录|验证码登录|短信验证码/.test(bodyText)) {
+            uiPosted = true;
+            if (window.top && window.top !== window) {
+              window.top.postMessage({ __smLoginUi: true }, '*');
+            } else {
+              window.__smLoginUi = true;
+            }
+          }
+        } catch (e) {}
+      }
       if (cap) {
         // 出现人机验证时停下来，避免和用户手动操作抢输入框
         halted = true;
@@ -641,13 +670,14 @@ private const val AUTO_FILL_TEMPLATE = """
         if (Date.now() < startAt) return;
         report();
         agreeBox() || agreeDialog();
-        // 验证中 / 自动填充轮次用尽后不再抢输入框，交给用户手动完成
+        // 先切登录方式再判断验证码：短信登录路由里的 captcha 类名容易被误判，
+        // 不能因为误判把切密码登录也一起挡住
+        passwordMode();
         if (halted) return;
         if (fillRounds >= 30) {
           if (!limitLogged) { limitLogged = true; L('自动尝试次数用尽，转为手动接管'); }
           return;
         }
-        passwordMode();
         if (fill()) {
           fillRounds++;
           clickLogin();
@@ -681,7 +711,7 @@ internal const val SILENT_PROBE_JS = """
   try { out.combo = s(window.__smCombo); } catch (e) {}
   try { out.error = s(window.__smLoginError); } catch (e) {}
   try { out.captcha = !!window.__smCaptcha; } catch (e) {}
-  try { out.login = !!window.__smLoginForm; } catch (e) {}
+  try { out.login = !!window.__smLoginForm || !!window.__smLoginUi; } catch (e) {}
   try { out.autoLogin = !!window.__smLoginClicked; } catch (e) {}
   try { out.url = s(location.href); } catch (e) {}
   try { out.logs = (window.__smLog || []); } catch (e) {}
@@ -712,7 +742,7 @@ internal const val SILENT_PROBE_JS = """
   }
   if (!out.captcha) {
     try {
-      var cands = document.querySelectorAll('.geetest_holder,.geetest_panel,.geetest_widget,iframe[src*="captcha"],[class*="captcha"],[id*="captcha"]');
+      var cands = document.querySelectorAll('.geetest_holder,.geetest_panel,.geetest_widget,[class*="geetest"],iframe[src*="geetest"]');
       for (var ci = 0; ci < cands.length; ci++) {
         var ce = cands[ci];
         var cs = window.getComputedStyle(ce);
