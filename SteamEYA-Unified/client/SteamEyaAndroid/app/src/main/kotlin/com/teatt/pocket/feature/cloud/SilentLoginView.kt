@@ -292,8 +292,8 @@ fun SilentLoginView(
             (constraints.maxHeight / 2f - with(density) { 60.dp.toPx() }).coerceAtLeast(0f)
         )
         fun clampCard(x: Float, y: Float): Offset {
-            val maxX = (constraints.maxWidth - cardSize.width).coerceAtLeast(0f)
-            val maxY = (constraints.maxHeight - cardSize.height).coerceAtLeast(0f)
+            val maxX = (constraints.maxWidth - cardSize.width).toFloat().coerceAtLeast(0f)
+            val maxY = (constraints.maxHeight - cardSize.height).toFloat().coerceAtLeast(0f)
             return Offset(x.coerceIn(0f, maxX), y.coerceIn(0f, maxY))
         }
         LaunchedEffect(constraints.maxWidth, constraints.maxHeight, cardSize) {
