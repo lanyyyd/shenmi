@@ -29,8 +29,99 @@ internal static class BrowserDriverProvisioner
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
 
-    private static string CacheRoot => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TeaTT", "drivers");
+    private static readonly Lazy<string> Root = new(ResolveRoot);
+
+    /// <summary>驱动缓存根目录（惰性解析一次）：「能写优先放数据目录」，避免 C 盘还原后要重下。</summary>
+    private static string CacheRoot => Root.Value;
+
+    /// <summary>
+    /// 驱动缓存目录：优先跟随 <see cref="EngineLauncher.DataDirectory"/>（装机在非 C 盘时就在安装盘，
+    /// 否则用 D:\SteamEYA\engine-data），目录不可写时退回 %LOCALAPPDATA%。
+    /// 首次解析时把旧位置已有的驱动搬过来，避免升级后白下一次。
+    /// </summary>
+    private static string ResolveRoot()
+    {
+        var legacy = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TeaTT", "drivers");
+
+        try
+        {
+            var primary = Path.Combine(EngineLauncher.DataDirectory, "drivers");
+            Directory.CreateDirectory(primary);
+            if (IsWritable(primary))
+            {
+                MigrateLegacy(legacy, primary);
+                return primary;
+            }
+
+            AppLog.Warn($"驱动缓存目录不可写，退回 {legacy}");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"解析驱动缓存目录失败，退回 {legacy}：{ex.Message}");
+        }
+
+        return legacy;
+    }
+
+    private static bool IsWritable(string dir)
+    {
+        try
+        {
+            var probe = Path.Combine(dir, $".write-test-{Guid.NewGuid():N}");
+            File.WriteAllText(probe, "1");
+            File.Delete(probe);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>把旧缓存目录里的驱动搬到新目录；搬失败就留着，不影响功能。</summary>
+    private static void MigrateLegacy(string from, string to)
+    {
+        try
+        {
+            if (string.Equals(from, to, StringComparison.OrdinalIgnoreCase) || !Directory.Exists(from))
+            {
+                return;
+            }
+
+            var moved = 0;
+            foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
+            {
+                var target = Path.Combine(to, Path.GetRelativePath(from, file));
+                if (File.Exists(target))
+                {
+                    continue;
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(file, target);
+                moved++;
+            }
+
+            if (moved > 0)
+            {
+                AppLog.Info($"已把 {moved} 个驱动文件迁移到 {to}");
+            }
+
+            try
+            {
+                Directory.Delete(from, recursive: true);
+            }
+            catch
+            {
+                // 旧目录删不掉（文件占用）就留着，下次启动再试。
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"迁移旧驱动缓存失败：{ex.Message}");
+        }
+    }
 
     /// <summary>
     /// 返回驱动 exe 的本地路径；返回 null 表示“这次不管”，交给 Selenium Manager 处理。
