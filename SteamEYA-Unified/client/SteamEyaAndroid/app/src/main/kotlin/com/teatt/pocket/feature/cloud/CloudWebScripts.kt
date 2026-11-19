@@ -33,9 +33,9 @@ internal const val COMBO_HOOK_JS = """
       if (!v) return;
       v = String(v);
       if (v.length < 8 || v.length > 8000) return;
+      // 只记录本次页面会话里真实请求带出来的凭证；不落 sessionStorage，
+      // 否则下次打开会读到上次的旧 combo_token，服务端判定失效就直接「假成功」。
       window.__smCombo = v;
-      // 同一 origin 内翻页后还能读到，避免登录成功后跳转丢掉凭证
-      try { window.sessionStorage.setItem('__smCombo', v); } catch (e) {}
       try {
         if (window.top && window.top !== window) window.top.postMessage({ __smCombo: v }, '*');
       } catch (e) {}
@@ -55,10 +55,6 @@ internal const val COMBO_HOOK_JS = """
       }
       return '';
     }
-    try {
-      var cached = window.sessionStorage.getItem('__smCombo');
-      if (cached && !window.__smCombo) window.__smCombo = cached;
-    } catch (e) {}
     try {
       window.addEventListener('message', function (e) {
         var d = e && e.data;

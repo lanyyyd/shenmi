@@ -227,14 +227,13 @@ fun SilentLoginView(
                 return@LaunchedEffect
             }
 
-            // 钩子没抓到时，翻一次 localStorage / cookie 兜底（登录成功但凭证已缓存的场景）
-            var comboValue = combo
-            if (comboValue.isBlank() && elapsed > 3_000L) {
-                comboValue = jsString(view.evalJs(COMBO_READ_JS))
-                if (comboValue.isNotBlank() && !loggedForm) log("从页面缓存里读到登录凭证")
-            }
+            // 只认注入钩子从本次页面网络请求里抓到的凭证。
+            // 之前的 localStorage / sessionStorage 兜底会读到上一轮的旧 combo_token，
+            // 服务端判定失效时就变成「还没登录就提示测试完成」。
+            val comboValue = combo
 
             if (comboValue.isNotBlank()) {
+                log("捕获到本次会话的云游戏凭证（长度 ${comboValue.length}）")
                 val domains = CookieHarvester.domainsFor(game.key, startUrl)
                 val cookies = CookieHarvester.harvest(domains)
                 log("抓取 Cookie：${cookies.size} 项")
