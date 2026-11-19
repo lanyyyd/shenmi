@@ -77,12 +77,10 @@ import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CookieDto
 import com.teatt.pocket.ui.BrandPink
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.coroutines.resume
 import kotlin.math.roundToInt
 
 /** 静默登录的结果；由 [AutoRefreshCenter] 消费并上传服务端。 */
@@ -175,6 +173,11 @@ fun SilentLoginView(
         var formSeen = false
         var loginSubmitted = false
         var ignoredComboLogged = false
+        var securitySince = 0L
+        var securityActionAt = 0L
+        var securityReloaded = false
+        var securityCycles = 0
+        var securityLogged = false
         while (!finished) {
             delay(1000)
             val view = webView ?: continue
@@ -212,6 +215,45 @@ fun SilentLoginView(
             val captcha = probe.optBoolean("captcha")
             val login = probe.optBoolean("login")
             val autoLogin = probe.optBoolean("autoLogin")
+            val security = probe.optBoolean("security")
+
+            // 登录后卡在「正在检测您的账号安全」过渡页：等 2 秒自动返回，
+            // 返回不生效就直接重开云游戏页（Cookie 已经写好，不需要过渡页）
+            if (security && securityCycles < 2) {
+                if (!securityLogged) {
+                    securityLogged = true
+                    log("检测到「正在检测您的账号安全」过渡页")
+                    setStatus("账号安全校验中，稍候自动返回…")
+                }
+                if (securitySince == 0L) securitySince = elapsed
+                if (securityActionAt == 0L && elapsed - securitySince >= 2_000L) {
+                    securityActionAt = elapsed
+                    securityCycles++
+                    if (view.canGoBack()) {
+                        log("等待 2 秒仍在校验页，自动返回")
+                        view.goBack()
+                    } else {
+                        log("没有可返回的页面，直接重新打开云游戏页")
+                        view.loadUrl(startUrl)
+                        securityReloaded = true
+                    }
+                } else if (securityActionAt > 0 && !securityReloaded &&
+                    elapsed - securityActionAt >= 3_000L
+                ) {
+                    securityReloaded = true
+                    securityCycles++
+                    log("返回未生效，重新打开云游戏页")
+                    view.loadUrl(startUrl)
+                }
+            } else if (!security) {
+                if (securitySince != 0L) {
+                    securitySince = 0L
+                    securityActionAt = 0L
+                    securityReloaded = false
+                    securityLogged = false
+                    log("已离开账号安全校验页")
+                }
+            }
 
             if (login) formSeen = true
             if (autoLogin && !loginSubmitted) {
@@ -629,15 +671,3 @@ fun SilentLoginView(
         }
     }
 }
-
-/** evaluateJavascript 一定要在主线程调用；这里封成挂起函数方便轮询。 */
-private suspend fun WebView.evalJs(script: String): String? =
-    suspendCancellableCoroutine { continuation ->
-        runCatching {
-            evaluateJavascript(script) { result ->
-                if (continuation.isActive) continuation.resume(result)
-            }
-        }.onFailure {
-            if (continuation.isActive) continuation.resume(null)
-        }
-    }

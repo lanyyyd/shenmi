@@ -308,13 +308,6 @@ fun CloudScreen(
                             busy = busyKey == account.game || busyKey == account.key,
                             credential = creds[account.key],
                             onCredential = { credTarget = account },
-                            onTest = {
-                                if (creds[account.key] == null) {
-                                    credTarget = account
-                                } else {
-                                    AutoRefreshCenter.testLogin(token, account)
-                                }
-                            },
                             onPlay = {
                                 val url = playUrl(account)
                                 if (url.isBlank()) {
@@ -444,10 +437,6 @@ fun CloudScreen(
             onRefreshNow = {
                 credTarget = null
                 AutoRefreshCenter.refreshNow(token, account)
-            },
-            onTest = {
-                credTarget = null
-                AutoRefreshCenter.testLogin(token, account)
             }
         )
     }
@@ -460,8 +449,7 @@ private fun CredentialDialog(
     existing: CloudCredential?,
     onDismiss: () -> Unit,
     onSaved: () -> Unit,
-    onRefreshNow: () -> Unit,
-    onTest: () -> Unit
+    onRefreshNow: () -> Unit
 ) {
     var user by remember { mutableStateOf(existing?.account.orEmpty()) }
     var password by remember { mutableStateOf(existing?.password.orEmpty()) }
@@ -555,9 +543,6 @@ private fun CredentialDialog(
         },
         dismissButton = {
             Row {
-                TextButton(onClick = { persist(onTest) }) {
-                    Text("保存并测试", color = BrandPink)
-                }
                 if (existing != null) {
                     TextButton(onClick = {
                         scope.launch {
@@ -830,7 +815,6 @@ private fun AccountCard(
     busy: Boolean,
     credential: CloudCredential?,
     onCredential: () -> Unit,
-    onTest: () -> Unit,
     onPlay: () -> Unit,
     onCheck: () -> Unit,
     onRecapture: () -> Unit,
@@ -946,12 +930,6 @@ private fun AccountCard(
                     if (account.game in setOf("genshin", "starrail")) {
                         TextButton(onClick = onCredential, enabled = !busy) {
                             Text("续期", fontSize = 13.sp)
-                        }
-                        if (credential != null) {
-                            // 测试版排查用：展开 WebView，能看到自动操作和每一步日志
-                            TextButton(onClick = onTest, enabled = !busy) {
-                                Text("测试", fontSize = 13.sp, color = BrandPink)
-                            }
                         }
                         TextButton(onClick = onStoken, enabled = !busy) {
                             Icon(Icons.Filled.QrCodeScanner, null, Modifier.size(15.dp))

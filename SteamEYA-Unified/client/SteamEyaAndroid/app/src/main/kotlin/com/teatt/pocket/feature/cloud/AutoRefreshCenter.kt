@@ -90,13 +90,6 @@ object AutoRefreshCenter {
         scope.launch { run(token, force = true, only = listOf(account)) }
     }
 
-    /** 测试模式：展开 WebView，把自动登录的每一步和日志都显示出来，方便排查。 */
-    fun testLogin(token: String, account: CloudAccountDto) {
-        if (running || token.isBlank()) return
-        if (account.game !in setOf("genshin", "starrail")) return
-        scope.launch { run(token, force = true, only = listOf(account), debug = true) }
-    }
-
     /** SilentLoginView 结束后回调。 */
     fun finish(outcome: SilentOutcome) {
         val target = waiter

@@ -35,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +53,8 @@ import androidx.webkit.WebViewFeature
 import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CookieDto
 import com.teatt.pocket.ui.BrandPink
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 /**
  * 云游戏登录抓取页：WebView 里让用户手动登录，登录完点底部按钮，
@@ -80,6 +83,48 @@ fun CaptureView(
     BackHandler {
         val view = webView
         if (view != null && view.canGoBack()) view.goBack() else onCancel()
+    }
+
+    // 登录后米哈游会停在「正在检测您的账号安全」过渡页，自动返回一次，省得手动按返回
+    LaunchedEffect(Unit) {
+        var hitSince = 0L
+        var actionAt = 0L
+        var reloaded = false
+        var cycles = 0
+        while (isActive) {
+            delay(1000)
+            val view = webView ?: continue
+            val hit = runCatching { jsString(view.evalJs(SECURITY_CHECK_JS)) }
+                .getOrNull().orEmpty().isNotBlank()
+            val now = System.currentTimeMillis()
+            if (hit && cycles < 2) {
+                if (hitSince == 0L) {
+                    hitSince = now
+                    comboHint = "检测到账号安全校验，稍候自动返回"
+                }
+                if (actionAt == 0L && now - hitSince >= 2_000L) {
+                    actionAt = now
+                    cycles++
+                    if (view.canGoBack()) {
+                        view.goBack()
+                        comboHint = "已自动返回，确认登录后点下方抓取"
+                    } else {
+                        view.loadUrl(startUrl)
+                        reloaded = true
+                        comboHint = "已重新打开云游戏页，确认登录后点下方抓取"
+                    }
+                } else if (actionAt > 0 && !reloaded && now - actionAt >= 3_000L) {
+                    reloaded = true
+                    cycles++
+                    view.loadUrl(startUrl)
+                    comboHint = "返回未生效，已重新打开云游戏页"
+                }
+            } else if (!hit && hitSince != 0L) {
+                hitSince = 0L
+                actionAt = 0L
+                reloaded = false
+            }
+        }
     }
 
     Column(

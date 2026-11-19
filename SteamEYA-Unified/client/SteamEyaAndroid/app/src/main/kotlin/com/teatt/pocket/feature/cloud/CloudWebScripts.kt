@@ -1,7 +1,10 @@
 package com.teatt.pocket.feature.cloud
 
+import android.webkit.WebView
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
 import org.json.JSONTokener
+import kotlin.coroutines.resume
 
 /**
  * 云游戏 WebView 共用的注入脚本。
@@ -64,6 +67,7 @@ internal const val COMBO_HOOK_JS = """
         if (d.__smCaptcha) window.__smCaptcha = true;
         if (d.__smLoginForm) window.__smLoginForm = true;
         if (d.__smLoginUi) window.__smLoginUi = true;
+        if (d.__smSecurityAt) window.__smSecurityAt = Number(d.__smSecurityAt) || Date.now();
         // 登录动作发生后作废旧凭证，只认登录之后新下发的 combo_token
         if (d.__smClearCombo) window.__smCombo = '';
         if (d.__smLoginClicked) window.__smLoginClicked = true;
@@ -75,6 +79,35 @@ internal const val COMBO_HOOK_JS = """
           } catch (err) {}
         }
       });
+    } catch (e) {}
+    // 登录成功后米哈游会跳到「正在检测您的账号安全」过渡页（cross-page.html），
+    // WebView 里没人调原生回调会一直卡住。各 frame 定时上报时间戳，App 读到后自动返回。
+    var securityTicks = 0;
+    function securityTick() {
+      try {
+        securityTicks++;
+        var href = String(location.href || '');
+        var hit = /cross-page\.html/i.test(href);
+        // innerText 会触发布局，别每 800ms 都读；URL 不匹配时每 4 秒兜底看一次文案
+        if (!hit && securityTicks % 5 === 0) {
+          var txt = ((document.body && (document.body.innerText || document.body.textContent)) || '');
+          if (txt.indexOf('正在检测您的账号安全') >= 0) hit = true;
+        }
+        if (!hit) return;
+        if (window.top && window.top !== window) {
+          window.top.postMessage({ __smSecurityAt: Date.now() }, '*');
+        } else {
+          window.__smSecurityAt = Date.now();
+        }
+      } catch (e) {}
+    }
+    securityTick();
+    try {
+      var securityRounds = 0;
+      var securityTimer = setInterval(function () {
+        securityTick();
+        if (++securityRounds > 900) clearInterval(securityTimer);
+      }, 800);
     } catch (e) {}
     function hook(headers) {
       if (!headers) return;
@@ -707,12 +740,13 @@ private const val AUTO_FILL_TEMPLATE = """
 internal const val SILENT_PROBE_JS = """
 (function () {
   function s(v) { return v ? String(v) : ''; }
-  var out = { combo: '', error: '', captcha: false, login: false, autoLogin: false, url: '', logs: [] };
+  var out = { combo: '', error: '', captcha: false, login: false, autoLogin: false, security: false, url: '', logs: [] };
   try { out.combo = s(window.__smCombo); } catch (e) {}
   try { out.error = s(window.__smLoginError); } catch (e) {}
   try { out.captcha = !!window.__smCaptcha; } catch (e) {}
   try { out.login = !!window.__smLoginForm || !!window.__smLoginUi; } catch (e) {}
   try { out.autoLogin = !!window.__smLoginClicked; } catch (e) {}
+  try { out.security = (Date.now() - (window.__smSecurityAt || 0)) < 2000; } catch (e) {}
   try { out.url = s(location.href); } catch (e) {}
   try { out.logs = (window.__smLog || []); } catch (e) {}
   if (!out.login) {
@@ -756,6 +790,15 @@ internal const val SILENT_PROBE_JS = """
 })();
 """
 
+/** 手动抓取页探针：是否停在「正在检测您的账号安全」过渡页。 */
+internal const val SECURITY_CHECK_JS = """
+(function () {
+  try {
+    return (Date.now() - (window.__smSecurityAt || 0) < 2000) ? '1' : '';
+  } catch (e) { return ''; }
+})();
+"""
+
 /** 账号密码注入前统一做 JSON 字符串转义，避免引号 / 反斜杠破坏脚本。 */
 internal fun buildAutoFillJs(account: String, password: String): String =
     AUTO_FILL_TEMPLATE
@@ -768,3 +811,15 @@ internal fun jsString(raw: String?): String {
     if (text.isEmpty() || text == "null") return ""
     return runCatching { JSONTokener(text).nextValue() as? String }.getOrNull().orEmpty()
 }
+
+/** evaluateJavascript 一定要在主线程调用；这里封成挂起函数方便轮询。 */
+internal suspend fun WebView.evalJs(script: String): String? =
+    suspendCancellableCoroutine { continuation ->
+        runCatching {
+            evaluateJavascript(script) { result ->
+                if (continuation.isActive) continuation.resume(result)
+            }
+        }.onFailure {
+            if (continuation.isActive) continuation.resume(null)
+        }
+    }
