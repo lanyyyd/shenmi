@@ -124,9 +124,29 @@ internal static class BrowserDriverProvisioner
     }
 
     /// <summary>
+    /// 串行化驱动准备：「更新 Cookie」和「一键上号」可能同时触发，
+    /// 并发跑会各下一份（还可能互相覆盖解压目录）。
+    /// </summary>
+    private static readonly SemaphoreSlim EnsureGate = new(1, 1);
+
+    /// <summary>
     /// 返回驱动 exe 的本地路径；返回 null 表示“这次不管”，交给 Selenium Manager 处理。
     /// </summary>
     public static async Task<string?> EnsureAsync(
+        string browser, IProgress<DriverProgress>? progress, CancellationToken ct = default)
+    {
+        await EnsureGate.WaitAsync(ct);
+        try
+        {
+            return await EnsureCoreAsync(browser, progress, ct);
+        }
+        finally
+        {
+            EnsureGate.Release();
+        }
+    }
+
+    private static async Task<string?> EnsureCoreAsync(
         string browser, IProgress<DriverProgress>? progress, CancellationToken ct = default)
     {
         try

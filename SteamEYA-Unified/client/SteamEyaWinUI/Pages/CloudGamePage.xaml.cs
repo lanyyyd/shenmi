@@ -395,8 +395,15 @@ public sealed partial class CloudGamePage : Page
 
     private async void OnOpenBrowser(object sender, RoutedEventArgs e)
     {
-        // 只查缓存：这里不为了「更新 Cookie」去等一次驱动下载。
+        // 更新 Cookie 也先把驱动准备好：否则这里走 Selenium Manager 下一份，
+        // 随后「一键上号」在应用缓存里找不到，又会从镜像再下一份。
         var driverPath = BrowserDriverProvisioner.TryGetCachedPath(CurrentBrowser);
+        if (driverPath is null)
+        {
+            ShowInfo("首次使用，正在准备浏览器驱动…", InfoBarSeverity.Informational);
+            driverPath = await BrowserDriverProvisioner.EnsureAsync(CurrentBrowser, null);
+        }
+
         var (ok, _, error) = await _cloud.EngineOpenAsync(
             CurrentGame, CurrentBrowser, CurrentGameUrl, CurrentGameName, driverPath);
         ShowInfo(ok ? "已打开浏览器，请登录后点「抓取并上传」" : $"打开浏览器失败：{error}",
