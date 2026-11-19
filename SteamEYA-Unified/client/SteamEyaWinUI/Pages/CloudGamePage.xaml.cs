@@ -287,18 +287,36 @@ public sealed partial class CloudGamePage : Page
         LoginButton.IsEnabled = false;
         try
         {
+            // 先把驱动准备好（命中缓存就秒过，缺失则从国内镜像多线程下），
+            // 避免 Selenium Manager 在上号过程中同步联网下载把界面卡住。
+            var driverProgress = new Progress<DriverProgress>(p => SetLoginProgress(
+                p.Stage,
+                5 + (p.Percent * 0.55),
+                indeterminate: p.Total <= 0,
+                p.Bytes,
+                p.Total,
+                p.Speed,
+                p.Threads));
+            SetLoginProgress("正在准备浏览器驱动", 2);
+            var driverPath = await BrowserDriverProvisioner.EnsureAsync(CurrentBrowser, driverProgress);
+
+            SetLoginProgress("正在获取账号 Cookie", 62, indeterminate: true);
             // 带 uid 下载，确保上的是选中的那个号，而不是该游戏最近上传的那个。
             var data = await _cloud.DownloadAsync(game, uid);
             if (!data.Ok || data.Cookies is not { } cookies)
             {
                 ShowInfo(data.Msg ?? "该账号尚未上传 Cookie，请先「更新 Cookie」", InfoBarSeverity.Warning);
+                HideLoginProgressSoon();
                 return;
             }
 
-            var (ok, body, error) = await _cloud.EngineLoginAsync(game, CurrentBrowser, cookies, data.ComboToken ?? "", CurrentGameUrl, CurrentGameName);
+            SetLoginProgress("正在打开浏览器并注入 Cookie", 72, indeterminate: true);
+            var (ok, body, error) = await _cloud.EngineLoginAsync(
+                game, CurrentBrowser, cookies, data.ComboToken ?? "", CurrentGameUrl, CurrentGameName, driverPath);
             if (!ok)
             {
                 ShowInfo($"调用本地引擎失败：{error}（请确认引擎服务已启动）", InfoBarSeverity.Error);
+                LoginProgressPanel.Visibility = Visibility.Collapsed;
                 return;
             }
 
@@ -313,6 +331,8 @@ public sealed partial class CloudGamePage : Page
                 _ => string.Empty
             };
             var failedRefresh = data.RefreshOk == false;
+            SetLoginProgress(loggedIn ? "上号完成" : "已注入 Cookie，请在浏览器确认登录", 100);
+            HideLoginProgressSoon();
             ShowInfo((loggedIn ? "登录成功，浏览器已打开" : "已注入 Cookie，请在浏览器确认登录状态") + refreshNote,
                 failedRefresh ? InfoBarSeverity.Warning : (loggedIn ? InfoBarSeverity.Success : InfoBarSeverity.Warning));
             await _cloud.ReportLoginAsync(game);
@@ -323,9 +343,62 @@ public sealed partial class CloudGamePage : Page
         }
     }
 
+    /// <summary>更新上号进度：stage 文字、下方进度条（右侧显示总百分比），下载时带速度。</summary>
+    private void SetLoginProgress(
+        string stage, double percent, bool indeterminate = false,
+        long bytes = 0, long total = 0, double speed = 0, int threads = 0)
+    {
+        LoginProgressPanel.Visibility = Visibility.Visible;
+        LoginProgressBar.IsIndeterminate = indeterminate;
+        if (!indeterminate)
+        {
+            LoginProgressBar.Value = Math.Clamp(percent, 0, 100);
+        }
+
+        var text = stage;
+        if (total > 0 && !indeterminate)
+        {
+            text += $" · {FormatBytes(bytes)} / {FormatBytes(total)}";
+        }
+
+        if (speed > 0)
+        {
+            text += speed >= 1024 * 1024
+                ? $" · {speed / 1024 / 1024:0.0} MB/s"
+                : $" · {speed / 1024:0} KB/s";
+        }
+
+        if (threads > 1)
+        {
+            text += $" · {threads} 线程";
+        }
+
+        LoginProgressText.Text = text;
+        LoginPercentText.Text = indeterminate ? "···" : $"{Math.Clamp(percent, 0, 100):0}%";
+    }
+
+    private void HideLoginProgressSoon()
+    {
+        _ = Task.Delay(1200).ContinueWith(_ => DispatcherQueue.TryEnqueue(() =>
+        {
+            LoginProgressPanel.Visibility = Visibility.Collapsed;
+        }));
+    }
+
+    private static string FormatBytes(long value) => value switch
+    {
+        >= 1024L * 1024 * 1024 => $"{value / 1024.0 / 1024 / 1024:0.00} GB",
+        >= 1024L * 1024 => $"{value / 1024.0 / 1024:0.0} MB",
+        >= 1024 => $"{value / 1024.0:0} KB",
+        _ => $"{value} B"
+    };
+
     private async void OnOpenBrowser(object sender, RoutedEventArgs e)
     {
-        var (ok, _, error) = await _cloud.EngineOpenAsync(CurrentGame, CurrentBrowser, CurrentGameUrl, CurrentGameName);
+        // 只查缓存：这里不为了「更新 Cookie」去等一次驱动下载。
+        var driverPath = BrowserDriverProvisioner.TryGetCachedPath(CurrentBrowser);
+        var (ok, _, error) = await _cloud.EngineOpenAsync(
+            CurrentGame, CurrentBrowser, CurrentGameUrl, CurrentGameName, driverPath);
         ShowInfo(ok ? "已打开浏览器，请登录后点「抓取并上传」" : $"打开浏览器失败：{error}",
             ok ? InfoBarSeverity.Informational : InfoBarSeverity.Error);
     }

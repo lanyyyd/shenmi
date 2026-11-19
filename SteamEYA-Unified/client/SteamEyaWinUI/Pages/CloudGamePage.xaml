@@ -52,6 +52,28 @@
                 Style="{StaticResource AccentButtonStyle}"
                 Click="OnOneClickLogin" />
 
+            <StackPanel x:Name="LoginProgressPanel" Spacing="4" Visibility="Collapsed">
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        x:Name="LoginProgressText"
+                        Grid.Column="0"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        TextTrimming="CharacterEllipsis"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock
+                        x:Name="LoginPercentText"
+                        Grid.Column="1"
+                        HorizontalAlignment="Right"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        FontWeight="SemiBold" />
+                </Grid>
+                <ProgressBar x:Name="LoginProgressBar" Minimum="0" Maximum="100" />
+            </StackPanel>
+
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button x:Name="OpenBrowserButton" Content="更新 Cookie（打开浏览器）" Click="OnOpenBrowser" />
                 <Button x:Name="CaptureButton" Content="抓取并上传" Click="OnCaptureUpload" />

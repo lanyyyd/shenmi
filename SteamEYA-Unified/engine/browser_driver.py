@@ -14,7 +14,9 @@ from typing import Optional
 import requests
 from selenium import webdriver
 from selenium.webdriver.edge.options import Options as EdgeOptions
+from selenium.webdriver.edge.service import Service as EdgeService
 from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
@@ -228,21 +230,26 @@ def launch_browser(
     headless: bool = False,
     capture_perf: bool = False,
     detach: bool = False,
+    driver_path: Optional[str] = None,
 ) -> webdriver.Remote:
     """
     启动浏览器
     browser_type: "edge" / "chrome" / "360"
-    Selenium 4 自带 Selenium Manager，自动下载匹配的驱动
+    默认由 Selenium 4 自带的 Selenium Manager 自动下载匹配的驱动；
+    客户端已经用国内镜像多线程下好驱动时，通过 driver_path 传进来直接使用，
+    跳过 Selenium Manager 的联网解析（弱网下这一步可能卡几分钟）。
     """
     if browser_type == BROWSER_EDGE:
         options = EdgeOptions()
         _build_common_args(options, headless, user_data_dir, capture_perf, detach)
-        driver = webdriver.Edge(options=options)
+        service = EdgeService(executable_path=driver_path) if driver_path else None
+        driver = webdriver.Edge(service=service, options=options) if service else webdriver.Edge(options=options)
 
     elif browser_type == BROWSER_CHROME:
         options = ChromeOptions()
         _build_common_args(options, headless, user_data_dir, capture_perf, detach)
-        driver = webdriver.Chrome(options=options)
+        service = ChromeService(executable_path=driver_path) if driver_path else None
+        driver = webdriver.Chrome(service=service, options=options) if service else webdriver.Chrome(options=options)
 
     elif browser_type == BROWSER_360:
         exe_path = find_360_path()
@@ -254,7 +261,8 @@ def launch_browser(
         options = ChromeOptions()
         options.binary_location = exe_path
         _build_common_args(options, headless, user_data_dir, capture_perf, detach)
-        driver = webdriver.Chrome(options=options)
+        service = ChromeService(executable_path=driver_path) if driver_path else None
+        driver = webdriver.Chrome(service=service, options=options) if service else webdriver.Chrome(options=options)
 
     else:
         raise ValueError(f"不支持的浏览器类型: {browser_type}")

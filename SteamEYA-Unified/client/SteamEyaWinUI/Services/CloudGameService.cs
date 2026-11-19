@@ -202,9 +202,18 @@ internal sealed class CloudGameService
     // ---------------- 本地引擎（Selenium 服务） ----------------
     /// <param name="url">自定义游戏的打开地址；内置游戏传 null 由引擎查表。</param>
     public async Task<(bool ok, string body, string? error)> EngineOpenAsync(
-        string game, string browser, string? url = null, string? name = null, CancellationToken ct = default)
-        => await EnginePostAsync("/engine/browser/open", WithTarget(
-            new JsonObject { ["game"] = game, ["browser"] = browser }, url, name), ct);
+        string game, string browser, string? url = null, string? name = null,
+        string? driverPath = null, CancellationToken ct = default)
+    {
+        var body = WithTarget(
+            new JsonObject { ["game"] = game, ["browser"] = browser }, url, name);
+        if (!string.IsNullOrWhiteSpace(driverPath))
+        {
+            body["driver_path"] = driverPath;
+        }
+
+        return await EnginePostAsync("/engine/browser/open", body, ct);
+    }
 
     public async Task<(bool ok, string body, string? error)> EngineCaptureAsync(
         string game, string? url = null, string? name = null, CancellationToken ct = default)
@@ -212,14 +221,24 @@ internal sealed class CloudGameService
 
     public async Task<(bool ok, string body, string? error)> EngineLoginAsync(
         string game, string browser, JsonElement cookies, string comboToken,
-        string? url = null, string? name = null, CancellationToken ct = default)
-        => await EnginePostAsync("/engine/login", WithTarget(new JsonObject
+        string? url = null, string? name = null, string? driverPath = null, CancellationToken ct = default)
+    {
+        var body = WithTarget(new JsonObject
         {
             ["game"] = game,
             ["browser"] = browser,
             ["combo_token"] = comboToken,
             ["cookies"] = JsonNode.Parse(cookies.GetRawText())
-        }, url, name), ct);
+        }, url, name);
+
+        // 客户端已经准备好的驱动路径：让引擎跳过 Selenium Manager 的联网解析。
+        if (!string.IsNullOrWhiteSpace(driverPath))
+        {
+            body["driver_path"] = driverPath;
+        }
+
+        return await EnginePostAsync("/engine/login", body, ct);
+    }
 
     /// <summary>
     /// 自定义游戏才带 url；name 用来让引擎的提示文案显示「抖音」而不是 custom_xxxxxxxx。

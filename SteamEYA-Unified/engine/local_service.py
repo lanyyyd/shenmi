@@ -68,7 +68,13 @@ def health():
                       for k, v in games.items()]}
 
 
-def _get_capture_driver(game: str, browser: str):
+def _driver_path(payload: dict) -> str | None:
+    """客户端用国内镜像预下好的驱动路径；不存在就当没传，交给 Selenium Manager。"""
+    path = (payload.get("driver_path") or "").strip()
+    return path if path and os.path.isfile(path) else None
+
+
+def _get_capture_driver(game: str, browser: str, driver_path: str | None = None):
     d = _capture_drivers.get(game)
     if d is not None:
         try:
@@ -76,12 +82,13 @@ def _get_capture_driver(game: str, browser: str):
             return d, True
         except Exception:
             _capture_drivers.pop(game, None)
-    d = _drv().launch_browser(browser_type=browser, user_data_dir=_capture_profile(game), capture_perf=True)
+    d = _drv().launch_browser(browser_type=browser, user_data_dir=_capture_profile(game),
+                              capture_perf=True, driver_path=driver_path)
     _capture_drivers[game] = d
     return d, False
 
 
-def _get_login_driver(game: str, browser: str):
+def _get_login_driver(game: str, browser: str, driver_path: str | None = None):
     d = _login_drivers.get(game)
     if d is not None:
         try:
@@ -89,7 +96,8 @@ def _get_login_driver(game: str, browser: str):
             return d, True
         except Exception:
             _login_drivers.pop(game, None)
-    d = _drv().launch_browser(browser_type=browser, user_data_dir=_login_profile(game), detach=True)
+    d = _drv().launch_browser(browser_type=browser, user_data_dir=_login_profile(game),
+                              detach=True, driver_path=driver_path)
     _login_drivers[game] = d
     return d, False
 
@@ -103,7 +111,7 @@ def browser_open(payload: dict = Body(...)):
     with _driver_lock:
         try:
             drv = _drv()
-            driver, reused = _get_capture_driver(game, browser)
+            driver, reused = _get_capture_driver(game, browser, _driver_path(payload))
             if not reused:
                 drv.navigate_to_game(driver, game, url)
             return {"ok": True, "reused": reused, "name": drv.display_name(game, url, name)}
@@ -142,7 +150,7 @@ def login(payload: dict = Body(...)):
     with _driver_lock:
         try:
             drv = _drv()
-            driver, reused = _get_login_driver(game, browser)
+            driver, reused = _get_login_driver(game, browser, _driver_path(payload))
             # 上号前先清掉登录 profile 里残留的 Cookie / 站点存储，否则上一个账号
             # （或上次失败的登录态）会让云游戏页面继续弹登录框。
             drv.inject_cookies(driver, cookies, game, url, reset=True)
