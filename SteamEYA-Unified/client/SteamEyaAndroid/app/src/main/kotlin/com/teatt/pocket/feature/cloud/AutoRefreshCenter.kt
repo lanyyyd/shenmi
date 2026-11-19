@@ -97,11 +97,11 @@ object AutoRefreshCenter {
         target?.complete(outcome)
     }
 
-    /** 10 分钟内检测过且有效，认为列表数据可信，不必重复请求。 */
-    private fun recentlyChecked(account: CloudAccountDto): Boolean {
-        val checkedAt = account.checkedAt ?: return false
-        val nowSeconds = System.currentTimeMillis() / 1000
-        return nowSeconds - checkedAt < 600
+    private suspend fun fetchAccounts(token: String): List<CloudAccountDto> {
+        runCatching { CloudApi.my(token) }.getOrNull()?.let { return it }
+        // 冷启动时网络可能还没就绪，退避 3 秒再试一次
+        delay(3_000)
+        return runCatching { CloudApi.my(token) }.getOrNull().orEmpty()
     }
 
     private suspend fun run(
@@ -113,7 +113,7 @@ object AutoRefreshCenter {
         if (running) return
         running = true
         try {
-            val accounts = only ?: runCatching { CloudApi.my(token) }.getOrNull().orEmpty()
+            val accounts = only ?: fetchAccounts(token)
             // 测试模式不等网络：立刻用兜底地址打开页面，让操作过程马上可见
             val games = if (debug) emptyList()
             else runCatching { CloudApi.games(token) }.getOrNull().orEmpty()
@@ -133,10 +133,9 @@ object AutoRefreshCenter {
                 }
 
                 if (!debug) {
-                    if (!force && account.valid == 1 && recentlyChecked(account)) continue
                     if (!force && credential.coolingDown()) continue
 
-                    // 列表里的 valid 可能过期，再向服务端确认一次；网络异常直接跳过，不记失败
+                    // 冷启动每次都向服务端确认一次，不能因为列表里的 checked_at 新就跳过
                     val checkResult = runCatching {
                         CloudApi.check(token, account.game, account.gameUid)
                     }

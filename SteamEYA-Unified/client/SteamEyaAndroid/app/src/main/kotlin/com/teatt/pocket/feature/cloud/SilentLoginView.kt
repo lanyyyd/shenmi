@@ -175,9 +175,9 @@ fun SilentLoginView(
         var ignoredComboLogged = false
         var securitySince = 0L
         var securityActionAt = 0L
-        var securityReloaded = false
         var securityCycles = 0
         var securityLogged = false
+        var captureNotBefore = 0L
         while (!finished) {
             delay(1000)
             val view = webView ?: continue
@@ -217,39 +217,26 @@ fun SilentLoginView(
             val autoLogin = probe.optBoolean("autoLogin")
             val security = probe.optBoolean("security")
 
-            // 登录后卡在「正在检测您的账号安全」过渡页：等 2 秒自动返回，
-            // 返回不生效就直接重开云游戏页（Cookie 已经写好，不需要过渡页）
+            // 登录后卡在「正在检测您的账号安全」过渡页：停留 2 秒后直接重载云游戏首页，
+            // 再等 5 秒让页面把登录态和 combo_token 准备好，然后才抓取上传。
             if (security && securityCycles < 2) {
                 if (!securityLogged) {
                     securityLogged = true
                     log("检测到「正在检测您的账号安全」过渡页")
-                    setStatus("账号安全校验中，稍候自动返回…")
+                    setStatus("账号安全校验中，稍候重新加载云游戏页…")
                 }
                 if (securitySince == 0L) securitySince = elapsed
                 if (securityActionAt == 0L && elapsed - securitySince >= 2_000L) {
                     securityActionAt = elapsed
                     securityCycles++
-                    if (view.canGoBack()) {
-                        log("等待 2 秒仍在校验页，自动返回")
-                        view.goBack()
-                    } else {
-                        log("没有可返回的页面，直接重新打开云游戏页")
-                        view.loadUrl(startUrl)
-                        securityReloaded = true
-                    }
-                } else if (securityActionAt > 0 && !securityReloaded &&
-                    elapsed - securityActionAt >= 3_000L
-                ) {
-                    securityReloaded = true
-                    securityCycles++
-                    log("返回未生效，重新打开云游戏页")
+                    captureNotBefore = elapsed + 5_000L
+                    log("停留 2 秒后重新加载云游戏首页，5 秒后再抓取 Cookie")
                     view.loadUrl(startUrl)
                 }
             } else if (!security) {
                 if (securitySince != 0L) {
                     securitySince = 0L
                     securityActionAt = 0L
-                    securityReloaded = false
                     securityLogged = false
                     log("已离开账号安全校验页")
                 }
@@ -285,7 +272,7 @@ fun SilentLoginView(
             // - 登录框出现过：必须等我们真的提交登录后再接受凭证；
             // - 没出现登录框：等 8 秒页面稳定后再接受（已登录场景）。
             val comboValue = combo
-            val acceptCombo = comboValue.isNotBlank() && (
+            val acceptCombo = comboValue.isNotBlank() && elapsed >= captureNotBefore && (
                 loginSubmitted || (elapsed >= 8_000L && !formSeen)
             )
             if (comboValue.isNotBlank() && !acceptCombo && !ignoredComboLogged) {

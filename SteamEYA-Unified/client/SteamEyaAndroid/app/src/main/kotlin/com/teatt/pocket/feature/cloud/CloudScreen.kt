@@ -157,8 +157,6 @@ fun CloudScreen(
                     )
                     when {
                         result.refreshOk == true -> append("\n自动续期：已开启（stoken 换票）")
-                        result.refreshOk == false && result.needStoken ->
-                            append("\nCookie 里没有 stoken：点卡片上的「扫码」补上后即可自动续期")
                         result.refreshOk == false && result.refreshMsg.isNotBlank() ->
                             append("\n自动续期失败：${result.refreshMsg}")
                     }
@@ -865,15 +863,6 @@ private fun AccountCard(
                     account.renewalText,
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            if (account.stokenHint.isNotBlank()) {
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    account.stokenHint,
-                    fontSize = 11.sp,
-                    color = Color(0xFFB45309)
                 )
             }
 

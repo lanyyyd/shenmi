@@ -85,11 +85,10 @@ fun CaptureView(
         if (view != null && view.canGoBack()) view.goBack() else onCancel()
     }
 
-    // 登录后米哈游会停在「正在检测您的账号安全」过渡页，自动返回一次，省得手动按返回
+    // 登录后米哈游会停在「正在检测您的账号安全」过渡页：停留 2 秒后直接重新加载云游戏页
     LaunchedEffect(Unit) {
         var hitSince = 0L
         var actionAt = 0L
-        var reloaded = false
         var cycles = 0
         while (isActive) {
             delay(1000)
@@ -100,29 +99,17 @@ fun CaptureView(
             if (hit && cycles < 2) {
                 if (hitSince == 0L) {
                     hitSince = now
-                    comboHint = "检测到账号安全校验，稍候自动返回"
+                    comboHint = "检测到账号安全校验，2 秒后重新加载云游戏页"
                 }
                 if (actionAt == 0L && now - hitSince >= 2_000L) {
                     actionAt = now
                     cycles++
-                    if (view.canGoBack()) {
-                        view.goBack()
-                        comboHint = "已自动返回，确认登录后点下方抓取"
-                    } else {
-                        view.loadUrl(startUrl)
-                        reloaded = true
-                        comboHint = "已重新打开云游戏页，确认登录后点下方抓取"
-                    }
-                } else if (actionAt > 0 && !reloaded && now - actionAt >= 3_000L) {
-                    reloaded = true
-                    cycles++
                     view.loadUrl(startUrl)
-                    comboHint = "返回未生效，已重新打开云游戏页"
+                    comboHint = "已重新加载云游戏页，等待 5 秒后再点抓取"
                 }
             } else if (!hit && hitSince != 0L) {
                 hitSince = 0L
                 actionAt = 0L
-                reloaded = false
             }
         }
     }
