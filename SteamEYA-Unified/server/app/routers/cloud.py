@@ -20,6 +20,7 @@ from .. import presence
 from ..config import DATA_DIR
 from ..db import execute, execute_update, query_all, query_one
 from ..deps import get_current_user, require_admin
+from ..hub import hub
 
 router = APIRouter(prefix="/api/cloud", tags=["cloud"])
 
@@ -635,6 +636,34 @@ def stoken_poll(payload: dict = Body(...), user: dict = Depends(get_current_user
 def report_login(request: Request, payload: dict = Body(...), user: dict = Depends(get_current_user)):
     game = payload.get("game") or "genshin"
     _record_cloud_login(user["id"], game, _client_ip(request))
+    hub.broadcast_online_threadsafe()
+    return {"ok": True}
+
+
+@router.post("/report_play")
+def report_play(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    """客户端开始游戏 / 心跳：每 60 秒调一次，服务端 90 秒没续上就自动结束。"""
+    game = payload.get("game") or "genshin"
+    uid = str(payload.get("uid") or "").strip()
+    presence.note_playing(user["id"], game, uid)
+    hub.broadcast_online_threadsafe()
+    return {"ok": True}
+
+
+@router.post("/report_stop")
+def report_stop(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    """客户端退出游戏：立刻清掉「在玩」，聊天室马上刷新。"""
+    game = str(payload.get("game") or "").strip()
+    presence.note_stopped(user["id"], game)
+    hub.broadcast_online_threadsafe()
+    return {"ok": True}
+
+
+@router.post("/report_steam")
+def report_steam(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    """客户端 Steam 进程心跳：运行中每 60 秒一次，退出时 running=false。"""
+    presence.note_steam(user["id"], bool(payload.get("running")))
+    hub.broadcast_online_threadsafe()
     return {"ok": True}
 
 

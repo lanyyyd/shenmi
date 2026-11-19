@@ -24,8 +24,10 @@ from .db import query_all, query_one
 
 log = logging.getLogger("presence")
 
-# 云游戏没有退出信号，先给一个较长的兜底有效期，正常情况由探测提前结束
+# 旧版客户端没有退出信号，先给一个较长的兜底有效期，正常情况由探测提前结束
 CLOUD_TTL = 3 * 3600
+# 新版客户端每 60 秒上报一次心跳；90 秒没续上就认为已退出（崩溃/被杀也最多拖 90 秒）
+CLIENT_TTL = 90
 # 探测间隔：上号后第一次、以及每次探测后，都在 10~30 分钟内随机
 PROBE_MIN = 10 * 60
 PROBE_MAX = 30 * 60
@@ -36,16 +38,22 @@ STEAM_REFRESH = 60
 STEAM_API = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/"
 
 _lock = threading.Lock()
-# user_id -> {game, uid, name, until, last, next, miss}
+# user_id -> {game, uid, name, until, last, next, miss, client}
 _sessions: dict[int, dict] = {}
-# user_id -> (文案, 过期时间)，目前只放 Steam
+# user_id -> (文案, 过期时间)，放 Steam 和客户端自行上报的状态
 _activity: dict[int, tuple[str, float]] = {}
+# 自行上报 Steam 的用户：以客户端为准，不让服务端 Steam API 覆盖
+_client_steam: set[int] = set()
 _started = False
 
 
 def _game_name(game: str) -> str:
-    # 只探测米哈游两个内置云游戏，固定文案即可，不必依赖 cloud.py
-    return {"genshin": "原神", "starrail": "星穹铁道"}.get(game, game)
+    fixed = {"genshin": "原神", "starrail": "星穹铁道", "steam": "Steam"}.get(game)
+    if fixed:
+        return fixed
+    # 自定义游戏取后台配置的显示名
+    row = query_one("SELECT name FROM cloud_games WHERE game_key=?", (game,))
+    return (row or {}).get("name") or game
 
 
 def note_cloud_login(user_id: int, game: str, uid: str = "") -> None:
@@ -69,14 +77,79 @@ def note_cloud_login(user_id: int, game: str, uid: str = "") -> None:
         base = int(row["free_duration"])
     with _lock:
         cur = _sessions.get(user_id)
+        # 新版客户端已经用心跳接管了状态，旧接口不要再覆盖成 3 小时探测会话
+        if cur and cur.get("client") and cur["until"] > now:
+            return
         if cur and cur["game"] == game and cur["uid"] == row["game_uid"]:
             cur["until"] = now + CLOUD_TTL
             return
         _sessions[user_id] = {
             "game": game, "uid": row["game_uid"] or "", "name": _game_name(game),
-            "until": now + CLOUD_TTL, "last": base, "miss": 0,
+            "until": now + CLOUD_TTL, "last": base, "miss": 0, "client": False,
             "next": now + random.randint(PROBE_MIN, PROBE_MAX),
         }
+
+
+def note_playing(user_id: int, game: str, uid: str = "") -> None:
+    """新版客户端上号/心跳：开始或续期一条 90 秒的实时「在玩」会话。"""
+    if not game:
+        return
+    row = None
+    if uid:
+        row = query_one(
+            "SELECT game_uid FROM cloud_cookies WHERE user_id=? AND game=? AND game_uid=?",
+            (user_id, game, uid))
+    if not row:
+        row = query_one(
+            "SELECT game_uid FROM cloud_cookies WHERE user_id=? AND game=? "
+            "ORDER BY updated_at DESC, id DESC LIMIT 1", (user_id, game))
+    now = time.time()
+    name = _game_name(game)
+    with _lock:
+        _activity.pop(user_id, None)
+        _sessions[user_id] = {
+            "game": game, "uid": (row or {}).get("game_uid") or uid,
+            "name": name, "until": now + CLIENT_TTL,
+            "last": None, "miss": 0, "client": True,
+            "next": now + CLIENT_TTL,
+        }
+
+
+def note_stopped(user_id: int, game: str = "") -> None:
+    """客户端退出游戏：立刻清掉「在玩」，不用等 TTL。"""
+    with _lock:
+        cur = _sessions.get(user_id)
+        if cur and (not game or cur["game"] == game):
+            _sessions.pop(user_id, None)
+        if not game or game == "steam":
+            _client_steam.discard(user_id)
+            _activity.pop(user_id, None)
+
+
+def note_steam(user_id: int, running: bool) -> None:
+    """客户端 Steam 进程心跳：运行中续 90 秒，退出立刻清掉。"""
+    now = time.time()
+    with _lock:
+        if running:
+            _client_steam.add(user_id)
+            _activity[user_id] = ("在玩 Steam", now + CLIENT_TTL)
+        else:
+            _client_steam.discard(user_id)
+            _activity.pop(user_id, None)
+
+
+def activity_snapshot() -> dict[int, str]:
+    """当前所有用户的「在玩」文案，用来判断状态有没有变化、需不需要广播。"""
+    now = time.time()
+    with _lock:
+        out: dict[int, str] = {}
+        for uid, s in _sessions.items():
+            if s["until"] > now:
+                out[uid] = f"在玩{s['name']}"
+        for uid, (text, exp) in _activity.items():
+            if exp > now and uid not in out:
+                out[uid] = text
+        return out
 
 
 def activity_of(user_id: int) -> str:
@@ -100,6 +173,9 @@ def _probe_cloud(now: float) -> None:
         for uid, s in list(_sessions.items()):
             if s["until"] <= now:
                 _sessions.pop(uid, None)
+            elif s.get("client"):
+                # 客户端心跳会话由 TTL 负责，不再探测剩余时长
+                continue
             elif s["next"] <= now:
                 due.append((uid, dict(s)))
 
@@ -148,7 +224,10 @@ def _refresh_steam() -> None:
     api_key = _get_setting("steam_api_key")
     if not api_key:
         with _lock:
-            _activity.clear()
+            # 保留客户端进程心跳上报的 Steam 状态，只清服务端自己探测出来的旧值
+            for uid in list(_activity):
+                if uid not in _client_steam:
+                    _activity.pop(uid, None)
         return
 
     online = query_all(
@@ -169,9 +248,11 @@ def _refresh_steam() -> None:
             mapping[sid] = u["uid"]
 
     now = time.time()
-    if not api_key or not mapping:
+    if not mapping:
         with _lock:
-            _activity.clear()
+            for uid in list(_activity):
+                if uid not in _client_steam:
+                    _activity.pop(uid, None)
         return
 
     states: dict[str, dict] = {}
@@ -189,6 +270,10 @@ def _refresh_steam() -> None:
 
     with _lock:
         for sid, uid in mapping.items():
+            # 客户端心跳还新鲜时以客户端为准；过期后再让服务端 API 兜底
+            client_alive = uid in _client_steam and (_activity.get(uid) or ("", 0))[1] > now
+            if client_alive:
+                continue
             p = states.get(sid) or {}
             online_now = int(p.get("personastate") or 0) > 0 or bool(p.get("gameid"))
             if online_now:
@@ -198,7 +283,10 @@ def _refresh_steam() -> None:
 
 
 def _loop() -> None:
+    from .hub import hub
+
     while True:
+        before = activity_snapshot()
         try:
             _probe_cloud(time.time())
         except Exception as e:
@@ -207,6 +295,9 @@ def _loop() -> None:
             _refresh_steam()
         except Exception as e:
             log.warning("Steam 在玩状态刷新失败：%s", e)
+        # 状态变化主动推给聊天室，否则要等下次有人上下线才会刷新
+        if activity_snapshot() != before:
+            hub.broadcast_online_threadsafe()
         time.sleep(STEAM_REFRESH)
 
 

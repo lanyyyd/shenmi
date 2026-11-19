@@ -199,6 +199,90 @@ internal sealed class CloudGameService
         }
     }
 
+    /// <summary>开始游戏 / 心跳：每 60 秒一次，服务端 90 秒收不到就认为已退出。</summary>
+    public async Task ReportPlayAsync(string game, string uid = "", CancellationToken ct = default)
+    {
+        var obj = new JsonObject { ["game"] = game };
+        if (!string.IsNullOrWhiteSpace(uid))
+        {
+            obj["uid"] = uid;
+        }
+
+        using var req = Auth(HttpMethod.Post, "/api/cloud/report_play");
+        req.Content = new StringContent(obj.ToJsonString(), Encoding.UTF8, "application/json");
+        try
+        {
+            // 心跳单独限时：网络卡住时别把下一次上报也一起拖过 90 秒有效期
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            await HttpClient.SendAsync(req, timeout.Token);
+        }
+        catch
+        {
+            // 心跳失败不影响游戏
+        }
+    }
+
+    /// <summary>退出游戏：立刻让聊天室把「在玩 xx」变回「在线」。</summary>
+    public async Task ReportStopAsync(string game, CancellationToken ct = default)
+    {
+        var json = new JsonObject { ["game"] = game }.ToJsonString();
+        using var req = Auth(HttpMethod.Post, "/api/cloud/report_stop");
+        req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+        try
+        {
+            await HttpClient.SendAsync(req, ct);
+        }
+        catch
+        {
+        }
+    }
+
+    /// <summary>Steam 进程心跳：运行中每 60 秒一次，退出时 running=false。</summary>
+    public async Task ReportSteamAsync(bool running, CancellationToken ct = default)
+    {
+        var json = new JsonObject { ["running"] = running }.ToJsonString();
+        using var req = Auth(HttpMethod.Post, "/api/cloud/report_steam");
+        req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+        try
+        {
+            await HttpClient.SendAsync(req, ct);
+        }
+        catch
+        {
+        }
+    }
+
+    /// <summary>
+    /// 查询本地引擎里是否还有该游戏的上号浏览器；引擎不可达返回 null（不据此判定退出）。
+    /// </summary>
+    public async Task<bool?> EngineStatusAsync(string game, CancellationToken ct = default)
+    {
+        try
+        {
+            using var resp = await HttpClient.GetAsync(
+                SessionState.EngineUrl.TrimEnd('/') + "/engine/status", ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("alive", out var alive)
+                || alive.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            return alive.TryGetProperty(game, out var v) && v.ValueKind == JsonValueKind.True;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     // ---------------- 本地引擎（Selenium 服务） ----------------
     /// <param name="url">自定义游戏的打开地址；内置游戏传 null 由引擎查表。</param>
     public async Task<(bool ok, string body, string? error)> EngineOpenAsync(

@@ -155,6 +155,9 @@ public sealed partial class MainWindow : Window
         {
             _ = RunStartupSyncAsync();
         }
+
+        // 「在玩 Steam」客户端心跳（服务端 Steam API 的兜底，退出 Steam 后 90 秒内消失）
+        PresenceService.Start();
     }
 
     /// <summary>按在线/离线模式决定可用导航项。设置页在离线模式下也保留，作为运行模式切换入口。</summary>

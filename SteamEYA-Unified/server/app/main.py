@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import socket
@@ -56,6 +57,13 @@ async def _cache_uploads(request, call_next):
         if response.status_code in (200, 206):
             response.headers.setdefault("Accept-Ranges", "bytes")
     return response
+
+
+@app.on_event("startup")
+async def _capture_event_loop():
+    # presence 后台线程通过这个 loop 主动广播在线快照
+    from .hub import hub
+    hub.set_loop(asyncio.get_running_loop())
 
 
 @app.on_event("startup")

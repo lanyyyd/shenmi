@@ -36,6 +36,12 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.teatt.pocket.core.Session
 import com.teatt.pocket.data.CloudApi
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -96,6 +102,12 @@ class CloudPlayActivity : ComponentActivity() {
     private lateinit var startUrl: String
     private var gachaArmed = false
     private var gachaCaptured = false
+
+    /** 在玩状态心跳：页面可见期间每 60 秒续一次，切后台/锁屏立即停止并上报退出。 */
+    private var presenceJob: Job? = null
+
+    /** 退出上报不能跟着 Activity 生命周期被取消，用独立作用域发完。 */
+    private val exitScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -420,6 +432,29 @@ class CloudPlayActivity : ComponentActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) hideSystemBars()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // 重启心跳并立刻上报一次，不用等第一个 45 秒间隔
+        presenceJob?.cancel()
+        presenceJob = lifecycleScope.launch {
+            while (isActive) {
+                runCatching { CloudApi.reportPlay(Session.token(), game, uid) }
+                // 45 秒一次：服务端 90 秒过期，单次网络超时也还有一次补救机会
+                delay(45_000)
+            }
+        }
+    }
+
+    override fun onStop() {
+        // 返回、切后台、锁屏都算退出：停心跳并立刻上报，聊天室马上变回「在线」
+        presenceJob?.cancel()
+        presenceJob = null
+        exitScope.launch {
+            runCatching { CloudApi.reportStop(Session.token(), game) }
+        }
+        super.onStop()
     }
 
     override fun onResume() {

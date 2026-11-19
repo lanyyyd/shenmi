@@ -19,6 +19,10 @@ public sealed partial class CloudGamePage : Page
     private readonly Dictionary<string, string> _gameUrls = new(StringComparer.Ordinal);
     private readonly ObservableCollection<CloudGameItem> _status = [];
 
+    /// <summary>「在玩」心跳：上号成功后每 60 秒续一次，浏览器被关闭或切换游戏时停止。</summary>
+    private CancellationTokenSource? _playCts;
+    private string _playingGame = "";
+
     public CloudGamePage()
     {
         InitializeComponent();
@@ -336,11 +340,83 @@ public sealed partial class CloudGamePage : Page
             ShowInfo((loggedIn ? "登录成功，浏览器已打开" : "已注入 Cookie，请在浏览器确认登录状态") + refreshNote,
                 failedRefresh ? InfoBarSeverity.Warning : (loggedIn ? InfoBarSeverity.Success : InfoBarSeverity.Warning));
             await _cloud.ReportLoginAsync(game);
+            StartPlayHeartbeat(game, uid);
         }
         finally
         {
             LoginButton.IsEnabled = true;
         }
+    }
+
+    /// <summary>
+    /// 上号成功后开始「在玩」心跳：每 45 秒向服务端续一次，同时问本地引擎浏览器还在不在。
+    /// 浏览器被用户关掉 → 立即上报退出；App 直接被 kill → 服务端 90 秒 TTL 兜底。
+    /// </summary>
+    private void StartPlayHeartbeat(string game, string uid)
+    {
+        var previous = _playingGame;
+        CancelPlayHeartbeat();
+        _playingGame = game;
+        if (!string.IsNullOrEmpty(previous) && !string.Equals(previous, game, StringComparison.Ordinal))
+        {
+            _ = _cloud.ReportStopAsync(previous);
+        }
+
+        _playCts = new CancellationTokenSource();
+        var ct = _playCts.Token;
+        _ = Task.Run(async () =>
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                // 先续心跳，再查浏览器；即使引擎查询卡住，上报也已经续上了
+                await _cloud.ReportPlayAsync(game, uid, ct);
+
+                try
+                {
+                    using var probe = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    probe.CancelAfter(TimeSpan.FromSeconds(8));
+                    var alive = await _cloud.EngineStatusAsync(game, probe.Token);
+                    if (alive == false)
+                    {
+                        await _cloud.ReportStopAsync(game, ct);
+                        return;
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    if (ct.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                }
+                catch
+                {
+                    // 单次查询失败不影响下一轮
+                }
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(45), ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
+        }, ct);
+    }
+
+    /// <summary>
+    /// 只停心跳、不上报退出：切换游戏时由 StartPlayHeartbeat 单独上报旧游戏的退出；
+    /// 用户离开本页面但浏览器还开着仍算在玩，关闭 App 则靠服务端 90 秒 TTL 自然过期。
+    /// </summary>
+    private void CancelPlayHeartbeat()
+    {
+        var cts = _playCts;
+        _playCts = null;
+        _playingGame = "";
+        cts?.Cancel();
+        cts?.Dispose();
     }
 
     /// <summary>更新上号进度：stage 文字、下方进度条（右侧显示总百分比），下载时带速度。</summary>

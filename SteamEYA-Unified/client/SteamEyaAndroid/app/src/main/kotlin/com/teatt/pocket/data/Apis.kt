@@ -96,6 +96,21 @@ object CloudApi {
         return Api.decode(Api.postJson("/api/cloud/check", body, token))
     }
 
+    /** 开始游戏 / 心跳：每 60 秒调一次，服务端 90 秒收不到就认为已退出。 */
+    suspend fun reportPlay(token: String, game: String, uid: String = "") {
+        val body = buildJsonObject {
+            put("game", JsonPrimitive(game))
+            if (uid.isNotBlank()) put("uid", JsonPrimitive(uid))
+        }.toString()
+        Api.postJson("/api/cloud/report_play", body, token)
+    }
+
+    /** 退出游戏：立刻清掉聊天室的「在玩 xx」。 */
+    suspend fun reportStop(token: String, game: String) {
+        val body = buildJsonObject { put("game", JsonPrimitive(game)) }.toString()
+        Api.postJson("/api/cloud/report_stop", body, token)
+    }
+
     /** 删除自己的某个云账号；uid 为空表示删该游戏下最新一条。 */
     suspend fun delete(token: String, game: String, uid: String = "") {
         val query = buildMap {

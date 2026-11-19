@@ -24,6 +24,21 @@ class Hub:
         # conn_id -> {ws, user_id, username, nickname, device_id}
         self.clients: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
+        # 服务端后台线程（presence）需要借主事件循环广播
+        self.loop: asyncio.AbstractEventLoop | None = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        self.loop = loop
+
+    def broadcast_online_threadsafe(self) -> None:
+        """供同步线程调用：把最新在线快照推给所有连接。"""
+        loop = self.loop
+        if loop is None or loop.is_closed():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self.broadcast_online(), loop)
+        except Exception as e:
+            log.debug("在线快照广播失败：%s", e)
 
     async def add(self, conn_id: str, ws, user: dict, device_id: str, ip: str = "") -> None:
         async with self._lock:
@@ -90,6 +105,21 @@ class Hub:
             users[r["user_id"]]["devices"].append({
                 "deviceId": r["device_id"], "ip": r["ip"], "ua": r["ua"], "at": r["connected_at"],
             })
+
+        # 正在云游戏 / Steam 但聊天 WebSocket 已断开（App 切到游戏页、被系统挂起）：
+        # 心跳还在就仍然算在线，并显示「在玩 xx」，避免一上号就从列表里消失。
+        for uid, text in presence.activity_snapshot().items():
+            if uid in users:
+                continue
+            u = query_one("SELECT * FROM users WHERE id = ?", (uid,))
+            if not u or not u["is_active"]:
+                continue
+            users[uid] = {
+                "id": u["id"], "username": u["username"], "nickname": u["nickname"],
+                "avatar": u["avatar"] or "", "displayName": display_name(u),
+                "devices": [], "activity": text,
+            }
+
         lst = list(users.values())
         return {"users": lst, "onlineUsers": len(lst), "onlineDevices": len(rows)}
 

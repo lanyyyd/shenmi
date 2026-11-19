@@ -184,6 +184,21 @@ def refresh(payload: dict = Body(...)):
         return {"ok": False, "msg": str(e)}
 
 
+@app.get("/engine/status")
+def status():
+    """客户端用来判断上号浏览器还在不在：alive 里没有对应 game 就说明用户已关闭。"""
+    alive: dict[str, bool] = {}
+    with _driver_lock:
+        for game, driver in list(_login_drivers.items()):
+            try:
+                _ = driver.current_url
+                _ = driver.window_handles
+                alive[game] = True
+            except Exception:
+                _login_drivers.pop(game, None)
+    return {"ok": True, "alive": alive}
+
+
 if __name__ == "__main__":
     import uvicorn
     parser = argparse.ArgumentParser()
