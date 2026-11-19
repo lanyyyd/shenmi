@@ -26,11 +26,12 @@ html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
 .card-h h2{font-size:15px;font-weight:700}
 .card-h .spacer{flex:1}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;padding:16px}
-.wall{background:var(--panel-soft);border:1px solid var(--line);border-radius:13px;overflow:hidden}
-.wall img{display:block;width:100%;height:130px;object-fit:cover;background:#222}
-.wall .body{padding:10px 12px;display:flex;align-items:center;gap:8px}
-.wall .name{flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mini{font-size:12px;padding:5px 9px;border-radius:8px}
+.wall{position:relative;background:var(--panel-soft);border:1px solid var(--line);border-radius:13px;overflow:hidden}
+.wall img{display:block;width:100%;height:150px;object-fit:cover;background:#222}
+.wall .del{position:absolute;top:8px;right:8px;padding:5px 10px;border-radius:8px;font-size:12px;
+  background:rgba(0,0,0,.55);color:#fff;border:none;cursor:pointer;opacity:0;transition:.15s}
+.wall:hover .del{opacity:1}
+.wall .del:hover{background:#EF4444}
 .empty{padding:40px;text-align:center;color:var(--muted);font-size:13.5px}
 .row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 18px}
 input[type=text]{padding:9px 12px;border-radius:9px;border:1.5px solid var(--line);
@@ -49,10 +50,9 @@ input[type=text]{padding:9px 12px;border-radius:9px;border:1.5px solid var(--lin
   <div class="card">
     <div class="card-h"><h2>上传壁纸</h2></div>
     <div class="row">
-      <input type="file" id="wFile" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,image/*">
-      <input type="text" id="wTitle" placeholder="标题（可留空，默认用文件名）" maxlength="60">
+      <input type="file" id="wFile" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,image/*" multiple>
       <button class="btn pri" onclick="upload()">上传</button>
-      <span style="font-size:12px;color:var(--muted)">支持 png / jpg / gif / webp / bmp，单张不超过 20MB</span>
+      <span style="font-size:12px;color:var(--muted)">可多选，支持 png / jpg / gif / webp / bmp，单张不超过 20MB</span>
     </div>
   </div>
 
@@ -85,38 +85,30 @@ async function load(){
   $('wGrid').innerHTML = ITEMS.length ? ITEMS.map(w => `
     <div class="wall">
       <img src="${esc(w.url)}" loading="lazy" alt="">
-      <div class="body">
-        <div class="name" title="${esc(w.title)}">${esc(w.title || '未命名')}</div>
-        <button class="btn mini" onclick="rename(${w.id})">改名</button>
-        <button class="btn mini danger" onclick="remove(${w.id})">删除</button>
-      </div>
+      <button class="del" onclick="remove(${w.id})">删除</button>
     </div>`).join('') : '<div class="empty" style="grid-column:1/-1">还没有上传壁纸</div>';
 }
 
 async function upload(){
-  const file = $('wFile').files[0];
-  if(!file){ toast('请先选择图片'); return; }
+  const files = Array.from($('wFile').files || []);
+  if(!files.length){ toast('请先选择图片'); return; }
   const fd = new FormData();
-  fd.append('file', file);
-  fd.append('title', $('wTitle').value.trim());
-  const r = await fetch('/api/wallpapers/admin/upload', {method:'POST', body: fd});
+  files.forEach(f => fd.append('files', f));
+  let r;
+  try{
+    r = await fetch('/api/wallpapers/admin/upload', {method:'POST', body: fd});
+  }catch(e){
+    toast('上传失败：网络错误'); return;
+  }
   const d = await r.json().catch(()=>({}));
-  if(!r.ok){ toast(d.detail || '上传失败'); return; }
-  toast('已上传');
-  $('wFile').value = ''; $('wTitle').value = '';
+  if(!r.ok){
+    toast(d.detail ? `上传失败：${d.detail}` : `上传失败（${r.status}）`);
+    return;
+  }
+  const okCount = d.count || 0;
+  toast(okCount ? `已上传 ${okCount} 张${(d.errors||[]).length ? `，${d.errors.length} 张失败` : ''}` : (d.errors||[])[0] || '上传失败');
+  $('wFile').value = '';
   load();
-}
-
-async function rename(id){
-  const cur = ITEMS.find(x => x.id === id);
-  const title = prompt('新的标题', cur ? cur.title : '');
-  if(title === null) return;
-  const r = await fetch('/api/wallpapers/admin/' + id, {
-    method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({title})
-  });
-  const d = await r.json().catch(()=>({}));
-  if(!r.ok){ toast(d.detail || '改名失败'); return; }
-  toast('已保存'); load();
 }
 
 async function remove(id){

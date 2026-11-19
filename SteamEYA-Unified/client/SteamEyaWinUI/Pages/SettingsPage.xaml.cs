@@ -846,23 +846,17 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         };
         foreach (var item in items)
         {
-            var panel = new StackPanel { Width = 220 };
+            // 直接看图选：不显示名字，缩略图铺满
+            var panel = new StackPanel { Width = 240 };
             panel.Children.Add(new Border
             {
                 CornerRadius = new CornerRadius(8),
-                Height = 124,
+                Height = 135,
                 Child = new Image
                 {
                     Stretch = Stretch.UniformToFill,
                     Source = new BitmapImage(new Uri(item.FullUrl))
                 }
-            });
-            panel.Children.Add(new TextBlock
-            {
-                Text = string.IsNullOrWhiteSpace(item.Title) ? "未命名" : item.Title,
-                FontSize = 12,
-                Margin = new Thickness(2, 6, 2, 0),
-                TextTrimming = TextTrimming.CharacterEllipsis
             });
             grid.Items.Add(new GridViewItem { Content = panel, Tag = item });
         }

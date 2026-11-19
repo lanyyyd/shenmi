@@ -615,10 +615,10 @@
     "Tools_Mode_Confirm": "Confirm switch",
     "Tools_Mode_Sent": "Switch command sent.",
     "Tools_Mode_Failed": "Send failed: not connected to the server and LAN is unavailable.",
-    "Lan_Conn_Error_Tip": "LAN connection failed. Check the host's and your firewall settings and keep the firewall disabled, meow~"
-  },
-  "Settings_Background_Server": "Server wallpapers",
-  "Settings_Background_Apply": "Use this one",
-  "Settings_Background_ServerEmpty": "No wallpapers have been uploaded yet.",
-  "Settings_Background_ServerFail": "Failed to load server wallpapers. Check your network and try again."
+    "Lan_Conn_Error_Tip": "LAN connection failed. Check the host's and your firewall settings and keep the firewall disabled, meow~",
+    "Settings_Background_Server": "Server wallpapers",
+    "Settings_Background_Apply": "Use this one",
+    "Settings_Background_ServerEmpty": "No wallpapers have been uploaded yet.",
+    "Settings_Background_ServerFail": "Failed to load server wallpapers. Check your network and try again."
+  }
 }
