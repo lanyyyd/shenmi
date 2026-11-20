@@ -136,11 +136,22 @@ jobs:
         shell: pwsh
         working-directory: SteamEYA-Unified/minecraft/autobackup-mod
         run: |
-          .\gradlew.bat build --no-daemon --stacktrace
-          $jar = "build\libs\autobackup-fabric-1.21.1.jar"
-          if (-not (Test-Path $jar)) { throw "模组 jar 未生成：$jar" }
+          # 同一份源码按版本参数化构建，客户端按 autobackup-<loader>-<mc>.jar 匹配实例。
+          $targets = @(
+            @{ Mc = '1.21.1'; Yarn = '1.21.1+build.3'; Api = '0.116.18+1.21.1'; Jar = 'autobackup-fabric-1.21.1' },
+            @{ Mc = '1.21';   Yarn = '1.21+build.9';   Api = '0.102.0+1.21';   Jar = 'autobackup-fabric-1.21' }
+          )
           New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\publish\minecraft-mods" | Out-Null
-          Copy-Item $jar "$env:GITHUB_WORKSPACE\publish\minecraft-mods\" -Force
+          foreach ($t in $targets) {
+            Write-Host "===== 构建 MC $($t.Mc) ====="
+            .\gradlew.bat clean build --no-daemon --stacktrace `
+              "-Pminecraft_version=$($t.Mc)" "-Pyarn_mappings=$($t.Yarn)" `
+              "-Pfabric_version=$($t.Api)" "-Parchives_base_name=$($t.Jar)"
+            if ($LASTEXITCODE -ne 0) { throw "MC $($t.Mc) 模组构建失败" }
+            $jar = "build\libs\$($t.Jar).jar"
+            if (-not (Test-Path $jar)) { throw "模组 jar 未生成：$jar" }
+            Copy-Item $jar "$env:GITHUB_WORKSPACE\publish\minecraft-mods\" -Force
+          }
           Get-ChildItem "$env:GITHUB_WORKSPACE\publish\minecraft-mods"
 
       # ---- 离线/局域网网关 + 网页聊天前端 ----

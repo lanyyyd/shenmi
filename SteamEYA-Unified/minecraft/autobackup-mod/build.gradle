@@ -27,8 +27,11 @@ dependencies {
 
 processResources {
     inputs.property "version", project.version
+    inputs.property "minecraft_version", project.minecraft_version
     filesMatching("fabric.mod.json") {
-        expand "version": project.version
+        // 版本由 -P 参数注入：同一份源码可分别构建 1.21 / 1.21.1 等实例。
+        expand "version": project.version,
+               "minecraft_version": project.minecraft_version
     }
 }
 
