@@ -20,7 +20,6 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -285,7 +284,7 @@ public final class BackupManager {
         }
 
         try {
-            server.getPlayerList().saveAll();
+            // saveEverything 内部会保存区块与玩家数据。
             if (!server.saveEverything(true, true, true)) {
                 fail(server, callback, "保存世界失败，备份已取消");
                 return;

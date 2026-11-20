@@ -15,10 +15,10 @@ public final class BackupCommand {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("autobackup")
                 .requires(source -> source.hasPermission(2))
-                .executes(BackupCommand::status)
-                .then(Commands.literal("now").executes(BackupCommand::now))
-                .then(Commands.literal("list").executes(BackupCommand::list))
-                .then(Commands.literal("reload").executes(BackupCommand::reload)));
+                .executes(context -> status(context.getSource()))
+                .then(Commands.literal("now").executes(context -> now(context.getSource())))
+                .then(Commands.literal("list").executes(context -> list(context.getSource())))
+                .then(Commands.literal("reload").executes(context -> reload(context.getSource()))));
     }
 
     private static int status(CommandSourceStack source) {
