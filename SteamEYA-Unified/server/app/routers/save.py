@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse
 from .. import security
 from ..config import DATA_DIR, SECRET_KEY
 from ..db import execute, query_all, query_one
-from ..deps import get_current_user, resolve_user
+from ..deps import get_current_user, require_admin, resolve_user
 
 router = APIRouter(prefix="/api/save", tags=["save"])
 
@@ -433,6 +433,73 @@ def share(payload: dict = Body(...), user: dict = Depends(get_current_user)):
                 (1 if shared else 0, now if shared else None, sid))
         changed += 1
     return {"ok": True, "changed": changed}
+
+
+# ---------------------------------------------------------------- 管理后台
+@router.get("/admin/list")
+def admin_list(q: str = "", game: str = "", source: str = "", limit: int = 200,
+               admin: dict = Depends(require_admin)):
+    """管理后台：查看全部用户的云存档（可按用户名/存档名、游戏、来源筛选）。"""
+    where, args = [], []
+    if q.strip():
+        like = f"%{q.strip()[:60]}%"
+        where.append("(u.username LIKE ? OR COALESCE(NULLIF(u.nickname,''), u.username) LIKE ? "
+                     "OR s.name LIKE ? OR s.save_name LIKE ?)")
+        args.extend([like] * 4)
+    if game:
+        where.append("s.game = ?")
+        args.append(game)
+    if source:
+        where.append("s.source = ?")
+        args.append(source)
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+
+    total = query_one(
+        f"SELECT COUNT(*) AS c FROM cloud_saves s JOIN users u ON u.id = s.user_id{clause}",
+        tuple(args))["c"]
+    rows = query_all(
+        f"SELECT s.*, u.username AS owner_username, "
+        f"COALESCE(NULLIF(u.nickname,''), u.username) AS owner_name "
+        f"FROM cloud_saves s JOIN users u ON u.id = s.user_id{clause} "
+        "ORDER BY COALESCE(s.saved_at, s.created_at) DESC, s.id DESC LIMIT ?",
+        tuple(args + [max(1, min(limit, 500))]))
+
+    names = game_name_map()
+    saves = []
+    for r in rows:
+        item = _item(r, r["owner_name"])
+        ts = r["saved_at"] or r["created_at"]
+        item.update({
+            "owner": r["owner_username"],
+            "gameName": names.get(r["game"], r["game"]),
+            "savedAtText": datetime.fromtimestamp(ts / 1000, _TZ).strftime("%Y-%m-%d %H:%M"),
+        })
+        saves.append(item)
+    return {"ok": True, "total": total, "saves": saves}
+
+
+@router.post("/admin/delete")
+def admin_delete(payload: dict = Body(...), admin: dict = Depends(require_admin)):
+    """管理后台删除云存档：不限制归属，数据库记录与磁盘文件一起删。"""
+    ids = [int(i) for i in (payload.get("ids") or [])]
+    removed = 0
+    for sid in ids:
+        row = query_one("SELECT * FROM cloud_saves WHERE id = ?", (sid,))
+        if not row:
+            continue
+        try:
+            pathlib.Path(row["file_path"]).unlink(missing_ok=True)
+        except Exception:
+            pass
+        execute("DELETE FROM cloud_saves WHERE id = ?", (sid,))
+        removed += 1
+    if removed:
+        execute("INSERT INTO logs (user_id, username, action, detail, ip_address, created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (admin["id"], admin["username"], "删除云存档",
+                 f"删除 {removed} 个云存档（id={','.join(str(i) for i in ids)}）", "",
+                 datetime.now().isoformat()))
+    return {"ok": True, "removed": removed}
 
 
 @router.post("/delete")

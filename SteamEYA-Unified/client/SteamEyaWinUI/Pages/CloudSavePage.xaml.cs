@@ -1041,6 +1041,50 @@ public sealed partial class CloudSavePage : Page
         }
     }
 
+    private async void OnMenuDelete(object sender, RoutedEventArgs e)
+    {
+        if (GetMenuItem(sender) is not { } item)
+        {
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "删除存档",
+            Content = new TextBlock
+            {
+                Text = $"确定删除存档「{item.Name}」？\n服务器上的存档文件也会一并删除，无法恢复。",
+                TextWrapping = TextWrapping.Wrap
+            },
+            PrimaryButtonText = "删除",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _service.DeleteAsync([item.Id]);
+            if (result.Ok)
+            {
+                ShowInfo($"已删除存档「{item.Name}」", InfoBarSeverity.Success);
+                await ReloadAsync();
+            }
+            else
+            {
+                ShowInfo(result.Msg ?? "删除失败", InfoBarSeverity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowInfo($"删除失败：{ex.Message}", InfoBarSeverity.Error);
+        }
+    }
+
     private async void OnMenuSharedDownloadTo(object sender, RoutedEventArgs e)
     {
         if (GetMenuItem(sender) is { } item)
@@ -1109,6 +1153,8 @@ public sealed partial class CloudSavePage : Page
         flyout.Items.Add(item.Shared
             ? BuildMenuItem("取消共享", item, OnMenuUnshare)
             : BuildMenuItem("共享存档", item, OnMenuShare));
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        flyout.Items.Add(BuildMenuItem("删除此存档", item, OnMenuDelete));
         return flyout;
     }
 

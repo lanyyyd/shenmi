@@ -139,6 +139,19 @@ def admin_activate(payload: dict = Body(...), admin: dict = Depends(require_admi
     return {"ok": True, "platform": p}
 
 
+@router.post("/admin/releases/update")
+def admin_update_notes(payload: dict = Body(...), admin: dict = Depends(require_admin)):
+    """修改已上传版本的更新公告（notes），无需重新上传安装包。"""
+    rid = int(payload.get("id") or 0)
+    if not query_one("SELECT id FROM app_releases WHERE id = ?", (rid,)):
+        raise HTTPException(404, "版本不存在")
+    notes = payload.get("notes")
+    if notes is None:
+        raise HTTPException(400, "缺少更新内容")
+    execute_update("UPDATE app_releases SET notes = ? WHERE id = ?", (str(notes)[:5000], rid))
+    return {"ok": True}
+
+
 @router.delete("/admin/releases/{rid}")
 def admin_delete(rid: int, admin: dict = Depends(require_admin)):
     row = query_one("SELECT * FROM app_releases WHERE id = ?", (rid,))

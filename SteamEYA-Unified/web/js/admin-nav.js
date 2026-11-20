@@ -8,6 +8,7 @@
     { label: '云游戏', href: '/admin-cloud.html', title: '云游戏账号管理' },
     { label: '壁纸', href: '/admin-wallpapers.html', title: '客户端壁纸库' },
     { label: '更新', href: '/admin-update.html', title: '客户端更新管理' },
+    { label: '云存档', href: '/admin-saves.html', title: '云存档管理' },
     { label: '积分', href: '/admin-points.html', title: '积分管理' },
     { label: '等级', href: '/admin-level.html', title: '等级管理' },
     { label: '抽卡', href: '/admin-gacha.html', title: '抽卡管理' },

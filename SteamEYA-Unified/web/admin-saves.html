@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-mode="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>云存档管理 · 管理后台</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+body{overflow:auto}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:26px 18px 60px}
+.top{display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.top h1{font-size:21px;font-weight:800;letter-spacing:-.3px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur)}
+html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
+.card-h{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.card-h h2{font-size:15px;font-weight:700}
+.card-h .spacer{flex:1}
+.btn{padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;transition:.2s;
+  background:var(--panel);border:1px solid var(--line);color:var(--text)}
+html[data-theme="light"] .btn:not(.pri){background:#fff}
+.btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn.pri{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;border:none}
+.btn.pri:hover{filter:brightness(1.08);color:#fff}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl th{text-align:left;padding:11px 14px;font-size:11.5px;font-weight:700;color:var(--hint);
+  border-bottom:1px solid var(--line);white-space:nowrap;letter-spacing:.4px}
+.tbl td{padding:12px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:var(--panel-soft)}
+html[data-theme="light"] .tbl tr:hover td{background:#FAFBFC}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
+.chip{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:6px;font-weight:700;
+  background:var(--primary-l);color:var(--primary)}
+.chip.gray{background:var(--panel-soft);color:var(--hint);border:1px solid var(--line)}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts button{font-size:12px;padding:5px 10px;border-radius:7px;background:var(--panel-soft);
+  border:1px solid var(--line);transition:.15s;color:var(--muted)}
+html[data-theme="light"] .acts button{background:#F7F8FA}
+.acts button:hover{border-color:var(--primary);color:var(--primary)}
+.acts button.dg:hover{border-color:#EF4444;color:#EF4444}
+.deny{text-align:center;padding:80px 20px}.deny h2{font-size:19px;margin-bottom:10px}
+.deny p{color:var(--muted);font-size:13.5px;margin-bottom:20px}
+.empty{text-align:center;color:var(--hint);padding:40px 0;font-size:13.5px}
+.filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:14px 18px}
+.filters input,.filters select{padding:9px 12px;border-radius:10px;font-size:13px;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+.filters input:focus,.filters select:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-l)}
+.filters input{width:230px}
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(20px);z-index:300;
+  padding:11px 20px;border-radius:11px;font-size:13.5px;font-weight:600;color:#fff;
+  background:linear-gradient(135deg,var(--primary),var(--primary-2));opacity:0;pointer-events:none;transition:.25s}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+@media(max-width:760px){
+  .tbl thead{display:none}
+  .tbl tr{display:block;border-bottom:1px solid var(--line);padding:10px 4px}
+  .tbl td{display:flex;justify-content:space-between;gap:10px;border:none;padding:5px 12px}
+  .tbl td::before{content:attr(data-l);color:var(--hint);font-size:11.5px;font-weight:700;flex-shrink:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>☁️ 云存档管理</h1>
+    <span id="whoami" class="mono"></span>
+  </div>
+
+  <div id="deny" class="deny hidden">
+    <h2>需要管理员权限</h2>
+    <p>请用管理员账号登录后再访问本页</p>
+    <button class="btn pri" onclick="location.href='/'">去登录</button>
+  </div>
+
+  <div id="main" class="hidden">
+    <div class="card">
+      <div class="card-h">
+        <h2>全部云存档</h2>
+        <span class="chip gray" id="totalChip">0 个</span>
+        <div class="spacer"></div>
+        <button class="btn" onclick="loadSaves()">刷新</button>
+      </div>
+      <div class="filters">
+        <input id="fQ" placeholder="搜索用户名 / 存档名" onkeydown="if(event.key==='Enter')loadSaves()">
+        <select id="fGame" onchange="loadSaves()"><option value="">全部游戏</option></select>
+        <select id="fSource" onchange="loadSaves()">
+          <option value="">全部来源</option>
+          <option value="mod">模组自动备份</option>
+          <option value="auto">客户端自动备份</option>
+          <option value="drag">手动上传</option>
+        </select>
+        <button class="btn pri" onclick="loadSaves()">查询</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr>
+            <th>存档</th><th>归属用户</th><th>游戏</th><th>来源</th><th>大小</th><th>备份时间</th><th>操作</th>
+          </tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+let tTimer; function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(tTimer); tTimer=setTimeout(()=>t.classList.remove('on'),2200); }
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtSize(b){ b = Number(b)||0;
+  if(b < 1024) return b + ' B';
+  if(b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(2) + ' MB'; }
+const SOURCE_NAME = { mod:'模组自动备份', auto:'客户端自动备份', drag:'手动上传' };
+
+const ICONS={auto:'🌗 自动',light:'☀️ 浅色',dark:'🌙 深色'};
+function resolveTheme(mode){ if(mode==='light')return 'light'; if(mode==='dark')return 'dark';
+  const h=new Date().getHours(); return (h>=6&&h<18)?'light':'dark'; }
+function applyTheme(mode){ document.documentElement.dataset.mode=mode; document.documentElement.dataset.theme=resolveTheme(mode);
+  try{localStorage.setItem('chat_theme_mode',mode)}catch(e){} const b=$('themeBtn'); if(b) b.textContent=ICONS[mode]; }
+function cycleTheme(){ const o=['auto','light','dark']; const cur=document.documentElement.dataset.mode||'auto';
+  applyTheme(o[(o.indexOf(cur)+1)%o.length]); }
+(function(){ let s='auto'; try{s=localStorage.getItem('chat_theme_mode')||'auto'}catch(e){} applyTheme(s); })();
+
+async function loadGames(){
+  const r = await fetch('/api/save/games');
+  const d = await r.json().catch(()=>({}));
+  ((d.games)||[]).forEach(g=>{
+    const o = document.createElement('option');
+    o.value = g.key; o.textContent = g.name;
+    $('fGame').appendChild(o);
+  });
+}
+
+async function loadSaves(){
+  const p = new URLSearchParams();
+  const q = $('fQ').value.trim();
+  if(q) p.set('q', q);
+  if($('fGame').value) p.set('game', $('fGame').value);
+  if($('fSource').value) p.set('source', $('fSource').value);
+  $('tbody').innerHTML = '<tr><td colspan="7" class="empty">加载中…</td></tr>';
+  const r = await fetch('/api/save/admin/list?' + p.toString());
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){
+    $('tbody').innerHTML = '<tr><td colspan="7" class="empty">加载失败</td></tr>';
+    toast(d.detail || d.error || '加载失败'); return;
+  }
+  $('totalChip').textContent = (d.total || 0) + ' 个';
+  render(d.saves || []);
+}
+
+function render(list){
+  if(!list.length){ $('tbody').innerHTML = '<tr><td colspan="7" class="empty">没有匹配的存档</td></tr>'; return; }
+  $('tbody').innerHTML = list.map(x=>{
+    const sub = [x.versionName ? '整合包：' + x.versionName : '',
+                 x.gameVersion ? '游戏版本：' + x.gameVersion : ''].filter(Boolean).join('　');
+    return `
+    <tr>
+      <td data-l="存档"><b>${esc(x.saveName || x.name)}</b>
+        ${x.shared ? ' <span class="chip">已共享</span>' : ''}
+        ${x.saveFolder ? `<div class="mono" style="margin-top:3px">${esc(x.saveFolder)}</div>` : ''}
+        ${sub ? `<div class="mono" style="margin-top:2px">${esc(sub)}</div>` : ''}
+        ${x.savePath ? `<div class="mono" style="margin-top:2px">${esc(x.savePath)}</div>` : ''}
+      </td>
+      <td data-l="归属用户">${esc(x.owner || x.ownerName || '—')}</td>
+      <td data-l="游戏">${esc(x.gameName || x.game)}</td>
+      <td data-l="来源"><span class="chip gray">${esc(SOURCE_NAME[x.source] || x.source || '—')}</span></td>
+      <td data-l="大小"><span class="mono">${fmtSize(x.size)}</span></td>
+      <td data-l="备份时间"><span class="mono">${esc(x.savedAtText || '—')}</span></td>
+      <td data-l="操作"><div class="acts">
+        <button class="dg" onclick="deleteSave(${x.id})">删除</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+async function deleteSave(id){
+  if(!confirm('确定删除这个云存档？\n\n服务器上的存档文件也会一并删除，此操作不可恢复。')) return;
+  const r = await fetch('/api/save/admin/delete', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ ids: [id] })
+  });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok || !d.ok){ toast(d.detail || d.error || '删除失败'); return; }
+  toast('已删除'); loadSaves();
+}
+
+async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
+
+(async function(){
+  const r = await fetch('/api/me'); const d = await r.json();
+  if(!d.ok || !d.user || !d.user.isAdmin){ $('deny').classList.remove('hidden'); return; }
+  $('whoami').textContent = '@' + d.user.username;
+  $('main').classList.remove('hidden');
+  await loadGames();
+  loadSaves();
+})();
+</script>
+<script src="/js/admin-nav.js"></script>
+</body>
+</html>

@@ -73,6 +73,18 @@ html[data-theme="light"] .seg{background:#F4F5F7}
 .seg-btn:hover{color:var(--text)}
 .seg-btn.on{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff}
 .seg-btn.on:hover{color:#fff}
+/* 编辑更新公告弹窗 */
+.mask{position:fixed;inset:0;z-index:250;display:flex;align-items:center;justify-content:center;
+  padding:20px;background:rgba(0,0,0,.45)}
+.modal{width:min(560px,100%);padding:20px;border-radius:16px;background:var(--panel);
+  border:1px solid var(--line)}
+html[data-theme="light"] .modal{background:#fff;box-shadow:var(--shadow)}
+.modal h3{font-size:16px;font-weight:700;margin-bottom:4px}
+.modal .mv{font-size:12px;color:var(--hint);margin-bottom:12px}
+.modal textarea{width:100%;padding:10px 13px;border-radius:10px;font-size:13.5px;line-height:1.6;
+  background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
+.modal textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-l)}
+.modal .acts{justify-content:flex-end;margin-top:14px}
 </style>
 </head>
 <body>
@@ -176,6 +188,17 @@ html[data-theme="light"] .seg{background:#F4F5F7}
 </div>
 
 <div id="toast"></div>
+<div id="notesMask" class="mask hidden" onclick="if(event.target===this)closeNotes()">
+  <div class="modal">
+    <h3>编辑更新公告</h3>
+    <div class="mv" id="notesVersion"></div>
+    <textarea id="notesText" rows="8" placeholder="本次更新说明，一行一条即可"></textarea>
+    <div class="acts">
+      <button class="btn" onclick="closeNotes()">取消</button>
+      <button class="btn pri" id="notesSave" onclick="saveNotes()">保存</button>
+    </div>
+  </div>
+</div>
 <script>
 let RELEASES = [];
 let PLATFORM = 'windows';
@@ -238,6 +261,7 @@ function renderReleases(){
       <td data-l="下载次数">${esc(x.downloadCount ?? 0)}</td>
       <td data-l="是否当前版本">${x.active ? '<span class="chip">当前版本</span>' : '<span class="chip gray">历史版本</span>'}</td>
       <td data-l="操作"><div class="acts">
+        <button onclick="editNotes(${x.id})">编辑公告</button>
         ${x.active ? '' : `<button onclick="activateRelease(${x.id})">设为当前版本</button>`}
         <button class="dg" onclick="deleteRelease(${x.id},'${esc(x.version)}')">删除</button>
       </div></td>
@@ -290,6 +314,34 @@ async function deleteRelease(id, version){
   toast('已删除 ' + version); loadReleases();
 }
 async function logout(){ await fetch('/api/logout',{method:'POST'}); location.href='/'; }
+
+/* ---------------- 编辑更新公告 ---------------- */
+let notesId = 0;
+function editNotes(id){
+  const x = RELEASES.find(r => r.id === id);
+  if(!x) return;
+  notesId = id;
+  $('notesVersion').textContent = '版本 ' + x.version + (x.active ? '（当前下发版本）' : '（历史版本）');
+  $('notesText').value = x.notes || '';
+  $('notesMask').classList.remove('hidden');
+  $('notesText').focus();
+}
+function closeNotes(){ $('notesMask').classList.add('hidden'); }
+async function saveNotes(){
+  const btn = $('notesSave'); btn.disabled = true;
+  try {
+    const r = await fetch('/api/admin/releases/update', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: notesId, notes: $('notesText').value })
+    });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){ toast(d.detail || d.error || '保存失败'); return; }
+    toast('✅ 更新公告已保存');
+    closeNotes(); loadReleases();
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 /* ---------------- GitHub 自动更新 ---------------- */
 let ghPollTimer;
