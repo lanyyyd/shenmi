@@ -159,6 +159,52 @@ jobs:
           }
           Get-ChildItem "$env:GITHUB_WORKSPACE\publish\minecraft-mods"
 
+      - name: 构建 Forge 备份模组
+        shell: pwsh
+        working-directory: SteamEYA-Unified/minecraft/autobackup-forge
+        run: |
+          $targets = @(
+            @{ Mc = '1.21.1'; Forge = '52.1.21'; Min = '52'; Java = '21' },
+            @{ Mc = '1.20.1'; Forge = '47.4.29'; Min = '47'; Java = '17' }
+          )
+          foreach ($t in $targets) {
+            Write-Host "===== Forge MC $($t.Mc) ====="
+            .\gradlew.bat clean build --no-daemon --stacktrace `
+              "-Pminecraft_version=$($t.Mc)" "-Pforge_version=$($t.Forge)" `
+              "-Pforge_loader_min=$($t.Min)" "-Pjava_release=$($t.Java)" `
+              "-Parchives_base_name=autobackup-forge-$($t.Mc)"
+            if ($LASTEXITCODE -ne 0) { throw "Forge MC $($t.Mc) 模组构建失败" }
+            $jar = "build\libs\autobackup-forge-$($t.Mc).jar"
+            if (-not (Test-Path $jar)) { throw "模组 jar 未生成：$jar" }
+            Copy-Item $jar "$env:GITHUB_WORKSPACE\publish\minecraft-mods\" -Force
+          }
+
+      - name: 构建 NeoForge 备份模组
+        shell: pwsh
+        working-directory: SteamEYA-Unified/minecraft/autobackup-neoforge
+        run: |
+          # NeoForge 用动态补丁版本（21.1.+ / 21.4.+ / 21.8.+），由 Gradle 解析最新可用版本。
+          $targets = @(
+            @{ Mc = '1.21.8'; Neo = '21.8.+'; Min = '21.8' },
+            @{ Mc = '1.21.4'; Neo = '21.4.+'; Min = '21.4' },
+            @{ Mc = '1.21.1'; Neo = '21.1.+'; Min = '21.1' }
+          )
+          foreach ($t in $targets) {
+            Write-Host "===== NeoForge MC $($t.Mc) ====="
+            .\gradlew.bat clean build --no-daemon --stacktrace `
+              "-Pminecraft_version=$($t.Mc)" "-Pneoforge_version=$($t.Neo)" `
+              "-Pneoforge_min=$($t.Min)" "-Pjava_release=21" `
+              "-Parchives_base_name=autobackup-neoforge-$($t.Mc)"
+            if ($LASTEXITCODE -ne 0) { throw "NeoForge MC $($t.Mc) 模组构建失败" }
+            $jar = "build\libs\autobackup-neoforge-$($t.Mc).jar"
+            if (-not (Test-Path $jar)) { throw "模组 jar 未生成：$jar" }
+            Copy-Item $jar "$env:GITHUB_WORKSPACE\publish\minecraft-mods\" -Force
+          }
+
+      - name: 模组产物清单
+        shell: pwsh
+        run: Get-ChildItem "$env:GITHUB_WORKSPACE\publish\minecraft-mods" | Select-Object Name, Length
+
       # ---- 离线/局域网网关 + 网页聊天前端 ----
       # 客户端在离线模式会拉起本机网关（<安装目录>\gateway\steameya-gateway.exe），
       # 并由网关托管网页版聊天前端（<安装目录>\web）。两者都必须随安装包一起下发。

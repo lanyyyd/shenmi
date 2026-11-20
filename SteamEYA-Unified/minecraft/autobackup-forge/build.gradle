@@ -1,0 +1,48 @@
+plugins {
+    id 'net.minecraftforge.gradle' version '6.0.54'
+}
+
+version = project.mod_version
+group = project.maven_group
+base {
+    archivesName = project.archives_base_name
+}
+
+minecraft {
+    // Forge 使用 Mojang 官方映射，与 Fabric 的 Yarn 源码不共用。
+    mappings channel: 'official', version: project.minecraft_version
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${project.minecraft_version}-${project.forge_version}"
+}
+
+sourceSets {
+    main {
+        java.srcDir '../common/src/main/java'
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = project.java_release as int
+}
+
+processResources {
+    inputs.property 'mod_version', project.mod_version
+    inputs.property 'mc_version', project.minecraft_version
+    inputs.property 'forge_loader_min', project.forge_loader_min
+    filesMatching('META-INF/mods.toml') {
+        expand 'mod_version': project.mod_version,
+               'mc_version': project.minecraft_version,
+               'forge_loader_min': project.forge_loader_min
+    }
+}
+
+tasks.named('jar', Jar) {
+    archiveFileName = "${project.archives_base_name}.jar"
+}

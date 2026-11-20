@@ -1,0 +1,23 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+
+[[mods]]
+modId="autobackup"
+version="${mod_version}"
+displayName="Auto Backup"
+description='''自动备份世界存档：按本地时间定时打包，并按最新 3 份 + 昨天/三天前保留。'''
+
+[[dependencies.autobackup]]
+modId="neoforge"
+type="required"
+versionRange="[${neoforge_min},)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.autobackup]]
+modId="minecraft"
+type="required"
+versionRange="[${mc_version},)"
+ordering="NONE"
+side="BOTH"
