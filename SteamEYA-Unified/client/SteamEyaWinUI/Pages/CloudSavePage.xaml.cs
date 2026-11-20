@@ -689,22 +689,16 @@ public sealed partial class CloudSavePage : Page
         {
             var jarName = $"autobackup-{target.Loader}-{target.McVersion}.jar";
             var jarPath = Path.Combine(AppContext.BaseDirectory, "minecraft-mods", jarName);
-            if (!File.Exists(jarPath))
-            {
-                var available = Directory.Exists(Path.Combine(AppContext.BaseDirectory, "minecraft-mods"))
-                    ? string.Join("\n", Directory.GetFiles(
-                        Path.Combine(AppContext.BaseDirectory, "minecraft-mods"), "autobackup-*.jar")
-                        .Select(Path.GetFileName))
-                    : "（安装包未附带 minecraft-mods 目录）";
-                ShowInfo($"当前版本还没有对应的模组：{jarName}\n已附带：\n{available}",
-                    InfoBarSeverity.Error);
-                return;
-            }
+            // 安装包不再内置模组 jar，缺失时仍写好配置，提示用户手动放入。
+            var bundled = File.Exists(jarPath);
 
             var modsDir = Path.Combine(target.GameDir, "mods");
             Directory.CreateDirectory(modsDir);
             var installedJar = Path.Combine(modsDir, jarName);
-            File.Copy(jarPath, installedJar, overwrite: true);
+            if (bundled)
+            {
+                File.Copy(jarPath, installedJar, overwrite: true);
+            }
 
             var configDir = Path.Combine(target.GameDir, "config");
             Directory.CreateDirectory(configDir);
@@ -715,12 +709,31 @@ public sealed partial class CloudSavePage : Page
                 && !Directory.GetFiles(modsDir, "fabric-api*.jar").Any();
 
             var result = new StackPanel { Spacing = 8 };
-            result.Children.Add(new TextBlock
+            if (bundled)
             {
-                Text = $"已安装到：{installedJar}",
-                TextWrapping = TextWrapping.Wrap,
-                IsTextSelectionEnabled = true
-            });
+                result.Children.Add(new TextBlock
+                {
+                    Text = $"已安装到：{installedJar}",
+                    TextWrapping = TextWrapping.Wrap,
+                    IsTextSelectionEnabled = true
+                });
+            }
+            else
+            {
+                result.Children.Add(new TextBlock
+                {
+                    Text = $"安装包未内置 {jarName}，请手动下载后放到下面的目录：",
+                    TextWrapping = TextWrapping.Wrap
+                });
+                result.Children.Add(new TextBlock
+                {
+                    Text = modsDir,
+                    TextWrapping = TextWrapping.Wrap,
+                    IsTextSelectionEnabled = true,
+                    FontSize = 12,
+                    Foreground = SecondaryTextBrush()
+                });
+            }
             result.Children.Add(new TextBlock
             {
                 Text = $"配置：{configPath}",

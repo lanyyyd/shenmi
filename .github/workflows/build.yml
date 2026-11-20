@@ -80,15 +80,20 @@ jobs:
       - name: 环境信息
         run: dotnet --info
 
-      # 先做一次普通编译：XAML/C# 有错时能快速失败，不用等 AOT 全程
-      - name: Build (Release / x64)
-        id: build
-        continue-on-error: true
-        run: dotnet build "$env:PROJECT" -c Release -p:Platform=x64
+      # Native AOT + Windows App SDK 自包含：产物零运行时依赖
+      # 注入版本号：使程序集版本与安装包版本一致（客户端「检查更新」靠它比较新旧版本）
+      - name: Publish (Native AOT / self-contained)
+        shell: pwsh
+        run: |
+          # 版本从 1.0.0 起：以构建序号偏移，run_number=64 时得到 1.0.0，之后逐次 +1。
+          $patch = [Math]::Max(0, ${{ github.run_number }} - 64)
+          Write-Host "版本 1.0.$patch"
+          dotnet publish "$env:PROJECT" -c Release -r win-x64 -p:Platform=x64 -p:Version=1.0.$patch `
+            -p:DebugType=None -o publish
 
       # XAML 编译器 Pass2 失败时只会抛 WMC9999（信息被吞），真实错误在 output.json 里
       - name: 诊断 · 打印 XAML 编译器 output.json
-        if: always()
+        if: failure()
         shell: pwsh
         run: |
           $projDir = Split-Path $env:PROJECT
@@ -103,96 +108,6 @@ jobs:
             Get-ChildItem -Recurse "$projDir\obj" | Select-Object -ExpandProperty FullName
           }
 
-      - name: 构建失败则终止
-        if: steps.build.outcome != 'success'
-        shell: pwsh
-        run: |
-          Write-Error "dotnet build 失败，见上方日志"
-          exit 1
-
-      # Native AOT + Windows App SDK 自包含：产物零运行时依赖
-      # 注入版本号：使程序集版本与安装包版本一致（客户端「检查更新」靠它比较新旧版本）
-      - name: Publish (Native AOT / self-contained)
-        shell: pwsh
-        run: |
-          # 版本从 1.0.0 起：以构建序号偏移，run_number=64 时得到 1.0.0，之后逐次 +1。
-          $patch = [Math]::Max(0, ${{ github.run_number }} - 64)
-          Write-Host "版本 1.0.$patch"
-          dotnet publish "$env:PROJECT" -c Release -r win-x64 -p:Platform=x64 -p:Version=1.0.$patch -o publish
-
-      - name: 清理符号文件（省安装包体积）
-        shell: pwsh
-        run: Get-ChildItem -Path publish -Filter *.pdb -File -ErrorAction SilentlyContinue | Remove-Item -Force
-
-      # ---- 我的世界云存档模组（Fabric 1.21.1）----
-      # 客户端「自动备份」会把对应 jar 复制到用户选择的版本实例 mods/ 下。
-      # ForgeGradle 会给 MC 1.20.1 指定 Java 17 工具链，必须真的装一个 17，
-      # 否则反编译产物生成失败（mapped_official jar 找不到）。
-      - name: Setup JDK 17 (Forge 1.20.1)
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Setup JDK 21 (Minecraft mod)
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: 构建我的世界备份模组
-        shell: pwsh
-        working-directory: SteamEYA-Unified/minecraft/autobackup-mod
-        run: |
-          # 同一份源码按版本参数化构建，客户端按 autobackup-<loader>-<mc>.jar 匹配实例。
-          $targets = @(
-            @{ Mc = '1.21.8'; Yarn = '1.21.8+build.1'; Api = '0.136.1+1.21.8'; Java = '21' },
-            @{ Mc = '1.21.4'; Yarn = '1.21.4+build.8'; Api = '0.119.4+1.21.4'; Java = '21' },
-            @{ Mc = '1.21.1'; Yarn = '1.21.1+build.3'; Api = '0.116.18+1.21.1'; Java = '21' },
-            @{ Mc = '1.21';   Yarn = '1.21+build.9';   Api = '0.102.0+1.21';   Java = '21' },
-            @{ Mc = '1.20.4'; Yarn = '1.20.4+build.3'; Api = '0.97.3+1.20.4'; Java = '17' },
-            @{ Mc = '1.20.1'; Yarn = '1.20.1+build.10'; Api = '0.92.12+1.20.1'; Java = '17' }
-          )
-          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\publish\minecraft-mods" | Out-Null
-          foreach ($t in $targets) {
-            Write-Host "===== 构建 MC $($t.Mc) ====="
-            .\gradlew.bat clean build --no-daemon --stacktrace `
-              "-Pminecraft_version=$($t.Mc)" "-Pyarn_mappings=$($t.Yarn)" `
-              "-Pfabric_version=$($t.Api)" "-Pjava_release=$($t.Java)" "-Pjava_min=$($t.Java)" `
-              "-Parchives_base_name=autobackup-fabric-$($t.Mc)"
-            if ($LASTEXITCODE -ne 0) { throw "MC $($t.Mc) 模组构建失败" }
-            $jar = "build\libs\autobackup-fabric-$($t.Mc).jar"
-            if (-not (Test-Path $jar)) { throw "模组 jar 未生成：$jar" }
-            Copy-Item $jar "$env:GITHUB_WORKSPACE\publish\minecraft-mods\" -Force
-          }
-          Get-ChildItem "$env:GITHUB_WORKSPACE\publish\minecraft-mods"
-
-      - name: 构建 Forge 备份模组
-        shell: pwsh
-        working-directory: SteamEYA-Unified/minecraft/autobackup-forge
-        run: |
-          $targets = @(
-            @{ Mc = '1.21.1'; Forge = '52.1.21'; Min = '52'; Java = '21' },
-            @{ Mc = '1.20.1'; Forge = '47.4.29'; Min = '47'; Java = '17' }
-          )
-          foreach ($t in $targets) {
-            Write-Host "===== Forge MC $($t.Mc) ====="
-            $env:JAVA_HOME = if ($t.Java -eq '17') { $env:JAVA_HOME_17_X64 } else { $env:JAVA_HOME_21_X64 }
-            Write-Host "JAVA_HOME=$env:JAVA_HOME"
-            .\gradlew.bat clean build --no-daemon --stacktrace `
-              "-Pminecraft_version=$($t.Mc)" "-Pforge_version=$($t.Forge)" `
-              "-Pforge_loader_min=$($t.Min)" "-Pjava_release=$($t.Java)" `
-              "-Parchives_base_name=autobackup-forge-$($t.Mc)"
-            if ($LASTEXITCODE -ne 0) { throw "Forge MC $($t.Mc) 模组构建失败" }
-            $jar = "build\libs\autobackup-forge-$($t.Mc).jar"
-            if (-not (Test-Path $jar)) { throw "模组 jar 未生成：$jar" }
-            Copy-Item $jar "$env:GITHUB_WORKSPACE\publish\minecraft-mods\" -Force
-          }
-
-      - name: 模组产物清单
-        shell: pwsh
-        run: Get-ChildItem "$env:GITHUB_WORKSPACE\publish\minecraft-mods" | Select-Object Name, Length
-
       # ---- 离线/局域网网关 + 网页聊天前端 ----
       # 客户端在离线模式会拉起本机网关（<安装目录>\gateway\steameya-gateway.exe），
       # 并由网关托管网页版聊天前端（<安装目录>\web）。两者都必须随安装包一起下发。
@@ -201,11 +116,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: 构建本机网关（PyInstaller onefile）
+      - name: 构建本机网关 + 拷贝网页聊天前端
         shell: pwsh
         working-directory: SteamEYA-Unified/server
         run: |
-          python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pyinstaller
           python -m PyInstaller --noconfirm --clean --onefile --name steameya-gateway `
             --collect-submodules uvicorn --collect-submodules fastapi `
@@ -213,13 +127,9 @@ jobs:
           if (-not (Test-Path "dist\steameya-gateway.exe")) { throw "网关 exe 未生成" }
           New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\publish\gateway" | Out-Null
           Copy-Item "dist\steameya-gateway.exe" "$env:GITHUB_WORKSPACE\publish\gateway\" -Force
-
-      - name: 拷贝网页聊天前端（web → publish\web）
-        shell: pwsh
-        run: |
+          # 网关托管的网页前端也要单独放一份，供安装目录下直接打开/排查
           New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\publish\web" | Out-Null
-          Copy-Item "SteamEYA-Unified\web\*" "$env:GITHUB_WORKSPACE\publish\web\" -Recurse -Force
-          Get-ChildItem "$env:GITHUB_WORKSPACE\publish\web" | Select-Object -ExpandProperty Name
+          Copy-Item "..\web\*" "$env:GITHUB_WORKSPACE\publish\web\" -Recurse -Force
 
       # ---- 云游戏引擎（Selenium 本地服务）----
       # 客户端点开「云游戏上号」会拉起 <安装目录>\engine\steameya-engine.exe（见 EngineLauncher），
@@ -261,9 +171,9 @@ jobs:
 
           Get-ChildItem "publish\jiyu" | Select-Object Name, Length
 
-      # 体积诊断：安装包 50MB+ 时先看清构成，避免盲目裁剪。
+      # 体积诊断：只在手动触发时跑，日常构建不占时间。
       - name: 诊断 · 发布目录体积构成
-        if: always()
+        if: github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
           if (-not (Test-Path publish)) { Write-Host "publish 目录不存在"; exit 0 }
