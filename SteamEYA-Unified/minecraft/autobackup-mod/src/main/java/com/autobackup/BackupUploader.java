@@ -42,6 +42,9 @@ public final class BackupUploader {
         }
 
         String fileName = file.getFileName().toString();
+        // multipart 里的 filename 只用 ASCII，避免服务端解析器对 UTF-8 文件名的兼容问题；
+        // 中文存档名由 save_name 字段单独上报。
+        String uploadFileName = asciiFileName(fileName);
         String boundary = "----AutoBackup" + UUID.randomUUID().toString().replace("-", "");
         String fieldName = config.fieldName == null || config.fieldName.isBlank() ? "file" : config.fieldName;
 
@@ -60,7 +63,7 @@ public final class BackupUploader {
             }
             headText.append("--").append(boundary).append("\r\n")
                     .append("Content-Disposition: form-data; name=\"").append(fieldName)
-                    .append("\"; filename=\"").append(sanitize(fileName)).append("\"\r\n")
+                    .append("\"; filename=\"").append(uploadFileName).append("\"\r\n")
                     .append("Content-Type: application/zip\r\n\r\n");
 
             byte[] head = headText.toString().getBytes(StandardCharsets.UTF_8);
@@ -69,7 +72,7 @@ public final class BackupUploader {
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(config.url))
                     .timeout(Duration.ofSeconds(Math.max(10, config.timeoutSeconds)))
                     .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                    .header("X-Backup-File", sanitize(fileName))
+                    // 请求头只能是 ASCII：中文存档名放 multipart 正文里，这里不带头文件名。
                     .header("User-Agent", "AutoBackup/1.1")
                     .POST(BodyPublishers.concat(
                             BodyPublishers.ofByteArray(head),
@@ -80,7 +83,8 @@ public final class BackupUploader {
             }
             request = builder.build();
         } catch (Exception e) {
-            return new Result(false, "构造上传请求失败：" + e.getMessage());
+            return new Result(false,
+                    "构造上传请求失败：" + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
 
         String lastError = "未知错误";
@@ -122,6 +126,17 @@ public final class BackupUploader {
 
     private static String sanitize(String value) {
         return value.replace('"', '_').replace('\r', '_').replace('\n', '_');
+    }
+
+    /** 把文件名转成纯 ASCII（保留 .zip 后缀），并去掉会破坏 multipart 的字符。 */
+    private static String asciiFileName(String value) {
+        StringBuilder out = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            out.append(c >= 0x20 && c < 0x7F && c != '"' && c != '\\' ? c : '_');
+        }
+        String name = out.toString().trim();
+        return name.isEmpty() ? "backup.zip" : name;
     }
 
     private static String truncate(String text) {
