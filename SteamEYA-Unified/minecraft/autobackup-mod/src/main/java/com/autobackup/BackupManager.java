@@ -3,6 +3,7 @@ package com.autobackup;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.text.Text;
 import net.minecraft.util.WorldSavePath;
 import org.slf4j.Logger;
 
@@ -72,6 +73,10 @@ public final class BackupManager {
     private volatile long lastSuccessMillis;
     private volatile long lastResultMillis;
     private volatile String lastResult = "尚未备份";
+    /** 上传进度：起始时间、上次聊天播报时间、当前存档标签。 */
+    private volatile long uploadStartMillis;
+    private volatile long uploadLastReportMillis;
+    private volatile String uploadLabel = "";
     /** 已执行过的定时槽位，key = 日期#槽位下标。 */
     private final Set<String> ranSlots = new HashSet<>();
 
@@ -312,15 +317,22 @@ public final class BackupManager {
                 applyRetention();
                 if (config.upload.enabled) {
                     LOGGER.info("开始上传备份 {} -> {}", result.file().getFileName(), config.upload.url);
+                    uploadLabel = finalSaveName + (versionName.isBlank() ? "" : "（" + versionName + "）");
+                    uploadStartMillis = System.currentTimeMillis();
+                    uploadLastReportMillis = uploadStartMillis;
+                    broadcastAll(server, "开始上传存档 " + uploadLabel + "（" + formatBytes(result.bytes()) + "）");
                     BackupUploader.Metadata meta = new BackupUploader.Metadata(
                             versionName, gameVersion, finalSaveName, worldName, finalSavePath, now);
-                    BackupUploader.Result upload = BackupUploader.upload(config.upload, result.file(), meta);
+                    BackupUploader.Result upload = BackupUploader.upload(config.upload, result.file(), meta,
+                            (sent, total) -> reportUploadProgress(server, sent, total));
                     if (upload.success()) {
                         LOGGER.info("备份上传成功: {}", upload.message());
+                        broadcastAll(server, "存档 " + uploadLabel + " 上传成功");
                         result = new BackupResult(true,
                                 result.message() + "，上传成功", result.file(), result.bytes());
                     } else {
                         LOGGER.warn("备份上传失败: {}", upload.message());
+                        broadcastAll(server, "存档 " + uploadLabel + " 上传失败：" + upload.message());
                         result = new BackupResult(true,
                                 result.message() + "，上传失败（" + upload.message() + "）",
                                 result.file(), result.bytes());
@@ -526,6 +538,52 @@ public final class BackupManager {
             server.execute(() -> callback.accept(result));
         } catch (Throwable t) {
             LOGGER.debug("无法发送备份结果: {}", t.getMessage());
+        }
+    }
+
+    /** 每 3 秒往聊天框播报一次上传进度、速度与预计剩余时间。 */
+    private void reportUploadProgress(MinecraftServer server, long sent, long total) {
+        long now = System.currentTimeMillis();
+        if (now - uploadLastReportMillis < 3000L) {
+            return;
+        }
+        uploadLastReportMillis = now;
+
+        long elapsed = Math.max(1L, now - uploadStartMillis);
+        double speed = sent * 1000.0 / elapsed;
+        double percent = total <= 0 ? 0 : Math.min(100.0, sent * 100.0 / total);
+        long remaining = Math.max(0L, total - sent);
+        long etaSeconds = speed < 1 ? 0 : (long) Math.ceil(remaining / speed);
+
+        broadcastAll(server, String.format("上传中 %s：%.1f%% · %s/s · 剩余 %s",
+                uploadLabel, percent, formatBytes((long) speed), formatEta(etaSeconds)));
+    }
+
+    private static String formatEta(long seconds) {
+        if (seconds <= 0) {
+            return "即将完成";
+        }
+        if (seconds < 60) {
+            return seconds + " 秒";
+        }
+        return (seconds / 60) + " 分 " + (seconds % 60) + " 秒";
+    }
+
+    /** 广播到所有玩家聊天框；没有玩家在线时只写日志。 */
+    private void broadcastAll(MinecraftServer server, String message) {
+        if (server == null) {
+            return;
+        }
+        try {
+            server.execute(() -> {
+                try {
+                    server.getPlayerManager().broadcast(Text.literal("[AutoBackup] " + message), false);
+                } catch (Throwable t) {
+                    LOGGER.debug("发送备份进度到聊天框失败: {}", t.getMessage());
+                }
+            });
+        } catch (Throwable t) {
+            LOGGER.debug("无法调度备份进度消息: {}", t.getMessage());
         }
     }
 

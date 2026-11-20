@@ -1,21 +1,21 @@
 package com.autobackup;
 
+import java.io.BufferedOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.net.http.HttpRequest.BodyPublishers;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.UUID;
 
 public final class BackupUploader {
-    private static final HttpClient CLIENT = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(15))
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
+    /** 上传进度回调：已发送字节 / 总字节。 */
+    public interface ProgressListener {
+        void onProgress(long sentBytes, long totalBytes);
+    }
 
     public record Result(boolean success, String message) {
     }
@@ -30,10 +30,15 @@ public final class BackupUploader {
     }
 
     public static Result upload(BackupConfig.Upload config, Path file) {
-        return upload(config, file, null);
+        return upload(config, file, null, null);
     }
 
     public static Result upload(BackupConfig.Upload config, Path file, Metadata meta) {
+        return upload(config, file, meta, null);
+    }
+
+    public static Result upload(BackupConfig.Upload config, Path file, Metadata meta,
+                                ProgressListener listener) {
         if (config == null || config.url == null || config.url.isBlank()) {
             return new Result(false, "未配置上传地址");
         }
@@ -41,15 +46,17 @@ public final class BackupUploader {
             return new Result(false, "备份文件不存在");
         }
 
-        String fileName = file.getFileName().toString();
-        // multipart 里的 filename 只用 ASCII，避免服务端解析器对 UTF-8 文件名的兼容问题；
-        // 中文存档名由 save_name 字段单独上报。
-        String uploadFileName = asciiFileName(fileName);
+        byte[] head;
+        byte[] tail;
+        long fileSize;
         String boundary = "----AutoBackup" + UUID.randomUUID().toString().replace("-", "");
-        String fieldName = config.fieldName == null || config.fieldName.isBlank() ? "file" : config.fieldName;
-
-        HttpRequest request;
         try {
+            String fileName = file.getFileName().toString();
+            // multipart 里的 filename 只用 ASCII，中文存档名由 save_name 字段单独上报。
+            String uploadFileName = asciiFileName(fileName);
+            String fieldName = config.fieldName == null || config.fieldName.isBlank()
+                    ? "file" : config.fieldName;
+
             StringBuilder headText = new StringBuilder();
             appendField(headText, boundary, "username", config.username);
             appendField(headText, boundary, "game", config.game);
@@ -66,38 +73,25 @@ public final class BackupUploader {
                     .append("\"; filename=\"").append(uploadFileName).append("\"\r\n")
                     .append("Content-Type: application/zip\r\n\r\n");
 
-            byte[] head = headText.toString().getBytes(StandardCharsets.UTF_8);
-            byte[] tail = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
-
-            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(config.url))
-                    .timeout(Duration.ofSeconds(Math.max(10, config.timeoutSeconds)))
-                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                    // 请求头只能是 ASCII：中文存档名放 multipart 正文里，这里不带头文件名。
-                    .header("User-Agent", "AutoBackup/1.1")
-                    .POST(BodyPublishers.concat(
-                            BodyPublishers.ofByteArray(head),
-                            BodyPublishers.ofFile(file),
-                            BodyPublishers.ofByteArray(tail)));
-            if (config.token != null && !config.token.isBlank()) {
-                builder.header("Authorization", "Bearer " + config.token);
-            }
-            request = builder.build();
+            head = headText.toString().getBytes(StandardCharsets.UTF_8);
+            tail = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
+            fileSize = Files.size(file);
         } catch (Exception e) {
             return new Result(false,
                     "构造上传请求失败：" + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
 
+        long total = head.length + fileSize + tail.length;
         String lastError = "未知错误";
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
-                HttpResponse<String> response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
-                int code = response.statusCode();
-                if (code >= 200 && code < 300) {
-                    return new Result(true, "HTTP " + code);
+                Result result = sendOnce(config, file, boundary, head, tail, total, listener);
+                if (result.success()) {
+                    return result;
                 }
-                lastError = "HTTP " + code
-                        + (response.body().isBlank() ? "" : "：" + truncate(response.body()));
-                if (code < 500) {
+                lastError = result.message();
+                // 4xx 是请求或鉴权问题，重试无意义
+                if (lastError.startsWith("HTTP 4")) {
                     break;
                 }
             } catch (InterruptedException e) {
@@ -116,6 +110,71 @@ public final class BackupUploader {
             }
         }
         return new Result(false, lastError);
+    }
+
+    private static Result sendOnce(BackupConfig.Upload config, Path file, String boundary,
+                                   byte[] head, byte[] tail, long total,
+                                   ProgressListener listener) throws IOException, InterruptedException {
+        HttpURLConnection connection = (HttpURLConnection) URI.create(config.url).toURL().openConnection();
+        connection.setRequestMethod("POST");
+        connection.setConnectTimeout(15_000);
+        connection.setReadTimeout(Math.max(10, config.timeoutSeconds) * 1000);
+        connection.setDoOutput(true);
+        // 固定长度流式上传：不整包读入内存，且能精确计算进度与速度。
+        connection.setFixedLengthStreamingMode(total);
+        connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+        connection.setRequestProperty("User-Agent", "AutoBackup/1.1");
+        if (config.token != null && !config.token.isBlank()) {
+            connection.setRequestProperty("Authorization", "Bearer " + config.token);
+        }
+
+        long sent = 0;
+        try (OutputStream out = new BufferedOutputStream(connection.getOutputStream(), 64 * 1024)) {
+            out.write(head);
+            sent += head.length;
+            notifyProgress(listener, sent, total);
+
+            byte[] buffer = new byte[64 * 1024];
+            try (InputStream in = Files.newInputStream(file)) {
+                int read;
+                while ((read = in.read(buffer)) > 0) {
+                    if (Thread.currentThread().isInterrupted()) {
+                        throw new InterruptedException();
+                    }
+                    out.write(buffer, 0, read);
+                    sent += read;
+                    notifyProgress(listener, sent, total);
+                }
+            }
+            out.write(tail);
+            sent += tail.length;
+            notifyProgress(listener, sent, total);
+        }
+
+        int code = connection.getResponseCode();
+        InputStream stream = code >= 400 ? connection.getErrorStream() : connection.getInputStream();
+        String body = "";
+        if (stream != null) {
+            try (InputStream in = stream) {
+                body = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+        }
+        if (code >= 200 && code < 300) {
+            return new Result(true, "HTTP " + code);
+        }
+        return new Result(false, "HTTP " + code
+                + (body.isBlank() ? "" : "：" + truncate(body)));
+    }
+
+    private static void notifyProgress(ProgressListener listener, long sent, long total) {
+        if (listener == null) {
+            return;
+        }
+        try {
+            listener.onProgress(sent, total);
+        } catch (Throwable ignored) {
+            // 进度回报不能影响上传本身
+        }
     }
 
     private static void appendField(StringBuilder out, String boundary, String name, String value) {

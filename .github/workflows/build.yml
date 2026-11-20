@@ -138,17 +138,22 @@ jobs:
         run: |
           # 同一份源码按版本参数化构建，客户端按 autobackup-<loader>-<mc>.jar 匹配实例。
           $targets = @(
-            @{ Mc = '1.21.1'; Yarn = '1.21.1+build.3'; Api = '0.116.18+1.21.1'; Jar = 'autobackup-fabric-1.21.1' },
-            @{ Mc = '1.21';   Yarn = '1.21+build.9';   Api = '0.102.0+1.21';   Jar = 'autobackup-fabric-1.21' }
+            @{ Mc = '1.21.8'; Yarn = '1.21.8+build.1'; Api = '0.136.1+1.21.8'; Java = '21' },
+            @{ Mc = '1.21.4'; Yarn = '1.21.4+build.8'; Api = '0.119.4+1.21.4'; Java = '21' },
+            @{ Mc = '1.21.1'; Yarn = '1.21.1+build.3'; Api = '0.116.18+1.21.1'; Java = '21' },
+            @{ Mc = '1.21';   Yarn = '1.21+build.9';   Api = '0.102.0+1.21';   Java = '21' },
+            @{ Mc = '1.20.4'; Yarn = '1.20.4+build.3'; Api = '0.97.3+1.20.4'; Java = '17' },
+            @{ Mc = '1.20.1'; Yarn = '1.20.1+build.10'; Api = '0.92.12+1.20.1'; Java = '17' }
           )
           New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\publish\minecraft-mods" | Out-Null
           foreach ($t in $targets) {
             Write-Host "===== 构建 MC $($t.Mc) ====="
             .\gradlew.bat clean build --no-daemon --stacktrace `
               "-Pminecraft_version=$($t.Mc)" "-Pyarn_mappings=$($t.Yarn)" `
-              "-Pfabric_version=$($t.Api)" "-Parchives_base_name=$($t.Jar)"
+              "-Pfabric_version=$($t.Api)" "-Pjava_release=$($t.Java)" "-Pjava_min=$($t.Java)" `
+              "-Parchives_base_name=autobackup-fabric-$($t.Mc)"
             if ($LASTEXITCODE -ne 0) { throw "MC $($t.Mc) 模组构建失败" }
-            $jar = "build\libs\$($t.Jar).jar"
+            $jar = "build\libs\autobackup-fabric-$($t.Mc).jar"
             if (-not (Test-Path $jar)) { throw "模组 jar 未生成：$jar" }
             Copy-Item $jar "$env:GITHUB_WORKSPACE\publish\minecraft-mods\" -Force
           }

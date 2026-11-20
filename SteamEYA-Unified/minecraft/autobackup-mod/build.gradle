@@ -28,15 +28,19 @@ dependencies {
 processResources {
     inputs.property "version", project.version
     inputs.property "minecraft_version", project.minecraft_version
+    inputs.property "java_min", project.java_min
     filesMatching("fabric.mod.json") {
-        // 版本由 -P 参数注入：同一份源码可分别构建 1.21 / 1.21.1 等实例。
+        // 版本由 -P 参数注入：同一份源码可分别构建 1.20.x / 1.21.x 等实例。
         expand "version": project.version,
-               "minecraft_version": project.minecraft_version
+               "minecraft_version": project.minecraft_version,
+               "java_min": project.java_min
     }
 }
 
+def targetJava = (project.findProperty('java_release') ?: '21').toString() as int
+
 tasks.withType(JavaCompile).configureEach {
-    it.options.release = 21
+    it.options.release = targetJava
     it.options.encoding = 'UTF-8'
 }
 
@@ -44,8 +48,8 @@ java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
     }
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
+    sourceCompatibility = JavaVersion.toVersion(targetJava)
+    targetCompatibility = JavaVersion.toVersion(targetJava)
 }
 
 jar {
