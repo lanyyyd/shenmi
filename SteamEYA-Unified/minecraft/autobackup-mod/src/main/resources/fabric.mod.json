@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "autobackup",
+  "version": "${version}",
+  "name": "Auto Backup",
+  "description": "自动/手动备份世界存档，按本地时间定时上传，并按最新 3 份 + 昨天/三天前保留。",
+  "authors": [
+    "AutoBackup"
+  ],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.autobackup.AutoBackupMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "fabric-api": "*",
+    "minecraft": "1.21.1",
+    "java": ">=21"
+  }
+}

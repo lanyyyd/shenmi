@@ -12,6 +12,7 @@ on:
       - 'SteamEYA-Unified/web/**'
       - 'SteamEYA-Unified/engine/**'
       - 'SteamEYA-Unified/native/**'
+      - 'SteamEYA-Unified/minecraft/**'
       - 'SteamEYA-Unified/build/**'
       - 'build/installer/**'
       - 'third_party/JiYuTrainer/**'
@@ -23,6 +24,7 @@ on:
       - 'SteamEYA-Unified/web/**'
       - 'SteamEYA-Unified/engine/**'
       - 'SteamEYA-Unified/native/**'
+      - 'SteamEYA-Unified/minecraft/**'
       - 'SteamEYA-Unified/build/**'
       - 'build/installer/**'
       - 'third_party/JiYuTrainer/**'
@@ -121,6 +123,25 @@ jobs:
       - name: 清理符号文件（省安装包体积）
         shell: pwsh
         run: Get-ChildItem -Path publish -Filter *.pdb -File -ErrorAction SilentlyContinue | Remove-Item -Force
+
+      # ---- 我的世界云存档模组（Fabric 1.21.1）----
+      # 客户端「自动备份」会把对应 jar 复制到用户选择的版本实例 mods/ 下。
+      - name: Setup JDK 21 (Minecraft mod)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: 构建我的世界备份模组
+        shell: pwsh
+        working-directory: SteamEYA-Unified/minecraft/autobackup-mod
+        run: |
+          .\gradlew.bat build --no-daemon --stacktrace
+          $jar = "build\libs\autobackup-fabric-1.21.1.jar"
+          if (-not (Test-Path $jar)) { throw "模组 jar 未生成：$jar" }
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\publish\minecraft-mods" | Out-Null
+          Copy-Item $jar "$env:GITHUB_WORKSPACE\publish\minecraft-mods\" -Force
+          Get-ChildItem "$env:GITHUB_WORKSPACE\publish\minecraft-mods"
 
       # ---- 离线/局域网网关 + 网页聊天前端 ----
       # 客户端在离线模式会拉起本机网关（<安装目录>\gateway\steameya-gateway.exe），

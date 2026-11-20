@@ -263,7 +263,13 @@ CREATE TABLE IF NOT EXISTS cloud_saves (
     file_size  INTEGER DEFAULT 0,
     shared     INTEGER DEFAULT 0,
     shared_at  INTEGER,
-    source     TEXT DEFAULT 'auto',           -- auto / drag
+    source     TEXT DEFAULT 'auto',           -- auto / drag / mod
+    game_version TEXT DEFAULT '',             -- 游戏版本，如 1.21.1
+    version_name TEXT DEFAULT '',             -- 整合包/版本实例名
+    save_name  TEXT DEFAULT '',               -- 世界显示名，如「新的世界」
+    save_folder TEXT DEFAULT '',              -- 世界文件夹名，如 11100-back
+    save_path  TEXT DEFAULT '',               -- 备份时的完整存档路径
+    saved_at   INTEGER,                       -- 备份时间（区别于 created_at 上传时间）
     created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_save_user ON cloud_saves(user_id, game);
@@ -660,6 +666,19 @@ def init_db() -> None:
         # 内置游戏本来就该对所有人可见。
         with cursor() as cur:
             cur.execute("UPDATE save_games SET visible=1 WHERE game_key IN ('pvz','pvzhybrid','minecraft')")
+
+    # 兼容旧库：云存档补充我的世界模组上传的元数据。
+    scols = {row["name"] for row in query_all("PRAGMA table_info(cloud_saves)")}
+    for _name, _ddl in (
+        ("game_version", "ALTER TABLE cloud_saves ADD COLUMN game_version TEXT DEFAULT ''"),
+        ("version_name", "ALTER TABLE cloud_saves ADD COLUMN version_name TEXT DEFAULT ''"),
+        ("save_name", "ALTER TABLE cloud_saves ADD COLUMN save_name TEXT DEFAULT ''"),
+        ("save_folder", "ALTER TABLE cloud_saves ADD COLUMN save_folder TEXT DEFAULT ''"),
+        ("save_path", "ALTER TABLE cloud_saves ADD COLUMN save_path TEXT DEFAULT ''"),
+        ("saved_at", "ALTER TABLE cloud_saves ADD COLUMN saved_at INTEGER"),
+    ):
+        if scols and _name not in scols:
+            execute(_ddl)
 
     # 兼容旧库：cloud_cookies 唯一键 (user_id, game) → (user_id, game, game_uid)，
     # 支持同一用户在同一游戏下保存多个账号（按 UID 区分）。

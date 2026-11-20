@@ -8,7 +8,10 @@
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import pathlib
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -17,7 +20,7 @@ from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException,
 from fastapi.responses import FileResponse
 
 from .. import security
-from ..config import DATA_DIR
+from ..config import DATA_DIR, SECRET_KEY
 from ..db import execute, query_all, query_one
 from ..deps import get_current_user, resolve_user
 
@@ -25,6 +28,13 @@ router = APIRouter(prefix="/api/save", tags=["save"])
 
 SAVE_DIR = DATA_DIR / "saves"
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
+
+# 我的世界模组专用上传口令：只能上传 minecraft 存档，不能读/删别人的数据。
+MOD_UPLOAD_TOKEN = "wdsjycd"
+# 模组上传的存档保留：最新 3 份 + 昨天最新 1 份 + 三天前最新 1 份。
+MOD_KEEP_LATEST = 3
+# 签名下载地址有效期（秒）：多线程分片下载大存档可能需要较长时间。
+DOWNLOAD_URL_TTL = 3600
 
 BUILTIN_GAMES = {"pvz": "植物大战僵尸", "pvzhybrid": "植物大战僵尸杂交版新版", "minecraft": "我的世界"}
 GAMES = BUILTIN_GAMES
@@ -75,7 +85,82 @@ def _item(row, owner_name: str = "") -> dict:
         "size": row["file_size"], "fileName": row["file_name"], "shared": bool(row["shared"]),
         "sharedAt": row["shared_at"], "createdAt": row["created_at"],
         "ownerId": row["user_id"], "ownerName": owner_name,
+        "source": row["source"] or "auto",
+        "gameVersion": row["game_version"] or "",
+        "versionName": row["version_name"] or "",
+        "saveName": row["save_name"] or "",
+        "saveFolder": row["save_folder"] or "",
+        "savePath": row["save_path"] or "",
+        # 老存档没有 saved_at，退回上传时间
+        "savedAt": row["saved_at"] or row["created_at"],
     }
+
+
+def _download_sig(save_id: int, exp: int) -> str:
+    return hmac.new(
+        SECRET_KEY.encode(), f"save-download:{save_id}:{exp}".encode(), hashlib.sha256
+    ).hexdigest()
+
+
+def _safe_zip_name(row) -> str:
+    base = row["save_name"] or row["name"] or "save"
+    if row["version_name"]:
+        base += f"_{row['version_name']}"
+    ts = row["saved_at"] or row["created_at"]
+    base += "_" + datetime.fromtimestamp(ts / 1000, _TZ).strftime("%Y%m%d-%H%M%S")
+    for ch in '\\/:*?"<>|\r\n':
+        base = base.replace(ch, "_")
+    return base[:120] + ".zip"
+
+
+def _can_access_save(row, user: dict) -> bool:
+    return row["user_id"] == user["id"] or bool(row["shared"]) or bool(user.get("is_admin"))
+
+
+def _mod_user(username: str):
+    name = (username or "").strip()[:64]
+    if not name:
+        return None
+    return query_one("SELECT * FROM users WHERE username=? AND is_active=1", (name,))
+
+
+def _prune_mod_saves(user_id: int, version_name: str, save_name: str) -> None:
+    """模组存档保留：最新 3 份 + 昨天最新 1 份 + 三天前最新 1 份（去重）。"""
+    rows = query_all(
+        "SELECT id, file_path, COALESCE(saved_at, created_at) AS ts "
+        "FROM cloud_saves WHERE user_id=? AND game='minecraft' AND source='mod' "
+        "AND version_name=? AND save_name=? ORDER BY ts DESC, id DESC",
+        (user_id, version_name, save_name),
+    )
+    if len(rows) <= MOD_KEEP_LATEST:
+        return
+
+    keep = {r["id"] for r in rows[:MOD_KEEP_LATEST]}
+    today = datetime.now(_TZ).date()
+    for days in (1, 3):
+        target = today - timedelta(days=days)
+        for r in rows:
+            if r["id"] in keep:
+                continue
+            if datetime.fromtimestamp(r["ts"] / 1000, _TZ).date() == target:
+                keep.add(r["id"])
+                break
+
+    for r in rows:
+        if r["id"] in keep:
+            continue
+        try:
+            pathlib.Path(r["file_path"]).unlink(missing_ok=True)
+        except Exception:
+            pass
+        execute("DELETE FROM cloud_saves WHERE id = ?", (r["id"],))
+
+
+def _mod_token_ok(authorization: Optional[str]) -> bool:
+    raw = (authorization or "").strip()
+    if raw.lower().startswith("bearer "):
+        raw = raw[7:].strip()
+    return bool(raw) and hmac.compare_digest(raw, MOD_UPLOAD_TOKEN)
 
 
 @router.get("/games")
@@ -199,14 +284,70 @@ async def upload(game: str = Form(...), file: UploadFile = File(...),
     return {"ok": True, "save": _item(row, user["nickname"] or user["username"])}
 
 
+@router.post("/mod/upload")
+async def mod_upload(
+    file: UploadFile = File(...),
+    username: str = Form(""),
+    version_name: str = Form(""),
+    game_version: str = Form(""),
+    save_name: str = Form(""),
+    save_folder: str = Form(""),
+    save_path: str = Form(""),
+    saved_at: int = Form(0),
+    authorization: Optional[str] = Header(default=None),
+):
+    """我的世界 Autobackup 模组专用上传：固定口令鉴权，只能写 minecraft 存档。"""
+    if not _mod_token_ok(authorization):
+        return {"ok": False, "msg": "上传口令无效"}
+    user = _mod_user(username)
+    if not user:
+        return {"ok": False, "msg": f"用户不存在：{username}"}
+
+    fname = file.filename or ""
+    if pathlib.Path(fname).suffix.lower() != ".zip":
+        return {"ok": False, "msg": "仅支持 .zip 存档"}
+    data = await file.read()
+    if not data:
+        return {"ok": False, "msg": "文件为空"}
+
+    _seed_games()
+    now = security.now_ms()
+    saved_ms = int(saved_at) if int(saved_at) > 0 else now
+    version = version_name.strip()[:120]
+    world = save_name.strip()[:120]
+    folder = save_folder.strip()[:120]
+    item_name = world or folder or _default_name(saved_ms)
+
+    safe_id = uuid.uuid4().hex
+    rel = f"{user['id']}/minecraft/{safe_id}.zip"
+    abs_path = SAVE_DIR / rel
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    abs_path.write_bytes(data)
+
+    sid = execute(
+        "INSERT INTO cloud_saves (user_id, game, name, remark, file_path, file_name, file_size, "
+        "shared, source, game_version, version_name, save_name, save_folder, save_path, saved_at, "
+        "created_at) VALUES (?,?,?,?,?,?,?,0,'mod',?,?,?,?,?,?,?)",
+        (user["id"], "minecraft", item_name, "", str(abs_path), fname[:200], len(data),
+         game_version.strip()[:40], version, world, folder, save_path.strip()[:400], saved_ms, now),
+    )
+    execute("UPDATE save_games SET visible=1 WHERE game_key='minecraft' AND visible=0")
+    _prune_mod_saves(user["id"], version, world)
+
+    row = query_one("SELECT * FROM cloud_saves WHERE id = ?", (sid,))
+    return {"ok": True, "save": _item(row, user["nickname"] or user["username"])}
+
+
 @router.get("/list")
 def list_saves(game: str = "pvz", request: Request = None,
                authorization: Optional[str] = Header(default=None)):
     user = resolve_user(request, authorization)
     if not user:
         return {"ok": False, "msg": "未登录"}
-    rows = query_all("SELECT * FROM cloud_saves WHERE user_id=? AND game=? ORDER BY created_at DESC",
-                     (user["id"], game))
+    rows = query_all(
+        "SELECT * FROM cloud_saves WHERE user_id=? AND game=? "
+        "ORDER BY COALESCE(saved_at, created_at) DESC, id DESC",
+        (user["id"], game))
     return {"ok": True, "saves": [_item(r) for r in rows]}
 
 
@@ -219,24 +360,51 @@ def list_shared(game: str = "pvz", request: Request = None,
     rows = query_all(
         "SELECT s.*, COALESCE(NULLIF(u.nickname,''), u.username) AS owner_name "
         "FROM cloud_saves s JOIN users u ON u.id = s.user_id "
-        "WHERE s.game=? AND s.shared=1 ORDER BY s.shared_at DESC, s.created_at DESC", (game,))
+        "WHERE s.game=? AND s.shared=1 "
+        "ORDER BY COALESCE(s.saved_at, s.created_at) DESC, s.id DESC", (game,))
     return {"ok": True, "saves": [_item(r, r["owner_name"]) for r in rows]}
 
 
-@router.get("/download")
-def download(id: int, request: Request = None, authorization: Optional[str] = Header(default=None)):
+@router.get("/download-url")
+def download_url(id: int, request: Request = None,
+                 authorization: Optional[str] = Header(default=None)):
+    """给多线程下载器用的临时签名地址（1 小时有效）。"""
     user = resolve_user(request, authorization)
     if not user:
         return {"ok": False, "msg": "未登录"}
     row = query_one("SELECT * FROM cloud_saves WHERE id = ?", (id,))
     if not row:
         return {"ok": False, "msg": "存档不存在"}
-    if row["user_id"] != user["id"] and not row["shared"] and not user.get("is_admin"):
+    if not _can_access_save(row, user):
         return {"ok": False, "msg": "无权下载该存档"}
+
+    exp = int(time.time()) + DOWNLOAD_URL_TTL
+    return {
+        "ok": True,
+        "url": f"/api/save/download?id={id}&exp={exp}&sig={_download_sig(id, exp)}",
+        "expires": exp,
+    }
+
+
+@router.get("/download")
+def download(id: int, exp: int = 0, sig: str = "", request: Request = None,
+             authorization: Optional[str] = Header(default=None)):
+    row = query_one("SELECT * FROM cloud_saves WHERE id = ?", (id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="存档不存在")
+
+    signed = exp > int(time.time()) and bool(sig) and hmac.compare_digest(sig, _download_sig(id, exp))
+    if not signed:
+        user = resolve_user(request, authorization)
+        if not user:
+            raise HTTPException(status_code=401, detail="未登录")
+        if not _can_access_save(row, user):
+            raise HTTPException(status_code=403, detail="无权下载该存档")
+
     p = pathlib.Path(row["file_path"])
     if not p.exists():
-        return {"ok": False, "msg": "存档文件已丢失"}
-    return FileResponse(str(p), media_type="application/zip", filename=f"{row['name']}.zip")
+        raise HTTPException(status_code=404, detail="存档文件已丢失")
+    return FileResponse(str(p), media_type="application/zip", filename=_safe_zip_name(row))
 
 
 @router.post("/remark")

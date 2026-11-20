@@ -126,6 +126,45 @@ internal sealed class CloudSaveService
         return (true, null);
     }
 
+    /// <summary>获取带签名的临时下载地址（1 小时有效，供多线程下载器使用）。</summary>
+    public async Task<CloudSaveDownloadUrlDto> DownloadUrlAsync(int id, CancellationToken ct = default)
+    {
+        using var req = NewRequest(HttpMethod.Get, $"/api/save/download-url?id={id}");
+        return await SendJsonAsync(req, CloudSaveJsonContext.Default.CloudSaveDownloadUrlDto, ct);
+    }
+
+    /// <summary>
+    /// 多线程下载存档到指定目录，返回实际下载到的文件路径。
+    /// 存档 zip 通常较大，走 DownloadEngine 的 8 线程分段 + 断点续传。
+    /// </summary>
+    public async Task<(bool ok, string? path, string? msg)> DownloadFastAsync(
+        int id, string directory, CancellationToken ct = default)
+    {
+        try
+        {
+            var dto = await DownloadUrlAsync(id, ct);
+            if (!dto.Ok || string.IsNullOrWhiteSpace(dto.Url))
+            {
+                return (false, null, dto.Msg ?? "获取下载地址失败");
+            }
+
+            var absolute = dto.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                ? dto.Url
+                : Url(dto.Url);
+            var engine = new DownloadEngine(absolute, directory, 8);
+            await engine.RunAsync();
+            if (engine.Status == DownloadStatus.Completed && !string.IsNullOrWhiteSpace(engine.TargetPath))
+            {
+                return (true, engine.TargetPath, null);
+            }
+            return (false, null, engine.Error ?? "下载失败");
+        }
+        catch (Exception ex)
+        {
+            return (false, null, ex.Message);
+        }
+    }
+
     public async Task<CloudSaveActionDto> SetRemarkAsync(int id, string remark, CancellationToken ct = default)
     {
         var body = JsonSerializer.Serialize(new CloudSaveRemarkRequest { Id = id, Remark = remark },

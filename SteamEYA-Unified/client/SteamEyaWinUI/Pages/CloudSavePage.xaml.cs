@@ -1,5 +1,9 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO.Compression;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -25,6 +29,7 @@ public sealed partial class CloudSavePage : Page
 
     private readonly CloudSaveService _service = new();
     private readonly ObservableCollection<CloudSaveItem> _mySaves = [];
+    private readonly ObservableCollection<CloudSaveGroup> _myGroups = [];
     private readonly ObservableCollection<CloudSaveItem> _sharedSaves = [];
 
     private static readonly (string Key, string Name)[] BuiltinGames =
@@ -49,6 +54,7 @@ public sealed partial class CloudSavePage : Page
     {
         InitializeComponent();
         MyList.ItemsSource = _mySaves;
+        MyGroupedList.ItemsSource = _myGroups;
         SharedList.ItemsSource = _sharedSaves;
         BuildGameCombo();
         UpdateAutoBackupState();
@@ -249,6 +255,8 @@ public sealed partial class CloudSavePage : Page
             {
                 _mySaves.Add(item);
             }
+
+            RebuildMinecraftGroups();
             MyEmptyText.Visibility = _mySaves.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
             var shared = await _service.ListSharedAsync(_game);
@@ -274,6 +282,45 @@ public sealed partial class CloudSavePage : Page
         }
     }
 
+    /// <summary>我的世界按「版本名 + 存档名」折叠；其他游戏保持平铺列表。</summary>
+    private void RebuildMinecraftGroups()
+    {
+        _myGroups.Clear();
+        if (!string.Equals(_game, "minecraft", StringComparison.Ordinal))
+        {
+            MyList.Visibility = Visibility.Visible;
+            MyGroupedList.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        MyList.Visibility = Visibility.Collapsed;
+        MyGroupedList.Visibility = Visibility.Visible;
+
+        var groups = _mySaves
+            .GroupBy(i => i.GroupKey)
+            .Select(g =>
+            {
+                var first = g.First();
+                return new CloudSaveGroup
+                {
+                    SaveName = first.SaveName,
+                    VersionName = first.VersionName,
+                    GameVersion = first.GameVersion,
+                    Items = g
+                        .OrderByDescending(i => i.SavedAt > 0 ? i.SavedAt : i.CreatedAt)
+                        .ThenByDescending(i => i.Id)
+                        .ToList()
+                };
+            })
+            .OrderByDescending(g => g.Latest.SavedAt > 0 ? g.Latest.SavedAt : g.Latest.CreatedAt)
+            .ThenByDescending(g => g.Latest.Id);
+
+        foreach (var group in groups)
+        {
+            _myGroups.Add(group);
+        }
+    }
+
     private void OnGameChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_rebuildingGames)
@@ -289,9 +336,16 @@ public sealed partial class CloudSavePage : Page
         _ = ReloadAsync();
     }
 
-    /// <summary>“自动备份”仅支持有固定存档目录的游戏（植物大战僵尸 / 杂交版新版）；我的世界置灰并给出提示。</summary>
+    /// <summary>“自动备份”：我的世界改为安装/配置模组，其他游戏直接压缩固定目录。</summary>
     private void UpdateAutoBackupState()
     {
+        if (string.Equals(_game, "minecraft", StringComparison.Ordinal))
+        {
+            AutoBackupBtn.IsEnabled = true;
+            ToolTipService.SetToolTip(AutoBackupBtn, "安装并配置我的世界自动备份模组");
+            return;
+        }
+
         if (FixedSaveDir(_game) is not null)
         {
             AutoBackupBtn.IsEnabled = true;
@@ -536,9 +590,378 @@ public sealed partial class CloudSavePage : Page
         ShareBtn.IsEnabled = count > 0;
     }
 
+    // ---------------- 我的世界模组安装 ----------------
+
+    private sealed class McInstance
+    {
+        public string Name { get; init; } = string.Empty;
+        public string McVersion { get; init; } = string.Empty;
+        public string Loader { get; init; } = "vanilla";
+        public string GameDir { get; init; } = string.Empty;
+    }
+
+    private async Task ConfigureMinecraftModAsync()
+    {
+        if (SessionState.Offline || string.IsNullOrWhiteSpace(SessionState.Username))
+        {
+            ShowInfo("请先登录在线账号，模组上传需要账号信息", InfoBarSeverity.Warning);
+            return;
+        }
+
+        var mcDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ".minecraft");
+        if (!Directory.Exists(Path.Combine(mcDir, "versions")))
+        {
+            ShowInfo($"未找到我的世界版本目录：{mcDir}", InfoBarSeverity.Error);
+            return;
+        }
+
+        var instances = ScanMcInstances(mcDir);
+        if (instances.Count == 0)
+        {
+            ShowInfo("没有找到可安装的版本实例", InfoBarSeverity.Warning);
+            return;
+        }
+
+        var combo = new ComboBox { MinWidth = 460 };
+        foreach (var instance in instances)
+        {
+            combo.Items.Add(new ComboBoxItem
+            {
+                Content = $"{instance.Name} · MC {instance.McVersion} · {LoaderName(instance.Loader)}",
+                Tag = instance
+            });
+        }
+        combo.SelectedIndex = 0;
+
+        var time1 = new TextBox { Header = "早上窗口备份时间", Text = "09:35", Width = 150 };
+        var time2 = new TextBox { Header = "上午窗口备份时间", Text = "11:43", Width = 150 };
+        var time3 = new TextBox { Header = "下午窗口备份时间", Text = "16:03", Width = 150 };
+        var timesRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        timesRow.Children.Add(time1);
+        timesRow.Children.Add(time2);
+        timesRow.Children.Add(time3);
+
+        void LoadExistingTimes()
+        {
+            if (combo.SelectedItem is ComboBoxItem { Tag: McInstance selected })
+            {
+                LoadMinecraftSchedule(selected, time1, time2, time3);
+            }
+        }
+
+        combo.SelectionChanged += (_, _) => LoadExistingTimes();
+        LoadExistingTimes();
+
+        var info = new TextBlock
+        {
+            Text = "安装前请先退出我的世界。默认在 09:35 / 11:43 / 16:03 自动备份并上传，"
+                   + "时间可以在这里改；首次安装后可用 /autobackup now 立即测试。",
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 12,
+            Foreground = SecondaryTextBrush()
+        };
+
+        var panel = new StackPanel { Spacing = 12, MinWidth = 480 };
+        panel.Children.Add(combo);
+        panel.Children.Add(timesRow);
+        panel.Children.Add(info);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "我的世界自动备份模组",
+            Content = panel,
+            PrimaryButtonText = "安装并配置",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+        if (combo.SelectedItem is not ComboBoxItem { Tag: McInstance target })
+        {
+            return;
+        }
+
+        try
+        {
+            var jarName = $"autobackup-{target.Loader}-{target.McVersion}.jar";
+            var jarPath = Path.Combine(AppContext.BaseDirectory, "minecraft-mods", jarName);
+            if (!File.Exists(jarPath))
+            {
+                var available = Directory.Exists(Path.Combine(AppContext.BaseDirectory, "minecraft-mods"))
+                    ? string.Join("\n", Directory.GetFiles(
+                        Path.Combine(AppContext.BaseDirectory, "minecraft-mods"), "autobackup-*.jar")
+                        .Select(Path.GetFileName))
+                    : "（安装包未附带 minecraft-mods 目录）";
+                ShowInfo($"当前版本还没有对应的模组：{jarName}\n已附带：\n{available}",
+                    InfoBarSeverity.Error);
+                return;
+            }
+
+            var modsDir = Path.Combine(target.GameDir, "mods");
+            Directory.CreateDirectory(modsDir);
+            var installedJar = Path.Combine(modsDir, jarName);
+            File.Copy(jarPath, installedJar, overwrite: true);
+
+            var configDir = Path.Combine(target.GameDir, "config");
+            Directory.CreateDirectory(configDir);
+            var configPath = Path.Combine(configDir, "autobackup.json");
+            WriteMinecraftBackupConfig(configPath, time1.Text, time2.Text, time3.Text);
+
+            var fabricApiMissing = string.Equals(target.Loader, "fabric", StringComparison.Ordinal)
+                && !Directory.GetFiles(modsDir, "fabric-api*.jar").Any();
+
+            var result = new StackPanel { Spacing = 8 };
+            result.Children.Add(new TextBlock
+            {
+                Text = $"已安装到：{installedJar}",
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = true
+            });
+            result.Children.Add(new TextBlock
+            {
+                Text = $"配置：{configPath}",
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = true
+            });
+            result.Children.Add(new TextBlock
+            {
+                Text = "进入游戏后输入 /autobackup now 可立即备份一次。",
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 12,
+                Foreground = SecondaryTextBrush()
+            });
+            if (fabricApiMissing)
+            {
+                result.Children.Add(new TextBlock
+                {
+                    Text = "注意：mods 里没有 Fabric API，请先安装对应版本的 Fabric API。",
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.OrangeRed)
+                });
+            }
+
+            var done = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "安装完成",
+                Content = result,
+                CloseButtonText = "知道了"
+            };
+            await done.ShowAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("安装我的世界备份模组失败。", ex);
+            ShowInfo($"安装失败：{ex.Message}", InfoBarSeverity.Error);
+        }
+    }
+
+    /// <summary>扫描 versions/*，识别加载器与游戏版本。</summary>
+    private static List<McInstance> ScanMcInstances(string mcDir)
+    {
+        var list = new List<McInstance>();
+        var versionsDir = Path.Combine(mcDir, "versions");
+        foreach (var dir in Directory.GetDirectories(versionsDir))
+        {
+            var name = Path.GetFileName(dir);
+            var jsonPath = Path.Combine(dir, name + ".json");
+            if (!File.Exists(jsonPath))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(jsonPath));
+                var root = doc.RootElement;
+                var loader = "vanilla";
+                if (root.TryGetProperty("libraries", out var libs) && libs.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var lib in libs.EnumerateArray())
+                    {
+                        if (!lib.TryGetProperty("name", out var nameNode))
+                        {
+                            continue;
+                        }
+                        var libName = nameNode.GetString() ?? "";
+                        if (libName.StartsWith("net.fabricmc:fabric-loader", StringComparison.Ordinal))
+                        {
+                            loader = "fabric";
+                        }
+                        else if (libName.StartsWith("net.neoforged:neoforge", StringComparison.Ordinal))
+                        {
+                            loader = "neoforge";
+                        }
+                        else if (loader == "vanilla"
+                                 && libName.StartsWith("net.minecraftforge:", StringComparison.Ordinal))
+                        {
+                            loader = "forge";
+                        }
+                    }
+                }
+
+                var mcVersion = ReadMcVersion(root);
+                if (string.IsNullOrWhiteSpace(mcVersion))
+                {
+                    continue;
+                }
+
+                var isolated = Directory.Exists(Path.Combine(dir, "saves"))
+                    || Directory.Exists(Path.Combine(dir, "mods"))
+                    || Directory.Exists(Path.Combine(dir, "config"));
+                list.Add(new McInstance
+                {
+                    Name = name,
+                    McVersion = mcVersion,
+                    Loader = loader,
+                    GameDir = isolated ? dir : mcDir
+                });
+            }
+            catch
+            {
+                // 单个实例 JSON 损坏不影响其他实例
+            }
+        }
+        return list.OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static string ReadMcVersion(JsonElement root)
+    {
+        foreach (var key in new[] { "inheritsFrom", "clientVersion", "id" })
+        {
+            if (!root.TryGetProperty(key, out var node))
+            {
+                continue;
+            }
+            var text = node.GetString() ?? "";
+            var match = Regex.Match(text, @"\b(1\.\d+(?:\.\d+)?)\b");
+            if (match.Success)
+            {
+                return match.Groups[1].Value;
+            }
+        }
+        return "";
+    }
+
+    private static string LoaderName(string loader) => loader switch
+    {
+        "fabric" => "Fabric",
+        "forge" => "Forge",
+        "neoforge" => "NeoForge",
+        _ => "原版"
+    };
+
+    /// <summary>已有配置时把自定义时间读回输入框，避免重复安装被重置。</summary>
+    private static void LoadMinecraftSchedule(
+        McInstance instance, TextBox morning, TextBox noon, TextBox afternoon)
+    {
+        var configPath = Path.Combine(instance.GameDir, "config", "autobackup.json");
+        if (!File.Exists(configPath))
+        {
+            return;
+        }
+
+        try
+        {
+            if (JsonNode.Parse(File.ReadAllText(configPath)) is not JsonObject root)
+            {
+                return;
+            }
+            if (root["schedule"] is not JsonObject schedule
+                || schedule["slots"] is not JsonArray slots)
+            {
+                return;
+            }
+            var boxes = new[] { morning, noon, afternoon };
+            for (var i = 0; i < boxes.Length && i < slots.Count; i++)
+            {
+                if (slots[i] is JsonObject slot && slot["at"] is JsonValue value
+                    && value.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text))
+                {
+                    boxes[i].Text = text;
+                }
+            }
+        }
+        catch
+        {
+            // 配置损坏就用默认时间
+        }
+    }
+
+    /// <summary>写入模组的定时备份、上传与保留规则。</summary>
+    private static void WriteMinecraftBackupConfig(
+        string path, string morning, string noon, string afternoon)
+    {
+        static string TimeOr(string value, string fallback)
+        {
+            return TimeSpan.TryParseExact(value.Trim(), @"h\:mm", null, out _)
+                ? value.Trim()
+                : fallback;
+        }
+        JsonObject root;
+        try
+        {
+            root = File.Exists(path)
+                ? JsonNode.Parse(File.ReadAllText(path)) as JsonObject ?? new JsonObject()
+                : new JsonObject();
+        }
+        catch
+        {
+            root = new JsonObject();
+        }
+
+        root["enabled"] = true;
+        root["intervalMinutes"] = 0;
+        root["keepBackups"] = 5;
+        root["backupOnStart"] = false;
+        root["backupOnStop"] = false;
+        root["compressLevel"] = 6;
+
+        static JsonObject Slot(string start, string end, string at) => new()
+        {
+            ["start"] = start, ["end"] = end, ["at"] = at
+        };
+        root["schedule"] = new JsonObject
+        {
+            ["enabled"] = true,
+            ["slots"] = new JsonArray(
+                Slot("08:00", "10:00", TimeOr(morning, "09:35")),
+                Slot("10:00", "12:00", TimeOr(noon, "11:43")),
+                Slot("14:00", "17:00", TimeOr(afternoon, "16:03")))
+        };
+        root["retention"] = new JsonObject
+        {
+            ["latest"] = 3,
+            ["days"] = new JsonArray(JsonValue.Create(1), JsonValue.Create(3))
+        };
+
+        var upload = root["upload"] as JsonObject ?? new JsonObject();
+        upload["enabled"] = true;
+        upload["url"] = SessionState.OnlineBaseUrl + "/api/save/mod/upload";
+        upload["token"] = "wdsjycd";
+        upload["username"] = SessionState.Username;
+        upload["game"] = "minecraft";
+        upload["fieldName"] = "file";
+        upload["timeoutSeconds"] = 600;
+        root["upload"] = upload;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+    }
+
     // ---------------- 自动备份 ----------------
     private async void OnAutoBackup(object sender, RoutedEventArgs e)
     {
+        if (string.Equals(_game, "minecraft", StringComparison.Ordinal))
+        {
+            await ConfigureMinecraftModAsync();
+            return;
+        }
+
         var saveDir = FixedSaveDir(_game);
         if (saveDir is null)
         {
@@ -643,6 +1066,40 @@ public sealed partial class CloudSavePage : Page
         {
             return;
         }
+        BuildItemMenu(item).ShowAt(element, new FlyoutShowOptions { Position = e.GetPosition(element) });
+        e.Handled = true;
+    }
+
+    /// <summary>折叠组里的历史存档：右键只操作选中的这一份。</summary>
+    private void OnMyGroupItemRightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement element || element.DataContext is not CloudSaveItem item)
+        {
+            return;
+        }
+        BuildItemMenu(item).ShowAt(element, new FlyoutShowOptions { Position = e.GetPosition(element) });
+        e.Handled = true;
+    }
+
+    /// <summary>折叠组标题：默认操作最新一份存档。</summary>
+    private void OnMyGroupRightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement element || element.DataContext is not CloudSaveGroup group)
+        {
+            return;
+        }
+
+        var flyout = new MenuFlyout();
+        flyout.Items.Add(BuildGroupMenuItem("还原最新存档", group, OnGroupRestoreLatest));
+        flyout.Items.Add(BuildGroupMenuItem("下载最新存档", group, OnGroupDownloadLatest));
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        flyout.Items.Add(BuildGroupMenuItem("共享最新存档", group, OnGroupShareLatest));
+        flyout.ShowAt(element, new FlyoutShowOptions { Position = e.GetPosition(element) });
+        e.Handled = true;
+    }
+
+    private MenuFlyout BuildItemMenu(CloudSaveItem item)
+    {
         var flyout = new MenuFlyout();
         flyout.Items.Add(BuildMenuItem("备  注", item, OnMenuRemark));
         flyout.Items.Add(BuildMenuItem("下载到指定文件夹", item, OnMenuDownloadTo));
@@ -652,8 +1109,43 @@ public sealed partial class CloudSavePage : Page
         flyout.Items.Add(item.Shared
             ? BuildMenuItem("取消共享", item, OnMenuUnshare)
             : BuildMenuItem("共享存档", item, OnMenuShare));
-        flyout.ShowAt(element, new FlyoutShowOptions { Position = e.GetPosition(element) });
-        e.Handled = true;
+        return flyout;
+    }
+
+    private static MenuFlyoutItem BuildGroupMenuItem(string text, CloudSaveGroup group, RoutedEventHandler handler)
+    {
+        var menuItem = new MenuFlyoutItem { Text = text, Tag = group };
+        menuItem.Click += handler;
+        return menuItem;
+    }
+
+    private async void OnGroupRestoreLatest(object sender, RoutedEventArgs e)
+    {
+        if (GetGroupMenuItem(sender) is { } group)
+        {
+            await RestoreAsync(group.Latest);
+        }
+    }
+
+    private async void OnGroupDownloadLatest(object sender, RoutedEventArgs e)
+    {
+        if (GetGroupMenuItem(sender) is { } group)
+        {
+            await DownloadToFolderAsync(group.Latest);
+        }
+    }
+
+    private async void OnGroupShareLatest(object sender, RoutedEventArgs e)
+    {
+        if (GetGroupMenuItem(sender) is { } group)
+        {
+            await ShareAsync([group.Latest.Id]);
+        }
+    }
+
+    private static CloudSaveGroup? GetGroupMenuItem(object sender)
+    {
+        return sender is FrameworkElement { Tag: CloudSaveGroup group } ? group : null;
     }
 
     private void OnSharedItemRightTapped(object sender, RightTappedRoutedEventArgs e)
@@ -700,6 +1192,12 @@ public sealed partial class CloudSavePage : Page
     /// </summary>
     private async Task RestoreAsync(CloudSaveItem item)
     {
+        if (string.Equals(item.Game, "minecraft", StringComparison.Ordinal))
+        {
+            await RestoreMinecraftAsync(item);
+            return;
+        }
+
         var destDir = await ResolveRestoreDirAsync(item);
         if (destDir is null)
         {
@@ -718,18 +1216,19 @@ public sealed partial class CloudSavePage : Page
             return;
         }
 
-        var tempZip = Path.Combine(Path.GetTempPath(), $"eya_save_{Guid.NewGuid():N}.zip");
+        var tempDir = Path.Combine(Path.GetTempPath(), $"eya_save_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
         try
         {
-            var (ok, msg) = await _service.DownloadAsync(item.Id, tempZip);
-            if (!ok)
+            var (ok, zipPath, msg) = await _service.DownloadFastAsync(item.Id, tempDir);
+            if (!ok || string.IsNullOrWhiteSpace(zipPath))
             {
                 ShowInfo(msg ?? "下载失败", InfoBarSeverity.Error);
                 return;
             }
             Directory.CreateDirectory(destDir);
             ClearDirectoryContents(destDir);
-            ZipFile.ExtractToDirectory(tempZip, destDir, overwriteFiles: true);
+            ZipFile.ExtractToDirectory(zipPath, destDir, overwriteFiles: true);
             ShowInfo($"已还原到：{destDir}", InfoBarSeverity.Success);
         }
         catch (Exception ex)
@@ -738,7 +1237,251 @@ public sealed partial class CloudSavePage : Page
         }
         finally
         {
-            TryDelete(tempZip);
+            TryDeleteDirectory(tempDir);
+        }
+    }
+
+    // ---------------- 我的世界还原 ----------------
+
+    /// <summary>
+    /// 我的世界按上传时记录的 savePath 精确还原到 saves 目录。
+    /// 目标文件夹已存在时自动加时间后缀，绝不覆盖原存档。
+    /// </summary>
+    private async Task RestoreMinecraftAsync(CloudSaveItem item)
+    {
+        var (savesDir, folderName) = ResolveMinecraftSavesDir(item);
+        if (string.IsNullOrWhiteSpace(savesDir))
+        {
+            var picked = await PickFolderAsync();
+            if (string.IsNullOrWhiteSpace(picked))
+            {
+                ShowInfo("已取消还原", InfoBarSeverity.Informational);
+                return;
+            }
+            savesDir = picked;
+        }
+
+        if (!IsSafeToClear(savesDir))
+        {
+            ShowInfo($"拒绝还原到该目录（路径过于宽泛）：{savesDir}", InfoBarSeverity.Error);
+            return;
+        }
+
+        if (!await ConfirmMinecraftRestoreAsync(item, savesDir))
+        {
+            return;
+        }
+
+        var tempDir = Path.Combine(Path.GetTempPath(), $"eya_mc_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var (ok, zipPath, msg) = await _service.DownloadFastAsync(item.Id, tempDir);
+            if (!ok || string.IsNullOrWhiteSpace(zipPath))
+            {
+                ShowInfo(msg ?? "下载失败", InfoBarSeverity.Error);
+                return;
+            }
+
+            var extractDir = Path.Combine(tempDir, "extract");
+            Directory.CreateDirectory(extractDir);
+            ZipFile.ExtractToDirectory(zipPath, extractDir);
+
+            // 模组 zip 顶层是存档文件夹；老格式没有顶层目录时，把内容塞进一个文件夹。
+            var entries = Directory.GetFileSystemEntries(extractDir);
+            var sourceRoot = entries.Length == 1 && Directory.Exists(entries[0])
+                ? entries[0]
+                : extractDir;
+
+            var originalName = SafeFolderName(
+                !string.IsNullOrWhiteSpace(folderName) ? folderName :
+                !string.IsNullOrWhiteSpace(item.SaveFolder) ? item.SaveFolder :
+                !string.IsNullOrWhiteSpace(item.SaveName) ? item.SaveName : "存档");
+
+            var targetName = originalName;
+            var targetPath = Path.Combine(savesDir, targetName);
+            if (Directory.Exists(targetPath))
+            {
+                targetName = $"{originalName} (还原于 {DateTime.Now:yyyy-MM-dd HH-mm-ss})";
+                targetPath = Path.Combine(savesDir, targetName);
+            }
+
+            Directory.CreateDirectory(savesDir);
+            if (string.Equals(sourceRoot, extractDir, StringComparison.OrdinalIgnoreCase))
+            {
+                Directory.CreateDirectory(targetPath);
+                CopyDirectoryContents(extractDir, targetPath);
+            }
+            else
+            {
+                MoveDirectory(sourceRoot, targetPath);
+            }
+
+            await ShowRestoreSuccessAsync(item, targetPath, targetName != originalName);
+        }
+        catch (Exception ex)
+        {
+            ShowInfo($"还原失败：{ex.Message}", InfoBarSeverity.Error);
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDir);
+        }
+    }
+
+    /// <summary>从备份时记录的完整路径推导 saves 目录与存档文件夹名。</summary>
+    private static (string? savesDir, string? folderName) ResolveMinecraftSavesDir(CloudSaveItem item)
+    {
+        var full = NormalizeSaveDir(item.SavePath);
+        if (!string.IsNullOrWhiteSpace(full))
+        {
+            var trimmed = full.TrimEnd('\\', '/');
+            var parent = Path.GetDirectoryName(trimmed);
+            var name = Path.GetFileName(trimmed);
+            if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent))
+            {
+                return (parent, name);
+            }
+        }
+
+        // 本机没有原版本实例时，尝试同版本目录下的 saves。
+        if (!string.IsNullOrWhiteSpace(item.VersionName))
+        {
+            var mc = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ".minecraft");
+            var candidate = Path.Combine(mc, "versions", item.VersionName, "saves");
+            if (Directory.Exists(candidate))
+            {
+                return (candidate, item.SaveFolder);
+            }
+        }
+
+        return (null, item.SaveFolder);
+    }
+
+    private async Task<bool> ConfirmMinecraftRestoreAsync(CloudSaveItem item, string savesDir)
+    {
+        var body = new StackPanel { Spacing = 8 };
+        body.Children.Add(new TextBlock
+        {
+            Text = $"存档：{item.SaveName}（{item.VersionName}）",
+            TextWrapping = TextWrapping.Wrap
+        });
+        body.Children.Add(new TextBlock
+        {
+            Text = $"还原到：{savesDir}",
+            IsTextSelectionEnabled = true,
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+            TextWrapping = TextWrapping.Wrap
+        });
+        body.Children.Add(new TextBlock
+        {
+            Text = "不会覆盖现有存档；如果同名文件夹已存在，会自动加时间后缀。请先退出我的世界再还原。",
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 12,
+            Foreground = SecondaryTextBrush()
+        });
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "还原我的世界存档",
+            Content = body,
+            PrimaryButtonText = "还原",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    private async Task ShowRestoreSuccessAsync(CloudSaveItem item, string targetPath, bool renamed)
+    {
+        var name = string.IsNullOrWhiteSpace(item.SaveName) ? "存档" : item.SaveName;
+        var body = new StackPanel { Spacing = 8 };
+        body.Children.Add(new TextBlock
+        {
+            Text = $"存档「{name}」已还原",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap
+        });
+        body.Children.Add(new TextBlock
+        {
+            Text = targetPath,
+            IsTextSelectionEnabled = true,
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+            TextWrapping = TextWrapping.Wrap
+        });
+        if (renamed)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "原文件夹已存在，因此还原成了带时间后缀的新文件夹。",
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 12,
+                Foreground = SecondaryTextBrush()
+            });
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "还原成功",
+            Content = body,
+            CloseButtonText = "知道了"
+        };
+        await dialog.ShowAsync();
+    }
+
+    private static string SafeFolderName(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var chars = name.Trim().Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray();
+        var result = new string(chars).Trim('.', ' ');
+        return string.IsNullOrWhiteSpace(result) ? "存档" : result;
+    }
+
+    private static void MoveDirectory(string source, string target)
+    {
+        try
+        {
+            Directory.Move(source, target);
+        }
+        catch (IOException)
+        {
+            // 跨盘符时 Directory.Move 会失败，退回复制后删除。
+            Directory.CreateDirectory(target);
+            CopyDirectoryContents(source, target);
+            Directory.Delete(source, recursive: true);
+        }
+    }
+
+    private static void CopyDirectoryContents(string source, string target)
+    {
+        Directory.CreateDirectory(target);
+        foreach (var dir in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
+        {
+            Directory.CreateDirectory(Path.Combine(target, Path.GetRelativePath(source, dir)));
+        }
+        foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var dest = Path.Combine(target, Path.GetRelativePath(source, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+            File.Copy(file, dest, overwrite: true);
+        }
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch
+        {
+            // 临时目录删不掉不影响结果
         }
     }
 
@@ -887,17 +1630,55 @@ public sealed partial class CloudSavePage : Page
         {
             return;
         }
-        var safeName = string.Concat(item.Name.Split(Path.GetInvalidFileNameChars()));
-        var dest = Path.Combine(folder, $"{safeName}.zip");
+
+        var tempDir = Path.Combine(Path.GetTempPath(), $"eya_dl_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
         try
         {
-            var (ok, msg) = await _service.DownloadAsync(item.Id, dest);
-            ShowInfo(ok ? $"已下载到：{dest}" : (msg ?? "下载失败"),
-                ok ? InfoBarSeverity.Success : InfoBarSeverity.Error);
+            var (ok, zipPath, msg) = await _service.DownloadFastAsync(item.Id, tempDir);
+            if (!ok || string.IsNullOrWhiteSpace(zipPath))
+            {
+                ShowInfo(msg ?? "下载失败", InfoBarSeverity.Error);
+                return;
+            }
+
+            var baseName = item.SaveName;
+            if (string.IsNullOrWhiteSpace(baseName))
+            {
+                baseName = item.Name;
+            }
+            if (!string.IsNullOrWhiteSpace(item.VersionName))
+            {
+                baseName += $"_{item.VersionName}";
+            }
+            baseName += $"_{item.SavedAtText.Replace(':', '-').Replace(' ', '_')}";
+            baseName = string.Concat(baseName.Split(Path.GetInvalidFileNameChars()));
+
+            var dest = Path.Combine(folder, $"{baseName}.zip");
+            var suffix = 1;
+            while (File.Exists(dest))
+            {
+                dest = Path.Combine(folder, $"{baseName} ({suffix++}).zip");
+            }
+            try
+            {
+                File.Move(zipPath, dest);
+            }
+            catch (IOException)
+            {
+                // 跨盘符 MOVE 会失败，退回复制
+                File.Copy(zipPath, dest, overwrite: true);
+            }
+
+            ShowInfo($"已下载到：{dest}", InfoBarSeverity.Success);
         }
         catch (Exception ex)
         {
             ShowInfo($"下载失败：{ex.Message}", InfoBarSeverity.Error);
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDir);
         }
     }
 
