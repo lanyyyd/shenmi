@@ -134,14 +134,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # NeoForge 21.8 的 NeoForm 工具要求 Java 25 工具链；
-      # Gradle 本身仍用 21 跑，只把 25 注册为可用工具链。
-      - name: Setup JDK 25 (NeoForge 工具链)
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '25'
-
       - name: Setup JDK 21 (Minecraft mod)
         uses: actions/setup-java@v4
         with:
@@ -176,8 +168,6 @@ jobs:
           Get-ChildItem "$env:GITHUB_WORKSPACE\publish\minecraft-mods"
 
       - name: 构建 Forge 备份模组
-        id: forge_mod
-        continue-on-error: true
         shell: pwsh
         working-directory: SteamEYA-Unified/minecraft/autobackup-forge
         run: |
@@ -198,43 +188,6 @@ jobs:
             if (-not (Test-Path $jar)) { throw "模组 jar 未生成：$jar" }
             Copy-Item $jar "$env:GITHUB_WORKSPACE\publish\minecraft-mods\" -Force
           }
-
-      - name: 构建 NeoForge 备份模组
-        id: neoforge_mod
-        continue-on-error: true
-        shell: pwsh
-        working-directory: SteamEYA-Unified/minecraft/autobackup-neoforge
-        run: |
-          # NeoForge 用动态补丁版本（21.1.+ / 21.4.+ / 21.8.+），由 Gradle 解析最新可用版本。
-          $targets = @(
-            @{ Mc = '1.21.8'; Neo = '21.8.+'; Min = '21.8' },
-            @{ Mc = '1.21.4'; Neo = '21.4.+'; Min = '21.4' },
-            @{ Mc = '1.21.1'; Neo = '21.1.+'; Min = '21.1' }
-          )
-          # Gradle 只识别 gradle.properties 里的工具链路径（-D 传参不生效）。
-          # NeoForm 需要 25，编译目标仍是 21。
-          $toolchains = "$($env:JAVA_HOME_21_X64),$($env:JAVA_HOME_25_X64)" -replace '\\', '/'
-          Add-Content -Path gradle.properties -Value "`norg.gradle.java.installations.paths=$toolchains"
-          foreach ($t in $targets) {
-            Write-Host "===== NeoForge MC $($t.Mc) ====="
-            $env:JAVA_HOME = $env:JAVA_HOME_21_X64
-            .\gradlew.bat clean build --no-daemon --stacktrace `
-              "-Pminecraft_version=$($t.Mc)" "-Pneoforge_version=$($t.Neo)" `
-              "-Pneoforge_min=$($t.Min)" "-Pjava_release=21" `
-              "-Parchives_base_name=autobackup-neoforge-$($t.Mc)"
-            if ($LASTEXITCODE -ne 0) { throw "NeoForge MC $($t.Mc) 模组构建失败" }
-            $jar = "build\libs\autobackup-neoforge-$($t.Mc).jar"
-            if (-not (Test-Path $jar)) { throw "模组 jar 未生成：$jar" }
-            Copy-Item $jar "$env:GITHUB_WORKSPACE\publish\minecraft-mods\" -Force
-          }
-
-      # 两个加载器独立构建，任一失败也把另一个的错误一起暴露出来。
-      - name: 检查模组构建结果
-        if: steps.forge_mod.outcome != 'success' || steps.neoforge_mod.outcome != 'success'
-        shell: pwsh
-        run: |
-          Write-Error "Forge=${{ steps.forge_mod.outcome }}，NeoForge=${{ steps.neoforge_mod.outcome }}"
-          exit 1
 
       - name: 模组产物清单
         shell: pwsh
