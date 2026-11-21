@@ -27,6 +27,7 @@ public sealed partial class ScreenshotWindow : Window
     private bool _selecting;
     private bool _hasSelection;
     private bool _busy;
+    private bool _chromeRemoved;
 
     internal ScreenshotWindow(ScreenshotFrame frame)
     {
@@ -47,6 +48,10 @@ public sealed partial class ScreenshotWindow : Window
         }
 
         AppWindow.MoveAndResize(new RectInt32(0, 0, frame.Width, frame.Height));
+
+        // WinUI 3 的窗口即使 SetBorderAndTitleBar(false,false) 仍会带 1px 边框和 Win11 圆角，
+        // 截图时会在屏幕边缘露出一条线，这里去掉 DWM 边框/圆角并改成 WS_POPUP 无边框窗口。
+        RemoveWindowChrome();
 
         CopyLabel.Text = Loc.T("Screenshot_Copy");
         SaveLabel.Text = Loc.T("Screenshot_Save");
@@ -85,6 +90,12 @@ public sealed partial class ScreenshotWindow : Window
     private async void OnRootLoaded(object sender, RoutedEventArgs e)
     {
         Root.Focus(FocusState.Programmatic);
+
+        // 构造时窗口句柄偶尔还没就绪，Loaded 时补一次去边框。
+        if (!_chromeRemoved)
+        {
+            RemoveWindowChrome();
+        }
 
         // 二次置顶：窗口刚显示时前台应用可能还在抢焦点，延迟一帧再压一次。
         _ = DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, BringToFront);
@@ -373,10 +384,67 @@ public sealed partial class ScreenshotWindow : Window
 
     private void OnCancelClick(object sender, RoutedEventArgs e) => Close();
 
+    /// <summary>
+    /// 去掉窗口边框、圆角和任务栏入口。仅靠 OverlappedPresenter 的设置仍会留下
+    /// 1px 系统边框和 Win11 圆角，全屏截图时会在屏幕四周露出缝隙。
+    /// </summary>
+    private void RemoveWindowChrome()
+    {
+        try
+        {
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            if (hwnd == 0)
+            {
+                return;
+            }
+
+            // Win11：禁止圆角、边框颜色设为“无”。
+            var noRound = 1; // DWMWCP_DONOTROUND
+            _ = DwmSetWindowAttribute(hwnd, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, ref noRound, sizeof(int));
+            var noBorder = unchecked((int)0xFFFFFFFE); // DWMWA_COLOR_NONE
+            _ = DwmSetWindowAttribute(hwnd, 34 /* DWMWA_BORDER_COLOR */, ref noBorder, sizeof(int));
+
+            // Win10 及部分显卡驱动下 DWM 边框仍会绘制，退回到纯 WS_POPUP 无边框窗口。
+            var style = (long)GetWindowLongPtr(hwnd, GwlStyle);
+            style &= ~(WsCaption | WsThickFrame | WsSystemMenu | WsMinimizeBox | WsMaximizeBox);
+            style |= WsPopup;
+            _ = SetWindowLongPtr(hwnd, GwlStyle, (nint)style);
+
+            var exStyle = (long)GetWindowLongPtr(hwnd, GwlExStyle);
+            exStyle |= WsExToolWindow;                                  // 不出现在任务栏 / Alt+Tab
+            exStyle &= ~(long)WsExAppWindow;                            // 从任务栏移除
+            exStyle &= ~((long)WsExClientEdge | (long)WsExWindowEdge);  // 去掉凹陷/凸起边
+            _ = SetWindowLongPtr(hwnd, GwlExStyle, (nint)exStyle);
+
+            _ = SetWindowPos(hwnd, 0, 0, 0, _frame.Width, _frame.Height,
+                SwpNoZorder | SwpFrameChanged | SwpShowWindow);
+            _chromeRemoved = true;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"去除截图窗口边框失败：{ex.Message}");
+        }
+    }
+
     private const int HwndTopmost = -1;
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoZorder = 0x0004;
     private const uint SwpShowWindow = 0x0040;
+    private const uint SwpFrameChanged = 0x0020;
+
+    private const int GwlStyle = -16;
+    private const int GwlExStyle = -20;
+    private const long WsCaption = 0x00C00000L;
+    private const long WsThickFrame = 0x00040000L;
+    private const long WsSystemMenu = 0x00080000L;
+    private const long WsMinimizeBox = 0x00020000L;
+    private const long WsMaximizeBox = 0x00010000L;
+    private const long WsPopup = 0x80000000L;
+    private const long WsExToolWindow = 0x00000080L;
+    private const long WsExAppWindow = 0x00040000L;
+    private const long WsExClientEdge = 0x00000200L;
+    private const long WsExWindowEdge = 0x00000100L;
 
     [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
     [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
@@ -392,6 +460,15 @@ public sealed partial class ScreenshotWindow : Window
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern nint SetFocus(nint hWnd);
+
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern nint GetWindowLongPtr(nint hWnd, int index);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern nint SetWindowLongPtr(nint hWnd, int index, nint value);
 
     /// <summary>按当前选区裁出像素并编码成 PNG；选区无效时返回 null。</summary>
     private async Task<byte[]?> BuildPngAsync()
