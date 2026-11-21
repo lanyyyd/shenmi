@@ -12,6 +12,25 @@ from .db import execute, query_all, query_one
 
 log = logging.getLogger("hub")
 
+# 在线连接超时：客户端每 25 秒发一次心跳，90 秒没有任何心跳就认为已掉线。
+# 网关被强杀时 online 表会留下旧行，靠这个 TTL + 启动清理避免「幽灵在线」。
+ONLINE_TTL_MS = 90_000
+
+
+def online_rows() -> list[dict]:
+    """返回仍有效的在线连接；顺带清掉超过 TTL 的残留行。"""
+    cutoff = security.now_ms() - ONLINE_TTL_MS
+    try:
+        execute("DELETE FROM online WHERE last_seen < ?", (cutoff,))
+    except Exception:
+        pass
+    return query_all("SELECT * FROM online WHERE last_seen >= ?", (cutoff,))
+
+
+def online_user_ids() -> set[int]:
+    return {r["user_id"] for r in online_rows()}
+
+
 
 def display_name(u) -> str:
     if not u:
@@ -89,7 +108,7 @@ class Hub:
 
     # ---------------- 快照 ----------------
     def online_snapshot(self) -> dict:
-        rows = query_all("SELECT * FROM online")
+        rows = online_rows()
         users: dict[int, dict] = {}
         for r in rows:
             u = query_one("SELECT * FROM users WHERE id = ?", (r["user_id"],))

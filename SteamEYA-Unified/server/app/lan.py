@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import queue
 import socket
 import threading
 import time
@@ -64,6 +65,7 @@ class LanDiscovery:
             now = time.time()
             if now - last_beacon >= BEACON_INTERVAL:
                 last_beacon = now
+                beacon = self._beacon()
                 for addr in ("255.255.255.255", "127.0.0.1"):
                     try:
                         sock.sendto(beacon, (addr, self.discovery_port))
@@ -73,29 +75,56 @@ class LanDiscovery:
                 data, (ip, _) = sock.recvfrom(2048)
                 info = json.loads(data.decode("utf-8", "ignore"))
             except socket.timeout:
-                self._prune()
+                if self._prune():
+                    _broadcast_online()
                 continue
             except Exception:
                 continue
             if info.get("app") != "steameya":
                 continue
-            # 跳过自己：IP 为本机，或 name+port 与本机一致
+            # 跳过自己：IP 为本机，或 name+port 与本机一致，或 install_id 相同
             if ip == self._local_ip():
                 continue
             if info.get("name") == self.name and int(info.get("port") or 0) == self.port:
                 continue
-            self.peers[ip] = {
+            install_id = str(info.get("installId") or "")[:64]
+            if install_id and install_id == self.instance_id:
+                continue
+            peer = {
                 "ip": ip,
                 "name": info.get("name") or ip,
                 "port": int(info.get("port") or self.port),
+                "installId": install_id,
+                "user": str(info.get("user") or "")[:20],
                 "lastSeen": int(now * 1000),
             }
+            old = self.peers.get(ip)
+            self.peers[ip] = peer
+            changed = old is None or (old.get("user") != peer["user"] or old.get("name") != peer["name"])
+            # 把对端登记为本机在线用户，离线模式的在线列表才能显示局域网里的其他人。
+            if _mark_peer_online(peer):
+                changed = True
+            if changed:
+                _broadcast_online()
         self._prune()
+        _broadcast_online()
 
-    def _prune(self) -> None:
+    def _beacon(self) -> bytes:
+        """每轮重新生成：带上本机当前登录用户，对端列表才能显示昵称而不是设备名。"""
+        payload = {
+            "app": "steameya", "name": self.name, "port": self.port,
+            "installId": self.instance_id, "user": _local_user_name(),
+        }
+        return json.dumps(payload).encode("utf-8")
+
+    def _prune(self) -> bool:
         cutoff = time.time() - PEER_TIMEOUT
-        for ip in [k for k, v in self.peers.items() if v["lastSeen"] / 1000 < cutoff]:
-            self.peers.pop(ip, None)
+        stale = [k for k, v in self.peers.items() if v["lastSeen"] / 1000 < cutoff]
+        for ip in stale:
+            peer = self.peers.pop(ip, None)
+            if peer and peer.get("installId"):
+                _drop_peer_online(peer["installId"])
+        return bool(stale)
 
     @staticmethod
     def _local_ip() -> str:
@@ -129,6 +158,81 @@ class LanDiscovery:
     def identity(self) -> dict:
         return {"installId": self.instance_id, "name": self.name,
                 "port": self.port, "ip": self._local_ip()}
+
+
+def _local_user_name() -> str:
+    """本机网关上最近活跃的登录用户昵称，写进 UDP 广播供对端显示。"""
+    try:
+        from .db import query_one
+        from .hub import ONLINE_TTL_MS
+        from .security import now_ms
+
+        row = query_one(
+            "SELECT u.nickname, u.username FROM online o JOIN users u ON u.id = o.user_id "
+            "WHERE o.conn_id NOT LIKE 'lan:%' AND o.last_seen >= ? "
+            "ORDER BY o.last_seen DESC LIMIT 1",
+            (now_ms() - ONLINE_TTL_MS,),
+        )
+        if row:
+            return (row["nickname"] or row["username"] or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _broadcast_online() -> None:
+    try:
+        from .hub import hub
+
+        hub.broadcast_online_threadsafe()
+    except Exception:
+        pass
+
+
+def _mark_peer_online(peer: dict) -> bool:
+    """把发现的局域网对端登记为在线用户；返回是否新增/变更，供广播去重。
+
+    只在离线（局域网）模式生效，避免在线服务器把内网设备混进公网在线列表。
+    """
+    if os.getenv("EYA_LAN_MODE") != "1":
+        return False
+    install_id = str(peer.get("installId") or "").strip()
+    if not install_id:
+        return False
+
+    from . import security
+    from .db import execute, query_one
+
+    user = ensure_peer_user(install_id, str(peer.get("user") or peer.get("name") or ""),
+                            str(peer.get("ip") or ""))
+    name = str(peer.get("user") or "").strip()[:20]
+    if name and (user.get("nickname") or "") != name:
+        execute("UPDATE users SET nickname = ? WHERE id = ?", (name, user["id"]))
+
+    conn_id = "lan:" + install_id
+    now = security.now_ms()
+    row = query_one("SELECT conn_id FROM online WHERE conn_id = ?", (conn_id,))
+    if row:
+        execute("UPDATE online SET last_seen = ?, ip = ? WHERE conn_id = ?",
+                (now, str(peer.get("ip") or "")[:64], conn_id))
+        return False
+    execute(
+        "INSERT INTO online (conn_id, user_id, device_id, ip, ua, connected_at, last_seen) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (conn_id, user["id"], "lan", str(peer.get("ip") or "")[:64], "", now, now),
+    )
+    return True
+
+
+def _drop_peer_online(install_id: str) -> None:
+    if os.getenv("EYA_LAN_MODE") != "1" or not install_id:
+        return
+    from .db import execute
+
+    try:
+        execute("DELETE FROM online WHERE conn_id = ?", ("lan:" + install_id,))
+    except Exception:
+        pass
 
 
 # ================================================================
@@ -254,19 +358,58 @@ def _control_worker(peers: list, action: str, mode: str, control_id: str, visite
             continue
 
 
+_forward_queue: "queue.Queue[dict]" = queue.Queue()
+_forward_lock = threading.Lock()
+_forward_started = False
+
+
+def _ensure_forward_worker() -> None:
+    global _forward_started
+    with _forward_lock:
+        if _forward_started:
+            return
+        _forward_started = True
+        threading.Thread(target=_forward_loop, name="lan-forward", daemon=True).start()
+
+
 def forward_to_peers(payload: dict) -> None:
-    """本机新消息广播后调用：异步转发给同网段对端（仅群聊，尽力而为，不阻塞调用方）。"""
+    """本机新消息广播后调用：入队后由单个后台线程按顺序转发给对端。
+
+    串行队列保证同一实例的消息到达顺序与发送顺序一致；入队时对端可能还没被
+    UDP 发现，worker 会短暂等待后再发，避免启动初期丢消息。
+    """
     d = get_discovery()
     if d is None or not payload.get("id") or payload.get("toId"):
         return
+    _ensure_forward_worker()
+    _forward_queue.put(dict(payload))
+
+
+def _forward_loop() -> None:
+    while True:
+        payload = _forward_queue.get()
+        try:
+            _forward_one(payload)
+        except Exception:
+            pass
+        finally:
+            _forward_queue.task_done()
+
+
+def _forward_one(payload: dict) -> None:
+    from .db import query_one
+
+    d = get_discovery()
+    if d is None:
+        return
+
+    deadline = time.time() + 5
     peers = d.snapshot()
+    while not peers and time.time() < deadline:
+        time.sleep(0.25)
+        peers = d.snapshot()
     if not peers:
         return
-    threading.Thread(target=_forward_worker, args=(d, peers, payload), daemon=True).start()
-
-
-def _forward_worker(d: LanDiscovery, peers: list, payload: dict) -> None:
-    from .db import query_one
 
     row = query_one("SELECT install_id, client_msg_id FROM messages WHERE id = ?", (payload["id"],))
     install_id = ((row["install_id"] if row else "") or d.instance_id)[:64]
@@ -281,14 +424,17 @@ def _forward_worker(d: LanDiscovery, peers: list, payload: dict) -> None:
     local = _local_upload_path(payload.get("filePath") or "")
     for p in peers:
         base = f"http://{p['ip']}:{int(p['port'])}/api/lan"
-        try:
-            if local is not None and local.exists():
-                fname = payload.get("fileName") or local.name
-                with local.open("rb") as fh:
-                    requests.post(base + "/relay/file",
-                                  data={**common, "fileName": fname},
-                                  files={"file": (fname, fh)}, timeout=(2, 60))
-            else:
-                requests.post(base + "/relay", json=common, timeout=(2, 10))
-        except Exception:
-            continue
+        for attempt in range(2):
+            try:
+                if local is not None and local.exists():
+                    fname = payload.get("fileName") or local.name
+                    with local.open("rb") as fh:
+                        requests.post(base + "/relay/file",
+                                      data={**common, "fileName": fname},
+                                      files={"file": (fname, fh)}, timeout=(2, 60))
+                else:
+                    requests.post(base + "/relay", json=common, timeout=(2, 10))
+                break
+            except Exception:
+                if attempt == 0:
+                    time.sleep(0.2)

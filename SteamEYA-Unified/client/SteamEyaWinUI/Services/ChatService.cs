@@ -480,28 +480,50 @@ internal sealed class ChatService : IAsyncDisposable
 
     private async Task ReceiveLoopAsync(ClientWebSocket ws, CancellationToken ct)
     {
-        while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
+        // 心跳必须是独立循环：以前用 CancelAfter 取消 ReceiveAsync 来触发 ping，
+        // 而 .NET 取消接收会直接中止 WebSocket，空闲 25 秒就会断线重连一次，
+        // 重连窗口里的消息会丢，表现为「收到消息有延迟」。
+        using var pingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var pingTask = PingLoopAsync(ws, pingCts.Token);
+        try
         {
-            string? json;
-            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
             {
-                timeout.CancelAfter(PingIntervalMs);
-                try
+                var json = await ReceiveMessageAsync(ws, ct);
+                if (json is null)
                 {
-                    json = await ReceiveMessageAsync(ws, timeout.Token);
+                    return;
                 }
-                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-                {
-                    // 空闲超时：发心跳，维持 online.last_seen（左侧“上次登录时间”依赖它）
-                    await SendRawAsync(JsonSerializer.Serialize(new ChatPingDto(), ChatJsonContext.Default.ChatPingDto), ct);
-                    continue;
-                }
+                Dispatch(json);
             }
-            if (json is null)
+        }
+        finally
+        {
+            pingCts.Cancel();
+            try { await pingTask; } catch { /* 忽略心跳退出异常 */ }
+        }
+    }
+
+    private async Task PingLoopAsync(ClientWebSocket ws, CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested && ws.State == WebSocketState.Open)
             {
-                return;
+                await Task.Delay(PingIntervalMs, ct);
+                if (ws.State != WebSocketState.Open)
+                {
+                    return;
+                }
+                await SendRawAsync(JsonSerializer.Serialize(new ChatPingDto(), ChatJsonContext.Default.ChatPingDto), ct);
             }
-            Dispatch(json);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            // 发送失败交给接收循环的重连逻辑处理
         }
     }
 

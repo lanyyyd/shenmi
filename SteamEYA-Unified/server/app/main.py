@@ -69,6 +69,14 @@ async def _capture_event_loop():
 @app.on_event("startup")
 def _startup():
     init_db()
+    # 上次进程被强杀/崩溃时 online 表会留下连接记录，启动时先清空，避免离线模式
+    # 的在线列表出现「幽灵用户」。
+    try:
+        from .db import execute as _execute
+
+        _execute("DELETE FROM online")
+    except Exception as e:
+        log.warning("清理在线表失败：%s", e)
     log.info("统一后端网关已启动，数据目录: %s", UPLOAD_DIR.parent)
     # 局域网发现（UDP 广播）：
     #   - 离线模式（EYA_LAN_MODE=1）默认开启；

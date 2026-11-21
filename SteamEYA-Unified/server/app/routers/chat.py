@@ -24,7 +24,7 @@ from .. import security
 from ..config import (AVATAR_DIR, MAX_AVATAR, MAX_STICKER, MAX_UPLOAD, STICKER_DIR, UPLOAD_DIR)
 from ..db import execute, query_all, query_one
 from ..deps import resolve_user, user_public
-from ..hub import hub
+from ..hub import hub, online_user_ids as hub_online_user_ids
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -325,7 +325,7 @@ def users(request: Request, authorization: Optional[str] = Header(default=None))
     u = _me(None, request, authorization)
     if not u:
         return _err("请先登录", 401)
-    online_ids = {r["user_id"] for r in query_all("SELECT user_id FROM online")}
+    online_ids = hub_online_user_ids()
     # lastSeen = 最后登录 / 最后在线 / 会话活跃 / 最后发言 取最大（毫秒），
     # 与后台「最后活跃」口径保持一致（会话活跃来自 sessions.last_seen，浏览器打开页面即会刷新）。
     rows = query_all(
@@ -336,6 +336,9 @@ def users(request: Request, authorization: Optional[str] = Header(default=None))
         "COALESCE(e.exp, 0) AS exp "
         "FROM users u LEFT JOIN user_exp e ON e.user_id = u.id "
         "WHERE u.is_active=1 AND u.is_admin=0 ORDER BY u.id DESC")
+    # 离线（局域网）模式只显示真正在线的人，隐藏历史注册账号和消息影子用户。
+    if os.getenv("EYA_LAN_MODE") == "1":
+        rows = [r for r in rows if r["id"] in online_ids and not r["is_ai"]]
     out = []
     for r in rows:
         login_seen = r["last_login_at"] or 0

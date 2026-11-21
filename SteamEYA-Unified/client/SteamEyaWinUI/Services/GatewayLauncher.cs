@@ -68,7 +68,7 @@ internal static class GatewayLauncher
         else if (File.Exists(script))
         {
             psi.FileName = "python";
-            psi.Arguments = $"\"{script}\" --port 8898";
+            psi.Arguments = $"\"{script}\" --local --port 8898";
         }
         else
         {

@@ -63,6 +63,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
 
     private readonly List<ChatMessageDto> _rawMessages = [];
     private ChatUserDto[] _rawUsers = [];
+    private bool _wasDisconnected;
     private readonly Dictionary<int, (string Username, long LastReadId)> _readState = [];
     private readonly Dictionary<string, int> _unread = [];
     private readonly Dictionary<int, string> _notes = [];
@@ -841,17 +842,21 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             }
         }
 
-        _users.Add(SidebarItemVm.Header(Loc.Tf("Chat_Sidebar_Offline", offline.Length)));
-        var offlineShown = offline.Where(Matches).ToArray();
-        if (offlineShown.Length == 0)
+        // 离线（局域网）模式只展示在线用户，不再列出历史注册账号和离线影子用户。
+        if (!SessionState.Offline)
         {
-            _users.Add(SidebarItemVm.Empty(kw.Length > 0 ? Loc.T("Chat_Sidebar_NoMatch") : Loc.T("Chat_Sidebar_NoOffline")));
-        }
-        else
-        {
-            foreach (var u in offlineShown)
+            _users.Add(SidebarItemVm.Header(Loc.Tf("Chat_Sidebar_Offline", offline.Length)));
+            var offlineShown = offline.Where(Matches).ToArray();
+            if (offlineShown.Length == 0)
             {
-                _users.Add(BuildUserRow(u, keywordsFiltered: false));
+                _users.Add(SidebarItemVm.Empty(kw.Length > 0 ? Loc.T("Chat_Sidebar_NoMatch") : Loc.T("Chat_Sidebar_NoOffline")));
+            }
+            else
+            {
+                foreach (var u in offlineShown)
+                {
+                    _users.Add(BuildUserRow(u, keywordsFiltered: false));
+                }
             }
         }
     }
@@ -2812,6 +2817,24 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         await RefreshUnreadAsync();
     }
 
+    private async Task ResyncAfterReconnectAsync()
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(_room))
+            {
+                await LoadHistoryAsync(_room, 0);
+                HookScrollViewer();
+            }
+            OnUsersChanged();
+            await RefreshUnreadAsync();
+        }
+        catch
+        {
+            // 补拉失败不打断聊天
+        }
+    }
+
     private void OnConnectionChanged(bool connected)
     {
         _dispatcher.TryEnqueue(() =>
@@ -2822,6 +2845,16 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             if (connected)
             {
                 _ = RefreshUnreadAsync();
+                // 断线期间的消息不会补发，重连后主动补拉一次当前会话和在线列表。
+                if (_wasDisconnected)
+                {
+                    _wasDisconnected = false;
+                    _ = ResyncAfterReconnectAsync();
+                }
+            }
+            else
+            {
+                _wasDisconnected = true;
             }
         });
     }
