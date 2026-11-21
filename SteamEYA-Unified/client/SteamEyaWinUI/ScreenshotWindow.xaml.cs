@@ -50,16 +50,17 @@ public sealed partial class ScreenshotWindow : Window
 
         AppWindow.MoveAndResize(new RectInt32(0, 0, frame.Width, frame.Height));
 
-        // WinUI 3 的窗口即使 SetBorderAndTitleBar(false,false) 仍会带 1px 边框和 Win11 圆角，
-        // 截图时会在屏幕边缘露出一条线，这里去掉 DWM 边框/圆角并改成 WS_POPUP 无边框窗口。
-        RemoveWindowChrome();
-
         CopyLabel.Text = Loc.T("Screenshot_Copy");
         SaveLabel.Text = Loc.T("Screenshot_Save");
         HintText.Text = Loc.T("Screenshot_Hint");
 
-        // 在窗口 Activate 之前就把画面填好，避免出现「先黑屏半秒再显示截图」。
+        // 在窗口显示之前就把画面填好，避免出现「先黑屏半秒再显示截图」。
         ShowFrame();
+
+        // WinUI 3 的窗口即使 SetBorderAndTitleBar(false,false) 仍会带 1px 边框和 Win11 圆角，
+        // 截图时会在屏幕边缘露出一条线，这里去掉 DWM 边框/圆角并改成 WS_POPUP 无边框窗口。
+        // 放在 ShowFrame 之后：SetWindowPos 带 SWP_SHOWWINDOW，会立刻显示窗口。
+        RemoveWindowChrome();
     }
 
     /// <summary>

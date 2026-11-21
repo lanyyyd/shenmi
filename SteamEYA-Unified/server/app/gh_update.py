@@ -251,7 +251,11 @@ ASSET_SUFFIXES = {
 
 
 def _pick_installers(assets: list) -> dict:
-    """返回 {edition: asset}；standard 排除 nojiyu，两个形态各自挑最匹配的 exe。"""
+    """返回 {edition: asset}；standard 排除 nojiyu，两个形态各自挑最匹配的 exe。
+
+    结果同时保留 GitHub 原始字段（name/browser_download_url/size）和下载代码使用的
+    简写字段（assetName/assetUrl/assetSize）。
+    """
     picked: dict = {}
     for a in assets:
         name = str(a.get("name") or "").lower()
@@ -262,7 +266,16 @@ def _pick_installers(assets: list) -> dict:
         score = 2 if name.endswith(suffix) else 1
         if edition not in picked or score > picked[edition]["_score"]:
             picked[edition] = {**a, "_score": score}
-    return {k: {kk: vv for kk, vv in v.items() if kk != "_score"} for k, v in picked.items()}
+    out = {}
+    for edition, a in picked.items():
+        raw_name = a.get("name") or "setup.exe"
+        out[edition] = {
+            **{k: v for k, v in a.items() if k != "_score"},
+            "assetName": raw_name,
+            "assetUrl": a.get("browser_download_url") or "",
+            "assetSize": int(a.get("size") or 0),
+        }
+    return out
 
 
 def _clean_notes(body: str) -> str:

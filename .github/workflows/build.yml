@@ -222,7 +222,7 @@ jobs:
           & $iscc "/DAppVersion=$version" "/DPublishDir=$env:GITHUB_WORKSPACE\publish" "/DOutputDir=$env:GITHUB_WORKSPACE\artifacts" "/DLanguagesDir=$env:GITHUB_WORKSPACE\build\installer\languages" "/DOutputBaseName=TeaTT-$version-win-x64-setup" "$env:GITHUB_WORKSPACE\build\installer\SteamEYA.iss"
           if ($LASTEXITCODE -ne 0) { throw "标准版 ISCC failed with exit code $LASTEXITCODE" }
 
-          # 无极域版：复制发布目录 → 剔除 jiyu 注入模块 → 放 nojiyu 标记（客户端据此隐藏「小工具」、更新只走 GitHub）
+          # 无极域版：复制发布目录 → 剔除 jiyu 注入模块 → 放 nojiyu 标记（客户端据此隐藏「小工具」，更新走服务器 nojiyu 频道）
           $noJiyuDir = "$env:GITHUB_WORKSPACE\publish-nojiyu"
           if (Test-Path $noJiyuDir) { Remove-Item $noJiyuDir -Recurse -Force }
           New-Item -ItemType Directory -Force -Path $noJiyuDir | Out-Null

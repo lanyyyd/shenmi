@@ -339,7 +339,10 @@ async function saveNotes(){
     });
     const d = await r.json().catch(()=>({}));
     if(!r.ok || !d.ok){
-      toast(`保存失败（HTTP ${r.status}）：` + (d.detail || d.error || '服务端未返回原因'));
+      const hint = (r.status === 404 || r.status === 405)
+        ? '（服务端未加载编辑公告接口，请重启/重新部署后端）'
+        : '';
+      toast(`保存失败（HTTP ${r.status}）：` + (d.detail || d.error || '服务端未返回原因') + hint);
       return;
     }
     // 先用返回值直接更新本地行，避免依赖下一次列表请求
