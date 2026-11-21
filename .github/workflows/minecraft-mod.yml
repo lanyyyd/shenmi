@@ -1,0 +1,106 @@
+name: Build Minecraft Mods
+
+# 我的世界云存档模组单独构建：与客户端安装包解耦，同一份源码按版本参数化，
+# 产出 autobackup-fabric-<mc>.jar / autobackup-forge-<mc>.jar。
+# 客户端会把安装目录 minecraft-mods/ 下的同名 jar 复制到对应实例的 mods/。
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'SteamEYA-Unified/minecraft/**'
+      - '.github/workflows/minecraft-mod.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: minecraft-mod-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.loader }} ${{ matrix.mc }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Fabric：Yarn / Fabric API 随 MC 版本切换，1.20.x 编译目标为 Java 17
+          - { loader: fabric, mc: '1.21.8', yarn: '1.21.8+build.1', api: '0.136.1+1.21.8', java: '21' }
+          - { loader: fabric, mc: '1.21.4', yarn: '1.21.4+build.8', api: '0.119.4+1.21.4', java: '21' }
+          - { loader: fabric, mc: '1.21.1', yarn: '1.21.1+build.3', api: '0.116.18+1.21.1', java: '21' }
+          - { loader: fabric, mc: '1.21', yarn: '1.21+build.9', api: '0.102.0+1.21', java: '21' }
+          - { loader: fabric, mc: '1.20.4', yarn: '1.20.4+build.3', api: '0.97.3+1.20.4', java: '17' }
+          - { loader: fabric, mc: '1.20.1', yarn: '1.20.1+build.10', api: '0.92.12+1.20.1', java: '17' }
+          # Forge：1.20.1 / 1.21.1
+          - { loader: forge, mc: '1.21.1', forge: '52.1.21', forge_min: '52', java: '21' }
+          - { loader: forge, mc: '1.20.1', forge: '47.4.29', forge_min: '47', java: '17' }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build ${{ matrix.loader }} ${{ matrix.mc }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $loader = '${{ matrix.loader }}'
+          $mc = '${{ matrix.mc }}'
+          if ($loader -eq 'fabric') {
+            Set-Location 'SteamEYA-Unified/minecraft/autobackup-mod'
+            & .\gradlew.bat clean build --no-daemon --stacktrace `
+              "-Pminecraft_version=$mc" `
+              "-Pyarn_mappings=${{ matrix.yarn }}" `
+              "-Pfabric_version=${{ matrix.api }}" `
+              "-Pjava_release=${{ matrix.java }}" "-Pjava_min=${{ matrix.java }}" `
+              "-Parchives_base_name=autobackup-fabric-$mc"
+          } else {
+            Set-Location 'SteamEYA-Unified/minecraft/autobackup-forge'
+            & .\gradlew.bat clean build --no-daemon --stacktrace `
+              "-Pminecraft_version=$mc" `
+              "-Pforge_version=${{ matrix.forge }}" `
+              "-Pforge_loader_min=${{ matrix.forge_min }}" `
+              "-Pjava_release=${{ matrix.java }}" `
+              "-Parchives_base_name=autobackup-forge-$mc"
+          }
+          if ($LASTEXITCODE -ne 0) { throw "$loader $mc 模组构建失败" }
+
+          $jar = "build\libs\autobackup-$loader-$mc.jar"
+          if (-not (Test-Path $jar)) { throw "未生成 $jar" }
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\dist" | Out-Null
+          Copy-Item $jar "$env:GITHUB_WORKSPACE\dist\" -Force
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobackup-${{ matrix.loader }}-${{ matrix.mc }}
+          path: dist/*.jar
+          if-no-files-found: error
+
+  bundle:
+    name: 汇总全部 jar
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download jars
+        uses: actions/download-artifact@v4
+        with:
+          pattern: autobackup-*
+          path: minecraft-mods
+          merge-multiple: true
+
+      - name: List
+        run: ls -lh minecraft-mods
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: minecraft-mods
+          path: minecraft-mods/*.jar
+          if-no-files-found: error
