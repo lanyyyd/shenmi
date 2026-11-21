@@ -40,6 +40,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Forge 1.20.1 的 userdev 需要 Java 17 工具链；Fabric 1.20.x 仍用 21 编译（--release 17）。
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Setup JDK 21
         uses: actions/setup-java@v4
         with:
@@ -62,6 +69,12 @@ jobs:
               "-Parchives_base_name=autobackup-fabric-$mc"
           } else {
             Set-Location 'SteamEYA-Unified/minecraft/autobackup-forge'
+            # ForgeGradle 通过工具链跑 Forge 补丁工具：1.20.1 要 17、1.21.1 要 21。
+            # setup-java 装的 JDK 不在 Gradle 自动探测路径里，显式登记（旧 NeoForge 构建同做法）。
+            $toolchains = @($env:JAVA_HOME_17_X64, $env:JAVA_HOME_21_X64) |
+              Where-Object { $_ } | ForEach-Object { $_ -replace '\\', '/' }
+            Add-Content -Path gradle.properties -Value "`norg.gradle.java.installations.paths=$($toolchains -join ',')"
+            $env:JAVA_HOME = $env:JAVA_HOME_21_X64
             & .\gradlew.bat clean build --no-daemon --stacktrace `
               "-Pminecraft_version=$mc" `
               "-Pforge_version=${{ matrix.forge }}" `
