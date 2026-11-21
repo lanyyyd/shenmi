@@ -15,6 +15,12 @@
         PointerReleased="OnPointerReleased"
         SizeChanged="OnRootSizeChanged">
 
+        <!-- 快捷键挂在窗口级加速器上：未框选时焦点不一定在根 Grid，仅靠 KeyDown 收不到 Esc -->
+        <Grid.KeyboardAccelerators>
+            <KeyboardAccelerator Key="Escape" Invoked="OnEscapeInvoked" />
+            <KeyboardAccelerator Key="Enter" Invoked="OnEnterInvoked" />
+        </Grid.KeyboardAccelerators>
+
         <Image x:Name="ShotImage" Stretch="Fill" />
 
         <!-- 未开始框选时的整屏压暗 -->

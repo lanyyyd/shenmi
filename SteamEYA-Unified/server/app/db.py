@@ -297,6 +297,7 @@ CREATE TABLE IF NOT EXISTS app_releases (
     file_size      INTEGER DEFAULT 0,
     sha256         TEXT DEFAULT '',
     platform       TEXT DEFAULT 'windows',    -- windows / android（各自只有一个 active）
+    edition        TEXT DEFAULT 'standard',   -- standard=含极域 / nojiyu=无极域
     active         INTEGER DEFAULT 1,
     download_count INTEGER DEFAULT 0,
     created_at     INTEGER NOT NULL
@@ -795,6 +796,9 @@ def init_db() -> None:
     acols = {r["name"] for r in query_all("PRAGMA table_info(app_releases)")}
     if acols and "platform" not in acols:
         execute("ALTER TABLE app_releases ADD COLUMN platform TEXT DEFAULT 'windows'")
+    # app_releases.edition：同一 Windows 平台下区分「含极域」和「无极域」两个安装包
+    if acols and "edition" not in acols:
+        execute("ALTER TABLE app_releases ADD COLUMN edition TEXT DEFAULT 'standard'")
 
     # ---- AI 自动配图：给店铺/菜品补状态列（老库平滑升级）----
     for _tbl in ("eat_stores", "eat_dishes"):

@@ -36,12 +36,19 @@ router = APIRouter(prefix="/api", tags=["update"])
 MAX_INSTALLER = 500 * 1024 * 1024
 
 PLATFORMS = ("windows", "android")
+EDITIONS = ("standard", "nojiyu")
 
 
 def _norm_platform(value: str | None) -> str:
     """非法/缺省一律按 windows，保证老客户端行为不变。"""
     p = (value or "").strip().lower()
     return p if p in PLATFORMS else "windows"
+
+
+def _norm_edition(value: str | None) -> str:
+    """standard=含极域安装包，nojiyu=无极域安装包；手机端没有这个维度。"""
+    e = (value or "").strip().lower()
+    return e if e in EDITIONS else "standard"
 
 
 def _release_out(r) -> dict:
@@ -53,6 +60,7 @@ def _release_out(r) -> dict:
         "fileSize": r["file_size"] or 0,
         "sha256": r["sha256"] or "",
         "platform": (r["platform"] if "platform" in r.keys() else "") or "windows",
+        "edition": (r["edition"] if "edition" in r.keys() else "") or "standard",
         "active": bool(r["active"]),
         "downloadCount": r["download_count"] or 0,
         "updatedAt": r["created_at"],
@@ -61,15 +69,18 @@ def _release_out(r) -> dict:
 
 
 @router.get("/update/latest")
-def latest(platform: str = Query("windows"), user: dict = Depends(get_current_user)):
-    """指定平台的最新下发版本；无版本时 available=False。"""
+def latest(platform: str = Query("windows"), edition: str = Query("standard"),
+           user: dict = Depends(get_current_user)):
+    """指定平台/版本形态的最新下发版本；无版本时 available=False。"""
     p = _norm_platform(platform)
+    e = _norm_edition(edition)
     row = query_one(
-        "SELECT * FROM app_releases WHERE active = 1 AND platform = ? ORDER BY id DESC LIMIT 1", (p,)
+        "SELECT * FROM app_releases WHERE active = 1 AND platform = ? "
+        "AND COALESCE(edition, 'standard') = ? ORDER BY id DESC LIMIT 1", (p, e)
     )
     if not row:
-        return {"ok": True, "available": False, "platform": p}
-    return {"ok": True, "available": True, "platform": p, **_release_out(row)}
+        return {"ok": True, "available": False, "platform": p, "edition": e}
+    return {"ok": True, "available": True, "platform": p, "edition": e, **_release_out(row)}
 
 
 @router.get("/update/download/{rid}")
@@ -88,9 +99,13 @@ def download(rid: int):
 
 # ---------------------------------------------------------------- 管理侧
 @router.get("/admin/releases")
-def admin_list(platform: str | None = Query(None), admin: dict = Depends(require_admin)):
+def admin_list(platform: str | None = Query(None), edition: str | None = Query(None),
+               admin: dict = Depends(require_admin)):
     if platform:
         rows = query_all("SELECT * FROM app_releases WHERE platform = ? ORDER BY id DESC", (_norm_platform(platform),))
+        if edition:
+            e = _norm_edition(edition)
+            rows = [r for r in rows if ((r["edition"] if "edition" in r.keys() else "") or "standard") == e]
     else:
         rows = query_all("SELECT * FROM app_releases ORDER BY id DESC")
     return {"ok": True, "releases": [_release_out(r) for r in rows]}
@@ -98,12 +113,13 @@ def admin_list(platform: str | None = Query(None), admin: dict = Depends(require
 
 @router.post("/admin/releases")
 async def admin_upload(file: UploadFile = File(...), version: str = Form(...), notes: str = Form(""),
-                       platform: str = Form("windows"),
+                       platform: str = Form("windows"), edition: str = Form("standard"),
                        admin: dict = Depends(require_admin)):
     version = version.strip()
     if not version:
         raise HTTPException(400, "请填写版本号")
     p = _norm_platform(platform)
+    e = _norm_edition(edition) if p == "windows" else "standard"
     data = await file.read()
     if not data:
         raise HTTPException(400, "安装包为空")
@@ -116,27 +132,30 @@ async def admin_upload(file: UploadFile = File(...), version: str = Form(...), n
     (UPDATE_DIR / name).write_bytes(data)
     sha = hashlib.sha256(data).hexdigest()
 
-    # 新上传即置为该平台的当前下发版本（只影响同平台，另一平台的 active 保持不动）
-    execute_update("UPDATE app_releases SET active = 0 WHERE platform = ?", (p,))
+    # 新上传即置为该平台/形态的当前下发版本（不影响含极域/无极域的另一份）
+    execute_update("UPDATE app_releases SET active = 0 WHERE platform = ? "
+                   "AND COALESCE(edition, 'standard') = ?", (p, e))
     rid = execute(
-        "INSERT INTO app_releases (version, notes, file_path, file_name, file_size, sha256, platform, active, created_at) "
-        "VALUES (?,?,?,?,?,?,?,1,?)",
-        (version, notes or "", f"/uploads/releases/{name}", raw_name, len(data), sha, p, security.now_ms()),
+        "INSERT INTO app_releases (version, notes, file_path, file_name, file_size, sha256, "
+        "platform, edition, active, created_at) VALUES (?,?,?,?,?,?,?,?,1,?)",
+        (version, notes or "", f"/uploads/releases/{name}", raw_name, len(data), sha, p, e, security.now_ms()),
     )
-    gh_update.prune_versions(p)
-    return {"ok": True, "id": rid, "platform": p}
+    gh_update.prune_versions(p, edition=e)
+    return {"ok": True, "id": rid, "platform": p, "edition": e}
 
 
 @router.post("/admin/releases/activate")
 def admin_activate(payload: dict = Body(...), admin: dict = Depends(require_admin)):
     rid = int(payload.get("id") or 0)
-    row = query_one("SELECT id, platform FROM app_releases WHERE id = ?", (rid,))
+    row = query_one("SELECT id, platform, edition FROM app_releases WHERE id = ?", (rid,))
     if not row:
         raise HTTPException(404, "版本不存在")
     p = _norm_platform(row["platform"])
-    execute_update("UPDATE app_releases SET active = 0 WHERE platform = ?", (p,))
+    e = _norm_edition(row["edition"] if "edition" in row.keys() else "")
+    execute_update("UPDATE app_releases SET active = 0 WHERE platform = ? "
+                   "AND COALESCE(edition, 'standard') = ?", (p, e))
     execute_update("UPDATE app_releases SET active = 1 WHERE id = ?", (rid,))
-    return {"ok": True, "platform": p}
+    return {"ok": True, "platform": p, "edition": e}
 
 
 @router.post("/admin/releases/update")
@@ -206,5 +225,8 @@ def gh_update_probe(admin: dict = Depends(require_admin)):
         latest = gh_update.fetch_latest(cfg)
     except Exception as e:
         return {"ok": False, "msg": f"获取 Release 失败：{e}"}
-    probed = gh_update.probe_mirrors(latest["assetUrl"], cfg)
-    return {"ok": True, "version": latest["version"], "asset": latest["assetName"], "mirrors": probed}
+    asset = (latest.get("assets") or {}).get("standard") or next(iter((latest.get("assets") or {}).values()), None)
+    if not asset:
+        return {"ok": False, "msg": "Release 中没有安装包"}
+    probed = gh_update.probe_mirrors(asset.get("browser_download_url") or "", cfg)
+    return {"ok": True, "version": latest["version"], "asset": asset.get("name") or "", "mirrors": probed}

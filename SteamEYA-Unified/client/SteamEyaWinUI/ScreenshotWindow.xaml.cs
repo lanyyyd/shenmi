@@ -11,6 +11,7 @@ using Windows.Storage;
 using Windows.Storage.Pickers;
 using Windows.Storage.Streams;
 using Windows.System;
+using System.Runtime.InteropServices.WindowsRuntime;
 
 namespace SteamEyaWinUI;
 
@@ -56,6 +57,9 @@ public sealed partial class ScreenshotWindow : Window
         CopyLabel.Text = Loc.T("Screenshot_Copy");
         SaveLabel.Text = Loc.T("Screenshot_Save");
         HintText.Text = Loc.T("Screenshot_Hint");
+
+        // 在窗口 Activate 之前就把画面填好，避免出现「先黑屏半秒再显示截图」。
+        ShowFrame();
     }
 
     /// <summary>
@@ -80,6 +84,7 @@ public sealed partial class ScreenshotWindow : Window
             BringWindowToTop(hwnd);
             SetForegroundWindow(hwnd);
             SetFocus(hwnd);
+            Root.Focus(FocusState.Programmatic);
         }
         catch (Exception ex)
         {
@@ -87,7 +92,7 @@ public sealed partial class ScreenshotWindow : Window
         }
     }
 
-    private async void OnRootLoaded(object sender, RoutedEventArgs e)
+    private void OnRootLoaded(object sender, RoutedEventArgs e)
     {
         Root.Focus(FocusState.Programmatic);
 
@@ -99,28 +104,28 @@ public sealed partial class ScreenshotWindow : Window
 
         // 二次置顶：窗口刚显示时前台应用可能还在抢焦点，延迟一帧再压一次。
         _ = DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, BringToFront);
+    }
 
-        try
+    /// <summary>
+    /// 直接把抓到的 BGRA 像素写进 WriteableBitmap，不再走「PNG 编码 → 解码」。
+    /// 原先那条链路要几百毫秒，窗口已经 Activate，用户会先看到黑屏再看到图。
+    /// </summary>
+    private void ShowFrame()
+    {
+        var pixels = _frame.Pixels;
+        // 屏幕 DIB 的 alpha 通常为 0，WriteableBitmap 按预乘透明度渲染会整张透明，必须置为不透明。
+        for (var i = 3; i < pixels.Length; i += 4)
         {
-            var png = await ScreenshotService.EncodePngAsync(_frame.Pixels, _frame.Width, _frame.Height);
-            using var stream = new InMemoryRandomAccessStream();
-            using (var writer = new DataWriter(stream))
-            {
-                writer.WriteBytes(png);
-                await writer.StoreAsync();
-                await writer.FlushAsync();
-                writer.DetachStream();
-            }
+            pixels[i] = 255;
+        }
 
-            stream.Seek(0);
-            var bitmap = new BitmapImage();
-            await bitmap.SetSourceAsync(stream);
-            ShotImage.Source = bitmap;
-        }
-        catch (Exception ex)
+        var bitmap = new WriteableBitmap(_frame.Width, _frame.Height);
+        using (var stream = bitmap.PixelBuffer.AsStream())
         {
-            AppLog.Warn($"显示截图预览失败：{ex.Message}");
+            stream.Write(pixels, 0, pixels.Length);
         }
+        bitmap.Invalidate();
+        ShotImage.Source = bitmap;
     }
 
     private void OnRootSizeChanged(object sender, SizeChangedEventArgs e)
@@ -280,6 +285,21 @@ public sealed partial class ScreenshotWindow : Window
     }
 
     // ---------- 键盘 ----------
+
+    private void OnEscapeInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        Close();
+    }
+
+    private async void OnEnterInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (_hasSelection && !_busy)
+        {
+            args.Handled = true;
+            await CopyAsync();
+        }
+    }
 
     private async void OnRootKeyDown(object sender, KeyRoutedEventArgs e)
     {

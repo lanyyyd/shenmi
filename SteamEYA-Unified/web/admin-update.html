@@ -243,7 +243,7 @@ function switchPlatform(p){
   loadReleases();
 }
 async function loadReleases(){
-  const r = await fetch('/api/admin/releases?platform=' + encodeURIComponent(PLATFORM));
+  const r = await fetch('/api/admin/releases?platform=' + encodeURIComponent(PLATFORM), { cache: 'no-store' });
   const d = await r.json().catch(()=>({}));
   if(!d.ok){ toast(d.error||'加载失败'); return; }
   RELEASES = d.releases || [];
@@ -254,6 +254,7 @@ function renderReleases(){
   $('tbody').innerHTML = RELEASES.map(x=>`
     <tr>
       <td data-l="版本号"><b>${esc(x.version)}</b>
+        ${x.edition === 'nojiyu' ? '<span class="chip gray" style="margin-left:6px">无极域</span>' : ''}
         ${x.fileName?`<div class="mono" style="margin-top:4px">${esc(x.fileName)}</div>`:''}
         ${x.notes?`<div class="mono" style="margin-top:2px;white-space:pre-wrap">${esc(x.notes)}</div>`:''}</td>
       <td data-l="文件大小"><span class="mono">${fmtSize(x.fileSize)}</span></td>
@@ -329,15 +330,25 @@ function editNotes(id){
 function closeNotes(){ $('notesMask').classList.add('hidden'); }
 async function saveNotes(){
   const btn = $('notesSave'); btn.disabled = true;
+  const text = $('notesText').value;
   try {
     const r = await fetch('/api/admin/releases/update', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ id: notesId, notes: $('notesText').value })
+      method:'POST', headers:{'Content-Type':'application/json'}, cache:'no-store',
+      credentials:'same-origin',
+      body: JSON.stringify({ id: notesId, notes: text })
     });
     const d = await r.json().catch(()=>({}));
-    if(!r.ok || !d.ok){ toast(d.detail || d.error || '保存失败'); return; }
+    if(!r.ok || !d.ok){
+      toast(`保存失败（HTTP ${r.status}）：` + (d.detail || d.error || '服务端未返回原因'));
+      return;
+    }
+    // 先用返回值直接更新本地行，避免依赖下一次列表请求
+    const row = RELEASES.find(x => x.id === notesId);
+    if (row) row.notes = text;
     toast('✅ 更新公告已保存');
     closeNotes(); loadReleases();
+  } catch (e) {
+    toast('保存失败：' + e.message);
   } finally {
     btn.disabled = false;
   }

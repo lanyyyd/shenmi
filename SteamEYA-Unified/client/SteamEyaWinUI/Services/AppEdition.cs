@@ -4,7 +4,7 @@ namespace SteamEyaWinUI.Services;
 /// 安装形态：发布目录里带 <c>nojiyu</c> 标记文件的是「无极域版」。
 /// 无极域版由 CI 用同一份 Native AOT 产物、剔除 jiyu 目录后单独打包，
 /// 因此启动后不拉起/不注册极域注入、导航栏不显示「小工具」，
-/// 并且检查更新只走 GitHub，下载 nojiyu 安装包。
+/// 并且检查更新时从服务器的 nojiyu 频道取无极域安装包。
 /// </summary>
 internal static class AppEdition
 {

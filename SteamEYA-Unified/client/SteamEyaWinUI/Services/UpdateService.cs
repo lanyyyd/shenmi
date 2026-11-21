@@ -14,7 +14,7 @@ namespace SteamEyaWinUI.Services;
 /// 检查更新：先看**自有服务器** <c>GET /api/update/latest</c>，再看 **GitHub Releases**。
 /// 两边版本一致时优先走服务器下载（更稳、有 sha256）；GitHub 版本更高时才走 GitHub，
 /// 并把下载链接接到自动测速选出的加速源上（国内直连 github.com 经常不通）。
-/// 无极域版（<see cref="AppEdition.IsNoJiYu"/>）跳过服务器，只从 GitHub 取 nojiyu 安装包。
+/// 无极域版查服务器的 `edition=nojiyu` 频道，拿到的仍是 nojiyu 安装包。
 /// </summary>
 internal sealed class UpdateService
 {
@@ -65,19 +65,17 @@ internal sealed class UpdateService
 
     public async Task<AppUpdateInfo> CheckLatestAsync(CancellationToken cancellationToken = default)
     {
-        // 顺序按需求：先查服务器，再查 GitHub。无极域版不走服务器，避免装回带极域的包。
+        // 顺序按需求：先查服务器，再查 GitHub。无极域版查服务器的 nojiyu 频道，
+        // 服务端会从同一个 Release 自动下发对应的 nojiyu 安装包。
         Exception? serverError = null;
         AppUpdateInfo? server = null;
-        if (!AppEdition.IsNoJiYu)
+        try
         {
-            try
-            {
-                server = await CheckServerAsync(cancellationToken);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                serverError = ex;
-            }
+            server = await CheckServerAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            serverError = ex;
         }
 
         AppUpdateInfo? github = null;
@@ -127,8 +125,13 @@ internal sealed class UpdateService
 
     private static async Task<AppUpdateInfo> CheckServerAsync(CancellationToken cancellationToken)
     {
-        using var req = new HttpRequestMessage(
-            HttpMethod.Get, SessionState.OnlineBaseUrl.TrimEnd('/') + "/api/update/latest");
+        var url = SessionState.OnlineBaseUrl.TrimEnd('/') + "/api/update/latest";
+        if (AppEdition.IsNoJiYu)
+        {
+            url += "?edition=nojiyu";
+        }
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
         if (!string.IsNullOrWhiteSpace(SessionState.Token))
         {
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", SessionState.Token);

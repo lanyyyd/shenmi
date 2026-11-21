@@ -171,18 +171,22 @@ def keep_limit() -> int:
         return int(DEFAULT_CONFIG["keep"])
 
 
-def prune_versions(platform: str = "windows", keep: int | None = None) -> int:
+def prune_versions(platform: str = "windows", keep: int | None = None,
+                   edition: str | None = None) -> int:
     """只保留最近 keep 个安装包（当前下发版本永远保留），返回清理条数。
 
-    keep=0 表示不限；被清理的版本连同磁盘文件一起删除。
+    keep=0 表示不限；被清理的版本连同磁盘文件一起删除。edition 为 None 时
+    按平台整体清理，指定后只清理该形态（含极域 / 无极域）。
     """
     keep = keep_limit() if keep is None else keep
     if keep <= 0:
         return 0
     rows = query_all(
-        "SELECT id, file_path, active FROM app_releases WHERE platform=? ORDER BY id DESC",
+        "SELECT id, file_path, active, edition FROM app_releases WHERE platform=? ORDER BY id DESC",
         (platform,),
     )
+    if edition is not None:
+        rows = [r for r in rows if ((r["edition"] if "edition" in r.keys() else "") or "standard") == edition]
     if len(rows) <= keep:
         return 0
     keep_ids = {r["id"] for r in rows if r["active"]}
@@ -212,7 +216,7 @@ def _api_headers(token: str = "") -> dict:
 
 
 def fetch_latest(cfg: dict) -> dict:
-    """取最新正式 Release：版本号、公告正文、含极域安装包信息。"""
+    """取最新正式 Release：版本号、公告正文，以及含极域/无极域两个安装包。"""
     repo = cfg.get("repo") or DEFAULT_CONFIG["repo"]
     url = f"https://api.github.com/repos/{repo}/releases/latest"
     resp = requests.get(url, headers=_api_headers(cfg.get("token") or ""), timeout=20)
@@ -229,30 +233,36 @@ def fetch_latest(cfg: dict) -> dict:
     if not version:
         raise RuntimeError("Release 没有版本号")
 
-    asset = _pick_installer(data.get("assets") or [])
-    if not asset:
-        raise RuntimeError("Release 中没有找到「含极域版本」的 Windows 安装包")
+    assets = _pick_installers(data.get("assets") or [])
+    if not assets:
+        raise RuntimeError("Release 中没有找到 Windows 安装包")
     return {
         "tag": tag,
         "version": version,
         "notes": _clean_notes(data.get("body") or ""),
-        "assetName": asset.get("name") or "setup.exe",
-        "assetUrl": asset.get("browser_download_url") or "",
-        "assetSize": int(asset.get("size") or 0),
+        "assets": assets,
     }
 
 
-def _pick_installer(assets: list) -> Optional[dict]:
-    """优先 TeaTT-<ver>-win-x64-setup.exe（含极域），排除 nojiyu。"""
-    candidates = [a for a in assets if str(a.get("name") or "").lower().endswith(".exe")
-                  and "nojiyu" not in str(a.get("name") or "").lower()]
-    if not candidates:
-        return None
-    for a in candidates:
+ASSET_SUFFIXES = {
+    "standard": "-win-x64-setup.exe",
+    "nojiyu": "-win-x64-nojiyu-setup.exe",
+}
+
+
+def _pick_installers(assets: list) -> dict:
+    """返回 {edition: asset}；standard 排除 nojiyu，两个形态各自挑最匹配的 exe。"""
+    picked: dict = {}
+    for a in assets:
         name = str(a.get("name") or "").lower()
-        if name.endswith("-win-x64-setup.exe"):
-            return a
-    return candidates[0]
+        if not name.endswith(".exe"):
+            continue
+        edition = "nojiyu" if "nojiyu" in name else "standard"
+        suffix = ASSET_SUFFIXES[edition]
+        score = 2 if name.endswith(suffix) else 1
+        if edition not in picked or score > picked[edition]["_score"]:
+            picked[edition] = {**a, "_score": score}
+    return {k: {kk: vv for kk, vv in v.items() if kk != "_score"} for k, v in picked.items()}
 
 
 def _clean_notes(body: str) -> str:
@@ -377,16 +387,48 @@ def _vtuple(v: str) -> tuple:
     return tuple(int(n) for n in nums[:4]) if nums else (0,)
 
 
-def _current_version() -> tuple[str, str]:
-    row = query_one("SELECT version, file_path FROM app_releases "
-                    "WHERE platform='windows' AND active=1 ORDER BY id DESC LIMIT 1")
+def _current_version(edition: str = "standard") -> tuple[str, str]:
+    row = query_one(
+        "SELECT version, file_path FROM app_releases WHERE platform='windows' AND active=1 "
+        "AND COALESCE(edition, 'standard') = ? ORDER BY id DESC LIMIT 1", (edition,)
+    )
     if not row:
         return "", ""
     return row["version"] or "", row["file_path"] or ""
 
 
+def _publish_edition(edition: str, asset: dict, latest: dict, cfg: dict,
+                     cur_version: str, cur_path: str, force: bool) -> dict:
+    cur_file = UPDATE_DIR / pathlib.Path(cur_path).name if cur_path else None
+    same = _vtuple(latest["version"]) == _vtuple(cur_version)
+    file_ok = bool(cur_file and cur_file.exists())
+    if not force and same and file_ok:
+        return {"edition": edition, "skipped": True,
+                "msg": f"{edition} 已是最新版本 {latest['version']}"}
+    if _vtuple(latest["version"]) < _vtuple(cur_version):
+        return {"edition": edition, "skipped": True,
+                "msg": f"{edition} 的 GitHub 版本 {latest['version']} 低于当前下发 {cur_version}，已跳过"}
+
+    saved, source, probed = _download(asset, cfg, latest["version"])
+    size = (UPDATE_DIR / saved).stat().st_size
+    sha = _sha256(UPDATE_DIR / saved)
+
+    execute_update("UPDATE app_releases SET active=0 WHERE platform='windows' "
+                   "AND COALESCE(edition, 'standard') = ?", (edition,))
+    rid = execute(
+        "INSERT INTO app_releases (version, notes, file_path, file_name, file_size, sha256, "
+        "platform, edition, active, created_at) VALUES (?,?,?,?,?,?,?,?,1,?)",
+        (latest["version"], latest["notes"], f"/uploads/releases/{saved}",
+         asset.get("name") or "setup.exe", size, sha, "windows", edition, security.now_ms()),
+    )
+    prune_versions("windows", edition=edition)
+    return {"edition": edition, "skipped": False, "version": latest["version"], "id": rid,
+            "asset": asset.get("name") or "setup.exe", "source": source,
+            "mirrors": [{"label": x["label"], "ms": x["ms"]} for x in probed]}
+
+
 def run_once(force: bool = False) -> dict:
-    """检查并下载一次。force=True 时即使版本相同也重新下载（用于文件缺失修复）。"""
+    """检查并下载一次：含极域、无极域两个安装包各自独立下发。"""
     if not _lock.acquire(blocking=False):
         return {"ok": False, "msg": "已有检查在进行中"}
     try:
@@ -394,36 +436,39 @@ def run_once(force: bool = False) -> dict:
         _save_status(lastCheckTs=security.now_ms(), lastResult="checking", message="正在检查 GitHub Release…")
         latest = fetch_latest(cfg)
 
-        cur_version, cur_path = _current_version()
-        cur_file = UPDATE_DIR / pathlib.Path(cur_path).name if cur_path else None
-        same = _vtuple(latest["version"]) == _vtuple(cur_version)
-        file_ok = bool(cur_file and cur_file.exists())
-        if not force and (same and file_ok):
-            msg = f"已是最新版本 {latest['version']}"
-            _save_status(lastResult="skipped", message=msg, version=latest["version"], asset=latest["assetName"])
-            return {"ok": True, "skipped": True, "msg": msg, "version": latest["version"]}
-        if _vtuple(latest["version"]) < _vtuple(cur_version):
-            msg = f"GitHub 最新 {latest['version']} 低于当前下发版本 {cur_version}，已跳过"
-            _save_status(lastResult="skipped", message=msg, version=latest["version"])
-            return {"ok": True, "skipped": True, "msg": msg, "version": latest["version"]}
+        results, errors = [], []
+        for edition, asset in (latest.get("assets") or {}).items():
+            cur_version, cur_path = _current_version(edition)
+            try:
+                results.append(_publish_edition(edition, asset, latest, cfg,
+                                                cur_version, cur_path, force))
+            except Exception as e:
+                errors.append(f"{edition}: {e}")
 
-        saved, source, probed = _download(latest, cfg, latest["version"])
-        size = (UPDATE_DIR / saved).stat().st_size
-        sha = _sha256(UPDATE_DIR / saved)
+        if not results and errors:
+            raise RuntimeError("；".join(errors))
 
-        execute_update("UPDATE app_releases SET active=0 WHERE platform='windows'")
-        rid = execute(
-            "INSERT INTO app_releases (version, notes, file_path, file_name, file_size, sha256, platform, active, created_at) "
-            "VALUES (?,?,?,?,?,?,?,1,?)",
-            (latest["version"], latest["notes"], f"/uploads/releases/{saved}",
-             latest["assetName"], size, sha, "windows", security.now_ms()),
+        done = [r for r in results if not r.get("skipped")]
+        skipped = [r for r in results if r.get("skipped")]
+        parts = [f"已更新 {r['edition']} → {r['version']}（来源：{r['source']}）" for r in done]
+        parts += [r["msg"] for r in skipped]
+        if errors:
+            parts.append("失败：" + "；".join(errors))
+        msg = "；".join(parts) or "没有可下发的安装包"
+
+        main = next((r for r in done if r["edition"] == "standard"), done[0] if done else {})
+        _save_status(
+            lastResult="ok" if not errors else ("error" if not done else "ok"),
+            message=msg,
+            version=latest["version"],
+            asset=main.get("asset") or "",
+            source=main.get("source") or "",
+            releaseId=main.get("id") or 0,
+            editions=results,
+            mirrors=main.get("mirrors") or [],
         )
-        prune_versions("windows")
-        msg = f"已自动更新到 {latest['version']}（来源：{source}）"
-        _save_status(lastResult="ok", message=msg, version=latest["version"],
-                     releaseId=rid, asset=latest["assetName"], source=source,
-                     mirrors=[{"label": x["label"], "ms": x["ms"]} for x in probed])
-        return {"ok": True, "version": latest["version"], "id": rid, "msg": msg}
+        return {"ok": not errors, "version": latest["version"],
+                "id": main.get("id") or 0, "msg": msg, "editions": results}
     except Exception as e:
         _save_status(lastResult="error", message=str(e))
         return {"ok": False, "msg": str(e)}
