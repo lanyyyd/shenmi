@@ -11,6 +11,7 @@ on:
       - 'SteamEYA-Unified/server/**'
       - 'SteamEYA-Unified/web/**'
       - 'SteamEYA-Unified/engine/**'
+      - 'SteamEYA-Unified/engine-go/**'
       - 'SteamEYA-Unified/native/**'
       - 'SteamEYA-Unified/minecraft/**'
       - 'SteamEYA-Unified/build/**'
@@ -23,6 +24,7 @@ on:
       - 'SteamEYA-Unified/server/**'
       - 'SteamEYA-Unified/web/**'
       - 'SteamEYA-Unified/engine/**'
+      - 'SteamEYA-Unified/engine-go/**'
       - 'SteamEYA-Unified/native/**'
       - 'SteamEYA-Unified/minecraft/**'
       - 'SteamEYA-Unified/build/**'
@@ -131,20 +133,22 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\publish\web" | Out-Null
           Copy-Item "..\web\*" "$env:GITHUB_WORKSPACE\publish\web\" -Recurse -Force
 
-      # ---- 云游戏引擎（Selenium 本地服务）----
-      # 客户端点开「云游戏上号」会拉起 <安装目录>\engine\steameya-engine.exe（见 EngineLauncher），
-      # 必须随安装包一起下发，否则页面提示「云游戏引擎未启动」。
-      # 入口用 --collect-all selenium：selenium 在代码里是延迟导入，且自带 selenium-manager 二进制，静态分析收集不全。
-      - name: 构建云游戏引擎（PyInstaller onefile）
+      # ---- 云游戏引擎（Go + CDP 本地服务）----
+      # 客户端点开「云游戏上号」会拉起 <安装目录>\engine\steameya-engine.exe（见 EngineLauncher）。
+      # 分支试验：用 Go 版替换原来的 Selenium/PyInstaller 实现，接口保持不变。
+      - name: Setup Go (云游戏引擎)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: SteamEYA-Unified/engine-go/go.mod
+          cache: false
+
+      - name: 构建云游戏引擎（Go）
         shell: pwsh
-        working-directory: SteamEYA-Unified/engine
+        working-directory: SteamEYA-Unified/engine-go
         run: |
-          python -m pip install -r requirements.txt fastapi "uvicorn[standard]" pyinstaller
-          python -m PyInstaller --noconfirm --clean --onefile --name steameya-engine `
-            --collect-all selenium local_service.py
-          if (-not (Test-Path "dist\steameya-engine.exe")) { throw "云游戏引擎 exe 未生成" }
           New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\publish\engine" | Out-Null
-          Copy-Item "dist\steameya-engine.exe" "$env:GITHUB_WORKSPACE\publish\engine\" -Force
+          go build -trimpath -ldflags="-s -w" -o "$env:GITHUB_WORKSPACE\publish\engine\steameya-engine.exe" .
+          if (-not (Test-Path "$env:GITHUB_WORKSPACE\publish\engine\steameya-engine.exe")) { throw "云游戏引擎 exe 未生成" }
 
       - name: Install Inno Setup
         shell: pwsh
