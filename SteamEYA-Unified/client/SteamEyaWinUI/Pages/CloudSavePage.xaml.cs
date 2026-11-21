@@ -616,7 +616,7 @@ public sealed partial class CloudSavePage : Page
             return;
         }
 
-        var instances = ScanMcInstances(mcDir);
+        var instances = ScanAllMcInstances(mcDir);
         if (instances.Count == 0)
         {
             ShowInfo("没有找到可安装的版本实例", InfoBarSeverity.Warning);
@@ -773,91 +773,31 @@ public sealed partial class CloudSavePage : Page
         }
     }
 
-    /// <summary>扫描 versions/*，识别加载器与游戏版本。</summary>
+    /// <summary>扫描 versions/*，识别加载器与游戏版本（复用 MinecraftLocator）。</summary>
     private static List<McInstance> ScanMcInstances(string mcDir)
     {
-        var list = new List<McInstance>();
-        var versionsDir = Path.Combine(mcDir, "versions");
-        foreach (var dir in Directory.GetDirectories(versionsDir))
-        {
-            var name = Path.GetFileName(dir);
-            var jsonPath = Path.Combine(dir, name + ".json");
-            if (!File.Exists(jsonPath))
+        return MinecraftLocator.ScanInstances(mcDir)
+            .Select(i => new McInstance
             {
-                continue;
-            }
-
-            try
-            {
-                using var doc = JsonDocument.Parse(File.ReadAllText(jsonPath));
-                var root = doc.RootElement;
-                var loader = "vanilla";
-                if (root.TryGetProperty("libraries", out var libs) && libs.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var lib in libs.EnumerateArray())
-                    {
-                        if (!lib.TryGetProperty("name", out var nameNode))
-                        {
-                            continue;
-                        }
-                        var libName = nameNode.GetString() ?? "";
-                        if (libName.StartsWith("net.fabricmc:fabric-loader", StringComparison.Ordinal))
-                        {
-                            loader = "fabric";
-                        }
-                        else if (libName.StartsWith("net.neoforged:neoforge", StringComparison.Ordinal))
-                        {
-                            loader = "neoforge";
-                        }
-                        else if (loader == "vanilla"
-                                 && libName.StartsWith("net.minecraftforge:", StringComparison.Ordinal))
-                        {
-                            loader = "forge";
-                        }
-                    }
-                }
-
-                var mcVersion = ReadMcVersion(root);
-                if (string.IsNullOrWhiteSpace(mcVersion))
-                {
-                    continue;
-                }
-
-                var isolated = Directory.Exists(Path.Combine(dir, "saves"))
-                    || Directory.Exists(Path.Combine(dir, "mods"))
-                    || Directory.Exists(Path.Combine(dir, "config"));
-                list.Add(new McInstance
-                {
-                    Name = name,
-                    McVersion = mcVersion,
-                    Loader = loader,
-                    GameDir = isolated ? dir : mcDir
-                });
-            }
-            catch
-            {
-                // 单个实例 JSON 损坏不影响其他实例
-            }
-        }
-        return list.OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase).ToList();
+                Name = i.Name,
+                McVersion = i.McVersion,
+                Loader = i.Loader,
+                GameDir = i.GameDir
+            })
+            .ToList();
     }
 
-    private static string ReadMcVersion(JsonElement root)
+    /// <summary>扫描默认目录与常见启动器目录，按游戏目录去重。</summary>
+    private static List<McInstance> ScanAllMcInstances(string mcDir)
     {
-        foreach (var key in new[] { "inheritsFrom", "clientVersion", "id" })
-        {
-            if (!root.TryGetProperty(key, out var node))
-            {
-                continue;
-            }
-            var text = node.GetString() ?? "";
-            var match = Regex.Match(text, @"\b(1\.\d+(?:\.\d+)?)\b");
-            if (match.Success)
-            {
-                return match.Groups[1].Value;
-            }
-        }
-        return "";
+        return MinecraftLocator.SearchRoots()
+            .Append(mcDir)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .SelectMany(ScanMcInstances)
+            .GroupBy(i => i.GameDir, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static string LoaderName(string loader) => loader switch
@@ -1308,7 +1248,12 @@ public sealed partial class CloudSavePage : Page
     /// </summary>
     private async Task RestoreMinecraftAsync(CloudSaveItem item)
     {
-        var (savesDir, folderName) = ResolveMinecraftSavesDir(item);
+        var (savesDir, folderName, canceled) = await ResolveMinecraftSavesDirAsync(item);
+        if (canceled)
+        {
+            ShowInfo("已取消还原", InfoBarSeverity.Informational);
+            return;
+        }
         if (string.IsNullOrWhiteSpace(savesDir))
         {
             var picked = await PickFolderAsync();
@@ -1317,7 +1262,7 @@ public sealed partial class CloudSavePage : Page
                 ShowInfo("已取消还原", InfoBarSeverity.Informational);
                 return;
             }
-            savesDir = picked;
+            savesDir = ResolveSavesFromPicked(picked);
         }
 
         if (!IsSafeToClear(savesDir))
@@ -1388,9 +1333,14 @@ public sealed partial class CloudSavePage : Page
         }
     }
 
-    /// <summary>从备份时记录的完整路径推导 saves 目录与存档文件夹名。</summary>
-    private static (string? savesDir, string? folderName) ResolveMinecraftSavesDir(CloudSaveItem item)
+    /// <summary>
+    /// 解析还原目标：优先用备份时的原路径（同机可用），否则按整合包名 + 游戏版本在本机搜索实例。
+    /// </summary>
+    private async Task<(string? savesDir, string? folderName, bool canceled)> ResolveMinecraftSavesDirAsync(
+        CloudSaveItem item)
     {
+        var folderName = !string.IsNullOrWhiteSpace(item.SaveFolder) ? item.SaveFolder : item.SaveName;
+
         var full = NormalizeSaveDir(item.SavePath);
         if (!string.IsNullOrWhiteSpace(full))
         {
@@ -1399,23 +1349,96 @@ public sealed partial class CloudSavePage : Page
             var name = Path.GetFileName(trimmed);
             if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent))
             {
-                return (parent, name);
+                return (parent, name, false);
             }
         }
 
-        // 本机没有原版本实例时，尝试同版本目录下的 saves。
-        if (!string.IsNullOrWhiteSpace(item.VersionName))
+        var candidates = MinecraftLocator.FindCandidates(item.VersionName, item.GameVersion);
+        if (candidates.Count == 1)
         {
-            var mc = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ".minecraft");
-            var candidate = Path.Combine(mc, "versions", item.VersionName, "saves");
-            if (Directory.Exists(candidate))
-            {
-                return (candidate, item.SaveFolder);
-            }
+            MinecraftLocator.Remember(item.VersionName, item.GameVersion, candidates[0].InstanceDir);
+            return (candidates[0].SavesDir, folderName, false);
+        }
+        if (candidates.Count == 0)
+        {
+            return (null, folderName, false);
         }
 
-        return (null, item.SaveFolder);
+        var combo = new ComboBox { MinWidth = 520 };
+        foreach (var candidate in candidates)
+        {
+            combo.Items.Add(new ComboBoxItem
+            {
+                Content = $"{candidate.Name} · MC {candidate.McVersion} · " +
+                          $"{LoaderName(candidate.Loader)} · {candidate.GameDir}",
+                Tag = candidate
+            });
+        }
+        combo.SelectedIndex = 0;
+
+        var body = new StackPanel { Spacing = 8 };
+        body.Children.Add(new TextBlock
+        {
+            Text = "没有找到备份时的原路径，已按整合包名和游戏版本在本机搜索到多个实例：",
+            TextWrapping = TextWrapping.Wrap
+        });
+        body.Children.Add(combo);
+        body.Children.Add(new TextBlock
+        {
+            Text = "请选择要还原到的整合包，选错会还原到别的实例的 saves 目录。",
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 12,
+            Foreground = SecondaryTextBrush()
+        });
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = $"还原存档 · {item.SaveName}",
+            Content = body,
+            PrimaryButtonText = "使用此实例",
+            SecondaryButtonText = "手动选择…",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result == ContentDialogResult.Secondary)
+        {
+            var picked = await PickFolderAsync();
+            if (string.IsNullOrWhiteSpace(picked))
+            {
+                return (null, folderName, true);
+            }
+
+            var savesDir = ResolveSavesFromPicked(picked);
+            var instanceDir = Path.GetDirectoryName(savesDir.TrimEnd('\\', '/'));
+            if (!string.IsNullOrWhiteSpace(instanceDir) && Directory.Exists(instanceDir))
+            {
+                MinecraftLocator.Remember(item.VersionName, item.GameVersion, instanceDir);
+            }
+            return (savesDir, folderName, false);
+        }
+        if (result != ContentDialogResult.Primary
+            || combo.SelectedItem is not ComboBoxItem { Tag: McInstanceInfo selected })
+        {
+            return (null, folderName, true);
+        }
+
+        MinecraftLocator.Remember(item.VersionName, item.GameVersion, selected.InstanceDir);
+        return (selected.SavesDir, folderName, false);
+    }
+
+    /// <summary>用户手动选的目录可能是实例目录、.minecraft 目录或 saves 目录，统一解析到 saves。</summary>
+    private static string ResolveSavesFromPicked(string picked)
+    {
+        var trimmed = picked.TrimEnd('\\', '/');
+        if (string.Equals(Path.GetFileName(trimmed), "saves", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed;
+        }
+        var saves = Path.Combine(trimmed, "saves");
+        return Directory.Exists(saves) ? saves : trimmed;
     }
 
     private async Task<bool> ConfirmMinecraftRestoreAsync(CloudSaveItem item, string savesDir)
