@@ -93,6 +93,9 @@ func (e *engine) handleBrowserOpen(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, jsonObj{"ok": false, "msg": err.Error()})
 			return
 		}
+	} else if err := s.ensurePage(navigateTarget(p.Game, p.URL)); err != nil {
+		writeJSON(w, jsonObj{"ok": false, "msg": err.Error()})
+		return
 	}
 	writeJSON(w, jsonObj{
 		"ok":     true,

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -78,7 +79,36 @@ func (s *session) run(timeout time.Duration, actions ...chromedp.Action) error {
 }
 
 func (s *session) navigate(target string) error {
-	return s.run(30*time.Second, chromedp.Navigate(target))
+	log.Printf("导航 [%s/%s] -> %s", s.game, s.kind, target)
+	err := s.run(30*time.Second, chromedp.Navigate(target))
+	if err != nil {
+		log.Printf("导航失败 [%s/%s]: %v", s.game, s.kind, err)
+		return err
+	}
+	s.bringToFront()
+	return nil
+}
+
+// ensurePage navigates away from the startup blank tab. Chrome may keep the
+// visible tab at about:blank while the controlled target is a background one,
+// which made one-click login look like it did nothing.
+func (s *session) ensurePage(target string) error {
+	var loc string
+	if err := s.run(5*time.Second, chromedp.Location(&loc)); err != nil {
+		loc = ""
+	}
+	switch {
+	case loc == "", loc == "about:blank", strings.HasPrefix(loc, "chrome://newtab"):
+		return s.navigate(target)
+	}
+	s.bringToFront()
+	return nil
+}
+
+func (s *session) bringToFront() {
+	_ = s.run(5*time.Second, chromedp.ActionFunc(func(ctx context.Context) error {
+		return page.BringToFront().Do(ctx)
+	}))
 }
 
 func (s *session) reload() error {
@@ -143,7 +173,7 @@ func (e *engine) getCapture(game, browserType string) (*session, bool, error) {
 		s.close()
 		delete(e.capture, game)
 	}
-	s, err := launchSession(e.dataDir, game, kindCapture, browserType, false)
+	s, err := launchSession(e.dataDir, game, kindCapture, browserType, false, navigateTarget(game, ""))
 	if err != nil {
 		return nil, false, err
 	}
@@ -172,7 +202,7 @@ func (e *engine) getLogin(game, browserType string) (*session, bool, error) {
 		e.registry.remove(game)
 	}
 
-	s, err := launchSession(e.dataDir, game, kindLogin, browserType, true)
+	s, err := launchSession(e.dataDir, game, kindLogin, browserType, true, cfgFor(game, "").Home)
 	if err != nil {
 		return nil, false, err
 	}
@@ -214,7 +244,7 @@ func (e *engine) aliveGames() map[string]bool {
 	return alive
 }
 
-func launchSession(dataDir, game, kind, browserType string, detach bool) (*session, error) {
+func launchSession(dataDir, game, kind, browserType string, detach bool, initialURL string) (*session, error) {
 	prefix := "capture_profile_"
 	if kind == kindLogin {
 		prefix = "login_profile_"
@@ -233,10 +263,12 @@ func launchSession(dataDir, game, kind, browserType string, detach bool) (*sessi
 	// a port that no longer belongs to this browser.
 	_ = os.Remove(filepath.Join(profile, "DevToolsActivePort"))
 
-	cmd, done, err := startBrowser(exe, browserArgs(profile), detach)
+	cmd, done, err := startBrowser(exe, browserArgs(profile, initialURL), detach)
 	if err != nil {
 		return nil, fmt.Errorf("启动浏览器失败：%w", err)
 	}
+	log.Printf("已启动浏览器 [%s/%s] exe=%s profile=%s pid=%d url=%s",
+		game, kind, exe, profile, cmd.Process.Pid, initialURL)
 
 	port, wsPath, err := waitDevToolsPort(profile, done, 25*time.Second)
 	if err != nil {
@@ -281,11 +313,20 @@ func attachCDP(game, kind, browserType, exe, profile string, pid, port int, wsUR
 	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), wsURL)
 
 	preferHost := hostOf(navigateTarget(game, ""))
+	targetID := pickPageTarget(port, preferHost)
+	// The DevTools endpoint can answer /json/list slightly before the first
+	// page shows up. Wait instead of letting chromedp create a hidden extra tab.
+	for i := 0; targetID == "" && i < 10; i++ {
+		time.Sleep(200 * time.Millisecond)
+		targetID = pickPageTarget(port, preferHost)
+	}
 	var ctx context.Context
 	var cancel context.CancelFunc
-	if targetID := pickPageTarget(port, preferHost); targetID != "" {
+	if targetID != "" {
+		log.Printf("CDP 接管已有标签页 [%s/%s] target=%s", game, kind, targetID)
 		ctx, cancel = chromedp.NewContext(allocCtx, chromedp.WithTargetID(cdptarget.ID(targetID)))
 	} else {
+		log.Printf("CDP 未发现页面标签，创建新标签 [%s/%s]", game, kind)
 		ctx, cancel = chromedp.NewContext(allocCtx)
 	}
 
@@ -312,6 +353,7 @@ func attachCDP(game, kind, browserType, exe, profile string, pid, port int, wsUR
 		allocCancel: allocCancel,
 	}
 	s.setupTarget()
+	s.bringToFront()
 	return s, nil
 }
 
@@ -347,7 +389,10 @@ func headerValue(headers network.Headers, name string) string {
 	return ""
 }
 
-func browserArgs(profile string) []string {
+func browserArgs(profile, initialURL string) []string {
+	if strings.TrimSpace(initialURL) == "" {
+		initialURL = "about:blank"
+	}
 	return []string{
 		"--user-data-dir=" + profile,
 		"--remote-debugging-port=0",
@@ -357,8 +402,7 @@ func browserArgs(profile string) []string {
 		"--disable-popup-blocking",
 		"--start-maximized",
 		"--disable-extensions",
-		"--disable-blink-features=AutomationControlled",
-		"about:blank",
+		initialURL,
 	}
 }
 

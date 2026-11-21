@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -20,6 +21,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("数据目录不可用: %v", err)
 	}
+	setupLogging(dataDir)
 
 	eng := newEngine(dataDir)
 	mux := http.NewServeMux()
@@ -51,4 +53,15 @@ func resolveDataDir() (string, error) {
 		return "", err
 	}
 	return filepath.Dir(exe), nil
+}
+
+// setupLogging mirrors the engine log to <dataDir>\engine.log so a user can
+// send it back when browser automation fails on a real Windows machine.
+func setupLogging(dataDir string) {
+	f, err := os.OpenFile(filepath.Join(dataDir, "engine.log"),
+		os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	log.SetOutput(io.MultiWriter(os.Stdout, f))
 }
