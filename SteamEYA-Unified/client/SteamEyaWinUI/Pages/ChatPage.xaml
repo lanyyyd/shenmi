@@ -45,7 +45,7 @@
         </ResourceDictionary>
     </Page.Resources>
 
-    <Grid Background="{ThemeResource ChatBgBrush}">
+    <Grid x:Name="ChatRoot" Background="{ThemeResource ChatBgBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -53,6 +53,7 @@
 
         <!-- ================= 顶部命令条（网页版 / 原生版共用） ================= -->
         <Grid
+            x:Name="TopBar"
             Grid.Row="0"
             Padding="16,9"
             ColumnSpacing="10"
@@ -118,6 +119,7 @@
 
             <!-- 左栏：联系人搜索 + 置顶 / 群聊 / 在线 / 离线 -->
             <Grid
+                x:Name="SidebarPanel"
                 Grid.Column="0"
                 Background="{ThemeResource ChatPanelBrush}"
                 BorderThickness="0,0,1,0"

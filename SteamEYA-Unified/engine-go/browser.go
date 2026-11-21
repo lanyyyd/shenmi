@@ -330,9 +330,19 @@ func attachCDP(game, kind, browserType, exe, profile string, pid, port int, wsUR
 		ctx, cancel = chromedp.NewContext(allocCtx)
 	}
 
-	runCtx, runCancel := context.WithTimeout(ctx, 25*time.Second)
-	err := chromedp.Run(runCtx)
-	runCancel()
+	// The first Run must use a context that lives as long as the session:
+	// RemoteAllocator watches the context passed to its Allocate call (i.e.
+	// this one) and, when it is done, cancels the session, closes the tab and
+	// drops the DevTools websocket. Using a short-lived context here (and
+	// cancelling it right after Run) silently killed every later CDP command,
+	// which looked like "the page opened but cookies were never injected".
+	// Bound the attach with a watchdog instead of a cancelable context.
+	initCtx, initCancel := context.WithCancel(ctx)
+	watchdog := time.AfterFunc(25*time.Second, initCancel)
+	err := chromedp.Run(initCtx)
+	if !watchdog.Stop() {
+		initCancel()
+	}
 	if err != nil {
 		cancel()
 		allocCancel()

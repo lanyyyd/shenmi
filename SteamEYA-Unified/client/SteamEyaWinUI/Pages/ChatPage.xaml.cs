@@ -64,6 +64,9 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     private readonly List<ChatMessageDto> _rawMessages = [];
     private ChatUserDto[] _rawUsers = [];
     private bool _wasDisconnected;
+    private Brush? _chatBgDefault;
+    private Brush? _sidebarDefault;
+    private Brush? _topBarDefault;
     private readonly Dictionary<int, (string Username, long LastReadId)> _readState = [];
     private readonly Dictionary<string, int> _unread = [];
     private readonly Dictionary<int, string> _notes = [];
@@ -145,6 +148,11 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         Loc.LanguageChanged += OnLanguageChanged;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+
+        _chatBgDefault = ChatRoot.Background;
+        _sidebarDefault = SidebarPanel.Background;
+        _topBarDefault = TopBar.Background;
+        ActualThemeChanged += (_, _) => ApplyChatBackground();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -162,6 +170,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         if (_initialized)
         {
             ApplyStaticText();
+            ApplyChatBackground();
             RefreshConnBanner(_chat.IsConnected);
             return;
         }
@@ -171,6 +180,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         ChatHub.ResetPendingNotifications();
         EnsurePalette();
         ApplyStaticText();
+        ApplyChatBackground();
 
         try
         {
@@ -333,13 +343,6 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     private static string LevelTextOf(int level) => "Lv" + Math.Clamp(level, 0, 6);
 
     // ---------------- 网页版 / 原生版 ----------------
-    private static string ChatModeSetting() => AppState.SettingsService.Load().ChatMode switch
-    {
-        "Web" => "Web",
-        "Native" => "Native",
-        _ => "Auto"
-    };
-
     private async Task InitializeModeAsync()
     {
         if (SessionState.Offline || string.IsNullOrWhiteSpace(SessionState.Token))
@@ -349,7 +352,8 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             return;
         }
 
-        if (ChatModeSetting() == "Native")
+        // 周一 / 周三 07:00–09:40 自动用原生聊天室，其余时间自动用网页版。
+        if (InNativeChatWindow())
         {
             SwitchMode(false);
             return;
@@ -363,6 +367,43 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
 
         SwitchMode(false);
         MainWindow.Instance?.ShowStatus(Loc.T("Chat_WebFailed"), InfoBarSeverity.Warning);
+    }
+
+    /// <summary>按本机时间判断是否处于「原生聊天室」时段：周一、周三 07:00–09:40。</summary>
+    private static bool InNativeChatWindow()
+    {
+        var now = DateTime.Now;
+        if (now.DayOfWeek is not (DayOfWeek.Monday or DayOfWeek.Wednesday))
+        {
+            return false;
+        }
+        return now.TimeOfDay >= TimeSpan.FromHours(7)
+            && now.TimeOfDay < new TimeSpan(9, 40, 0);
+    }
+
+    /// <summary>原生聊天室背景跟随「设置 → 个性化」里的自定义背景。</summary>
+    private void ApplyChatBackground()
+    {
+        var settings = AppState.SettingsService.Load();
+        var custom = settings.CustomBackgroundEnabled
+            && AppState.SettingsService.GetCustomBackgroundImagePath(settings) is not null;
+
+        if (!custom)
+        {
+            ChatRoot.Background = _chatBgDefault;
+            SidebarPanel.Background = _sidebarDefault;
+            TopBar.Background = _topBarDefault;
+            return;
+        }
+
+        ChatRoot.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0, 0, 0));
+        // 半透明侧栏 / 顶栏：既能透出背景，又保证文字可读。
+        var dark = ActualTheme == ElementTheme.Dark;
+        var panel = new SolidColorBrush(dark
+            ? Windows.UI.Color.FromArgb(0xD0, 0x15, 0x19, 0x26)
+            : Windows.UI.Color.FromArgb(0xD8, 0xFF, 0xFF, 0xFF));
+        SidebarPanel.Background = panel;
+        TopBar.Background = panel;
     }
 
     private static void PersistChatMode(string mode)

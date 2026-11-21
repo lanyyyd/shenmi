@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/page"
+	"github.com/chromedp/chromedp"
 )
 
 // interceptJS is _INTERCEPT_JS, copied verbatim from browser_driver.py.
@@ -168,9 +169,10 @@ const readComboJS = `
 // captureComboToken is capture_combo_token. The network listener installed in
 // setupTarget replaces Selenium's performance log fallback.
 func captureComboToken(s *session, timeout int) string {
-	ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
-	_, _ = page.AddScriptToEvaluateOnNewDocument(interceptJS).Do(ctx)
-	cancel()
+	_ = s.run(10*time.Second, chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := page.AddScriptToEvaluateOnNewDocument(interceptJS).Do(ctx)
+		return err
+	}))
 
 	_ = s.reload()
 
