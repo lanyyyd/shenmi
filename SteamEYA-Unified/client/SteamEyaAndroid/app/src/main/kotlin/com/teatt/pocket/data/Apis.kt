@@ -8,6 +8,8 @@ import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CloudGamesDto
 import com.teatt.pocket.core.CloudMyDto
 import com.teatt.pocket.core.CookieDto
+import com.teatt.pocket.core.ExpiryPushQrDto
+import com.teatt.pocket.core.ExpiryPushStatusDto
 import com.teatt.pocket.core.GachaLinkDto
 import com.teatt.pocket.core.GachaRolesDto
 import com.teatt.pocket.core.LoginDto
@@ -128,6 +130,28 @@ object CloudApi {
     suspend fun stokenPoll(token: String, session: String): StokenPollDto {
         val body = buildJsonObject { put("session", JsonPrimitive(session)) }.toString()
         return Api.decode(Api.postJson("/api/cloud/stoken/poll", body, token))
+    }
+
+    // ---------------- Cookie 过期微信提醒（PushPlus 扫码绑定） ----------------
+
+    suspend fun expiryPushStatus(token: String): ExpiryPushStatusDto =
+        Api.decode(Api.get("/api/cloud/expiry-push", token))
+
+    /** 生成一次性个人二维码，微信扫码后由 pushplus 回调自动绑定。 */
+    suspend fun expiryPushQr(token: String): ExpiryPushQrDto =
+        Api.decode(Api.postJson("/api/cloud/expiry-push/qr", "{}", token))
+
+    suspend fun setExpiryPushEnabled(token: String, enabled: Boolean): ExpiryPushStatusDto {
+        val body = buildJsonObject { put("enabled", JsonPrimitive(enabled)) }.toString()
+        return Api.decode(Api.postJson("/api/cloud/expiry-push/enabled", body, token))
+    }
+
+    suspend fun unbindExpiryPush(token: String): ExpiryPushStatusDto =
+        Api.decode(Api.postJson("/api/cloud/expiry-push/unbind", "{}", token))
+
+    /** 发一条测试推送；失败会抛 ApiException。 */
+    suspend fun testExpiryPush(token: String) {
+        Api.postJson("/api/cloud/expiry-push/test", "{}", token)
     }
 
     /** 列出扫码 stoken 绑定的原神/星铁角色。 */

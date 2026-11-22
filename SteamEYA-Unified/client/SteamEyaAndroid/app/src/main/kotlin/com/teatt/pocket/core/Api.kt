@@ -289,6 +289,29 @@ data class StokenPollDto(
     val matched: Int = 0
 )
 
+/** 云游戏 Cookie 过期提醒（PushPlus 扫码绑定）状态。 */
+@Serializable
+data class ExpiryPushStatusDto(
+    val ok: Boolean = false,
+    /** 服务端是否已配置 PushPlus（Token + SecretKey）。 */
+    val configured: Boolean = false,
+    val bound: Boolean = false,
+    val enabled: Boolean = false,
+    val nickname: String = "",
+    @SerialName("boundAt") val boundAt: Long = 0,
+    val detail: String = ""
+)
+
+/** 一次性个人绑定二维码。 */
+@Serializable
+data class ExpiryPushQrDto(
+    val ok: Boolean = false,
+    val url: String = "",
+    val nonce: String = "",
+    @SerialName("expiresIn") val expiresIn: Int = 0,
+    val detail: String = ""
+)
+
 @Serializable
 data class GachaRoleDto(
     @SerialName("game_biz") val gameBiz: String = "",

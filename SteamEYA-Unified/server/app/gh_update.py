@@ -216,32 +216,41 @@ def _api_headers(token: str = "") -> dict:
 
 
 def fetch_latest(cfg: dict) -> dict:
-    """取最新正式 Release：版本号、公告正文，以及含极域/无极域两个安装包。"""
+    """取最新**桌面端**正式 Release：版本号、公告正文，以及两个安装包。
+
+    不能直接用 /releases/latest：安卓包（android-v*）和这次新增的服务端包
+    （server-*）也会发 Release，一旦它们排到最前，latest 会返回一个没有 exe 的
+    版本，自动更新就会报「没有找到安装包」。这里改为遍历列表，只认 v 开头、
+    且真的带 Windows 安装包的正式 Release。
+    """
     repo = cfg.get("repo") or DEFAULT_CONFIG["repo"]
-    url = f"https://api.github.com/repos/{repo}/releases/latest"
+    url = f"https://api.github.com/repos/{repo}/releases?per_page=30"
     resp = requests.get(url, headers=_api_headers(cfg.get("token") or ""), timeout=20)
     if resp.status_code == 403:
         raise RuntimeError("GitHub API 被限流（403），可在后台填写 GitHub Token 后重试")
     if resp.status_code != 200:
         raise RuntimeError(f"GitHub API 返回 HTTP {resp.status_code}")
-    data = resp.json() or {}
-    if data.get("draft") or data.get("prerelease"):
-        raise RuntimeError("最新 Release 是草稿/预发布，已跳过")
+    releases = resp.json() or []
+    if not isinstance(releases, list):
+        raise RuntimeError("GitHub API 返回格式异常")
 
-    tag = str(data.get("tag_name") or "").strip()
-    version = tag.lstrip("vV")
-    if not version:
-        raise RuntimeError("Release 没有版本号")
-
-    assets = _pick_installers(data.get("assets") or [])
-    if not assets:
-        raise RuntimeError("Release 中没有找到 Windows 安装包")
-    return {
-        "tag": tag,
-        "version": version,
-        "notes": _clean_notes(data.get("body") or ""),
-        "assets": assets,
-    }
+    for data in releases:
+        if not isinstance(data, dict) or data.get("draft") or data.get("prerelease"):
+            continue
+        tag = str(data.get("tag_name") or "").strip()
+        # 桌面端 tag 形如 v1.0.95；android-v* / server-* 一律跳过。
+        if not re.match(r"^[vV]\d+(?:\.\d+)*$", tag):
+            continue
+        assets = _pick_installers(data.get("assets") or [])
+        if not assets:
+            continue
+        return {
+            "tag": tag,
+            "version": tag.lstrip("vV"),
+            "notes": _clean_notes(data.get("body") or ""),
+            "assets": assets,
+        }
+    raise RuntimeError("没有找到带 Windows 安装包的正式 Release")
 
 
 ASSET_SUFFIXES = {

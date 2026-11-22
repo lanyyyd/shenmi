@@ -101,5 +101,6 @@ jobs:
           else
             gh release create "$TAG" "ShenMi-1.0.$PATCH-android.apk" \
               --title "神·魔法武器 安卓 1.0.$PATCH" \
+              --prerelease \
               --notes "安卓客户端构建产物（直接安装 APK，固定签名可覆盖升级）。"
           fi

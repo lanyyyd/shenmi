@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -56,11 +57,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -72,6 +75,7 @@ import com.teatt.pocket.core.CloudCredential
 import com.teatt.pocket.core.CloudCredentialStore
 import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CookieDto
+import com.teatt.pocket.core.ExpiryPushStatusDto
 import com.teatt.pocket.core.GachaLinkDto
 import com.teatt.pocket.core.GachaRoleDto
 import com.teatt.pocket.core.StokenCreateDto
@@ -80,6 +84,7 @@ import kotlinx.coroutines.delay
 import com.teatt.pocket.ui.BrandPink
 import com.teatt.pocket.ui.LocalBarInset
 import com.teatt.pocket.ui.NetworkErrorPane
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 
 @Composable
@@ -103,6 +108,9 @@ fun CloudScreen(
     var gachaLoading by remember { mutableStateOf(false) }
     var credTarget by remember { mutableStateOf<CloudAccountDto?>(null) }
     var creds by remember { mutableStateOf<Map<String, CloudCredential>>(emptyMap()) }
+    var pushStatus by remember { mutableStateOf<ExpiryPushStatusDto?>(null) }
+    var pushQrOpen by remember { mutableStateOf(false) }
+    var pushBusy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -130,7 +138,62 @@ fun CloudScreen(
         }
         creds = runCatching { CloudCredentialStore.list() }
             .getOrNull().orEmpty().associateBy { it.key }
+        // 过期提醒状态单独容错：接口没部署/断网时静默保留旧值，不影响账号列表。
+        pushStatus = runCatching { CloudApi.expiryPushStatus(token) }.getOrNull() ?: pushStatus
         loading = false
+    }
+
+    fun refreshPushStatus() {
+        scope.launch {
+            pushStatus = runCatching { CloudApi.expiryPushStatus(token) }.getOrNull() ?: pushStatus
+        }
+    }
+
+    fun setPushEnabled(enabled: Boolean) {
+        if (pushStatus?.bound != true) {
+            pushQrOpen = true
+            return
+        }
+        pushBusy = true
+        scope.launch {
+            try {
+                pushStatus = CloudApi.setExpiryPushEnabled(token, enabled)
+                dialog = "过期提醒" to if (enabled) "已开启，检测到 Cookie 失效会推送微信提醒" else "已关闭微信提醒"
+            } catch (e: Exception) {
+                dialog = "保存失败" to (e.message ?: "请稍后重试")
+                refreshPushStatus()
+            } finally {
+                pushBusy = false
+            }
+        }
+    }
+
+    fun testPush() {
+        pushBusy = true
+        scope.launch {
+            try {
+                CloudApi.testExpiryPush(token)
+                dialog = "测试推送" to "已发送，请查看微信是否收到"
+            } catch (e: Exception) {
+                dialog = "测试推送失败" to (e.message ?: "请确认已绑定且服务端配置正确")
+            } finally {
+                pushBusy = false
+            }
+        }
+    }
+
+    fun unbindPush() {
+        pushBusy = true
+        scope.launch {
+            try {
+                pushStatus = CloudApi.unbindExpiryPush(token)
+                dialog = "过期提醒" to "已解除微信绑定"
+            } catch (e: Exception) {
+                dialog = "解绑失败" to (e.message ?: "请稍后重试")
+            } finally {
+                pushBusy = false
+            }
+        }
     }
 
     LaunchedEffect(token, AutoRefreshCenter.revision) { reload() }
@@ -278,6 +341,17 @@ fun CloudScreen(
                 }
             }
 
+            item {
+                ExpiryPushCard(
+                    status = pushStatus,
+                    busy = pushBusy,
+                    onToggle = { setPushEnabled(it) },
+                    onBind = { pushQrOpen = true },
+                    onTest = { testPush() },
+                    onUnbind = { unbindPush() }
+                )
+            }
+
             if (loading) {
                 item {
                     Box(Modifier.fillMaxWidth().padding(top = 80.dp), contentAlignment = Alignment.Center) {
@@ -411,6 +485,18 @@ fun CloudScreen(
                 scanTarget = null
                 dialog = "扫码成功" to msg
                 scope.launch { reload() }
+            }
+        )
+    }
+
+    if (pushQrOpen) {
+        ExpiryPushQrDialog(
+            token = token,
+            onDismiss = { pushQrOpen = false },
+            onBound = {
+                pushQrOpen = false
+                dialog = "微信提醒" to "绑定成功，检测到 Cookie 失效会推送通知"
+                refreshPushStatus()
             }
         )
     }
@@ -774,6 +860,148 @@ private fun StokenScanDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) { Text(if (terminal) "关闭" else "取消") }
+        }
+    )
+}
+
+/** 云游戏 Cookie 过期微信提醒：微信扫码绑定后，每日检测到失效时推送。 */
+@Composable
+private fun ExpiryPushCard(
+    status: ExpiryPushStatusDto?,
+    busy: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onBind: () -> Unit,
+    onTest: () -> Unit,
+    onUnbind: () -> Unit
+) {
+    val bound = status?.bound == true
+    val configured = status?.configured == true
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Notifications, null, Modifier.size(18.dp), tint = BrandPink)
+                Spacer(Modifier.size(9.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Cookie 过期微信提醒", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        when {
+                            status == null -> "正在读取绑定状态…"
+                            !configured -> "管理员尚未配置 PushPlus，暂时无法绑定"
+                            bound -> {
+                                val nick = status?.nickname.orEmpty()
+                                "已绑定${if (nick.isBlank()) "" else "（$nick）"}：检测到失效会推送微信提醒"
+                            }
+                            else -> "微信扫码绑定后，每日检测到 Cookie 失效会推送提醒"
+                        },
+                        fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = bound && status?.enabled == true,
+                    enabled = !busy && configured,
+                    onCheckedChange = onToggle
+                )
+            }
+            if (configured) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    TextButton(onClick = onBind, enabled = !busy) {
+                        Icon(Icons.Filled.QrCodeScanner, null, Modifier.size(15.dp))
+                        Spacer(Modifier.size(4.dp))
+                        Text(if (bound) "重新绑定" else "扫码绑定", fontSize = 13.sp)
+                    }
+                    if (bound) {
+                        TextButton(onClick = onTest, enabled = !busy) { Text("测试推送", fontSize = 13.sp) }
+                        TextButton(onClick = onUnbind, enabled = !busy) { Text("解绑", fontSize = 13.sp) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 微信扫码绑定：展示 pushplus 个人二维码，2 秒轮询一次绑定状态。 */
+@Composable
+private fun ExpiryPushQrDialog(
+    token: String,
+    onDismiss: () -> Unit,
+    onBound: () -> Unit
+) {
+    var qrUrl by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf("正在生成二维码…") }
+
+    LaunchedEffect(Unit) {
+        try {
+            val qr = CloudApi.expiryPushQr(token)
+            if (!qr.ok || qr.url.isBlank()) {
+                message = qr.detail.ifBlank { "生成二维码失败：请确认管理员已配置 PushPlus" }
+                return@LaunchedEffect
+            }
+            qrUrl = qr.url
+            message = "请用微信扫码，扫码成功后自动绑定"
+            while (true) {
+                delay(2000)
+                val st = runCatching { CloudApi.expiryPushStatus(token) }.getOrNull() ?: continue
+                if (st.bound) {
+                    onBound()
+                    return@LaunchedEffect
+                }
+            }
+        } catch (e: Exception) {
+            message = e.message ?: "生成二维码失败"
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("微信扫码绑定过期提醒") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (qrUrl.isNotBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.White,
+                        modifier = Modifier.padding(6.dp)
+                    ) {
+                        AsyncImage(
+                            model = qrUrl,
+                            contentDescription = "绑定二维码",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .size(240.dp)
+                                .padding(8.dp)
+                        )
+                    }
+                } else {
+                    CircularProgressIndicator(color = BrandPink, strokeWidth = 2.dp)
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    message,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "二维码 10 分钟内有效，仅能扫描一次",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
         }
     )
 }
