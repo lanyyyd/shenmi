@@ -5,6 +5,7 @@ Cookie 在服务端以主密钥加密存储；检测逻辑（米哈游/完美世
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import uuid
@@ -17,12 +18,14 @@ from .. import security
 from .. import cloud_refresh
 from .. import mihoyo_qr
 from .. import presence
+from .. import pushplus
 from ..config import DATA_DIR
 from ..db import execute, execute_update, query_all, query_one
 from ..deps import get_current_user, require_admin
 from ..hub import hub
 
 router = APIRouter(prefix="/api/cloud", tags=["cloud"])
+log = logging.getLogger("cloud")
 
 GAMES = {
     "genshin": {"name": "原神", "biz": "hk4e_cn", "vendor": "mihoyo", "url": "https://ys.mihoyo.com/cloud/#/"},
@@ -736,6 +739,52 @@ def my(user: dict = Depends(get_current_user)):
     return {"ok": True, "games": out}
 
 
+# ---------------- 云游戏 Cookie 过期提醒（PushPlus 扫码绑定） ----------------
+@router.get("/expiry-push")
+def expiry_push_status(user: dict = Depends(get_current_user)):
+    return {"ok": True, **pushplus.status(user["id"])}
+
+
+@router.post("/expiry-push/qr")
+def expiry_push_qr(user: dict = Depends(get_current_user)):
+    """生成一次性个人二维码；客户端展示后由用户微信扫码绑定。"""
+    try:
+        data = pushplus.create_bind_qr(user["id"])
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, **data}
+
+
+@router.post("/expiry-push/enabled")
+def expiry_push_enabled(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    if not pushplus.set_enabled(user["id"], bool(payload.get("enabled"))):
+        raise HTTPException(404, "尚未绑定推送")
+    return {"ok": True, **pushplus.status(user["id"])}
+
+
+@router.post("/expiry-push/unbind")
+def expiry_push_unbind(user: dict = Depends(get_current_user)):
+    pushplus.unbind(user["id"])
+    return {"ok": True, **pushplus.status(user["id"])}
+
+
+@router.post("/expiry-push/test")
+def expiry_push_test(user: dict = Depends(get_current_user)):
+    if not pushplus.send_test(user["id"]):
+        raise HTTPException(400, "推送失败：请确认已扫码绑定，且管理员已配置 PushPlus")
+    return {"ok": True}
+
+
+@router.post("/pushplus/callback")
+def pushplus_callback(payload: dict = Body(...)):
+    """PushPlus 回调（公开地址，无鉴权）：add_friend 用一次性 nonce 识别账号。"""
+    try:
+        pushplus.handle_callback(payload)
+    except Exception as e:
+        log.warning("PushPlus 回调处理失败：%s", e)
+    return {"code": 200, "msg": "success"}
+
+
 # ---------------- 管理员：云游戏账号管理 ----------------
 @router.get("/admin/games")
 def admin_games(admin: dict = Depends(require_admin)):
@@ -832,8 +881,11 @@ def check_account_row(row: dict) -> dict:
 
     返回原始检测结果，额外带 valid_state：1 有效 / 0 失效 / None 无法判定。
     后台「检测有效性」和每日定时检测共用，避免两处逻辑跑偏。
+    由有效变为失效时按用户绑定的 PushPlus 好友推送一次提醒。
     """
     row_id = row["id"]
+    prev_valid = row["valid"] if "valid" in row.keys() else None
+    notified = (row["expiry_notified"] if "expiry_notified" in row.keys() else 0) or 0
     cookies = security.decrypt_blob(row["data"])
     result = check_cookie_valid(cookies, row["game"], row["combo_token"] or "")
     valid_val = 1 if result.get("valid") is True else (0 if result.get("valid") is False else None)
@@ -852,6 +904,26 @@ def check_account_row(row: dict) -> dict:
              result.get("nickname") or row["nickname"] or "",
              result.get("free_duration"), result.get("total_duration"), row_id),
         )
+
+    # 失效提醒：只在「有效/未判定 → 失效」的转折点推一次；恢复有效后清零，
+    # 下次再失效才会重新提醒，避免每天定时检测重复轰炸。
+    try:
+        if valid_val == 1:
+            if notified:
+                execute_update("UPDATE cloud_cookies SET expiry_notified=0 WHERE id=?", (row_id,))
+        elif valid_val == 0 and prev_valid != 0 and not notified:
+            execute_update("UPDATE cloud_cookies SET expiry_notified=1 WHERE id=?", (row_id,))
+            user_id = row["user_id"] if "user_id" in row.keys() else 0
+            if user_id:
+                game = row["game"]
+                game_name = game_name_map().get(game) or game
+                nick = result.get("nickname") or row["nickname"] or ""
+                uid = result.get("game_uid") or row["game_uid"] or ""
+                account = f"{nick}（UID {uid}）" if nick and uid else (nick or uid or "未命名账号")
+                pushplus.notify_expired_async(user_id, game_name, account)
+    except Exception as e:
+        log.warning("失效提醒处理失败：%s", e)
+
     result["valid_state"] = valid_val
     return result
 

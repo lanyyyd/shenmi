@@ -4,6 +4,7 @@ using System.Threading;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
 using SteamEyaWinUI.Models;
 using SteamEyaWinUI.Services;
@@ -23,6 +24,10 @@ public sealed partial class CloudGamePage : Page
     private CancellationTokenSource? _playCts;
     private string _playingGame = "";
 
+    /// <summary>过期提醒绑定状态；程序化切换 ToggleSwitch 时用 _suppress 防重入。</summary>
+    private bool _expiryBound;
+    private bool _suppressExpiryToggle;
+
     public CloudGamePage()
     {
         InitializeComponent();
@@ -40,6 +45,7 @@ public sealed partial class CloudGamePage : Page
             await EnsureEngineAsync();
             await RefreshStatusAsync();
             await AutoCheckAsync();
+            await RefreshExpiryPushAsync();
         };
     }
 
@@ -834,6 +840,227 @@ public sealed partial class CloudGamePage : Page
         }
         var nick = string.IsNullOrWhiteSpace(role.Nickname) ? "未命名" : role.Nickname;
         return $"{role.GameName} · {nick} · UID {role.GameUid} · {region}";
+    }
+
+    // ---------------- Cookie 过期微信提醒（PushPlus 扫码绑定） ----------------
+
+    private async Task RefreshExpiryPushAsync()
+    {
+        try
+        {
+            ApplyExpiryPushStatus(await _cloud.ExpiryPushStatusAsync());
+        }
+        catch (Exception ex)
+        {
+            AppLog.Debug($"查询过期提醒绑定状态失败：{ex.Message}");
+        }
+    }
+
+    private void ApplyExpiryPushStatus(ExpiryPushStatusDto st)
+    {
+        _expiryBound = st.Bound;
+        _suppressExpiryToggle = true;
+        ExpiryPushSwitch.IsOn = st.Bound && st.Enabled;
+        ExpiryPushSwitch.IsEnabled = st.Configured;
+        _suppressExpiryToggle = false;
+
+        ExpiryBindButton.IsEnabled = st.Configured;
+        ExpiryBindButton.Content = st.Bound ? "重新绑定" : "扫码绑定";
+        ExpiryTestButton.Visibility = st.Bound ? Visibility.Visible : Visibility.Collapsed;
+        ExpiryUnbindButton.Visibility = st.Bound ? Visibility.Visible : Visibility.Collapsed;
+
+        ExpiryPushText.Text = !st.Configured
+            ? "管理员尚未配置 PushPlus，暂时无法绑定微信提醒。"
+            : st.Bound
+                ? $"已绑定{(string.IsNullOrWhiteSpace(st.Nickname) ? "" : $"（{st.Nickname}）")}：每日检测到 Cookie 失效会推送微信提醒。"
+                : "微信扫码绑定后，每日检测到 Cookie 失效会推送提醒。";
+    }
+
+    /// <summary>未绑定时打开扫码流程；已绑定时只切换开关，不改绑定关系。</summary>
+    private async void OnExpiryPushToggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressExpiryToggle)
+        {
+            return;
+        }
+
+        if (!_expiryBound)
+        {
+            _suppressExpiryToggle = true;
+            ExpiryPushSwitch.IsOn = false;
+            _suppressExpiryToggle = false;
+            await StartExpiryPushBindingAsync();
+            return;
+        }
+
+        try
+        {
+            var st = await _cloud.ExpiryPushEnabledAsync(ExpiryPushSwitch.IsOn);
+            if (st is { Ok: true })
+            {
+                ApplyExpiryPushStatus(st);
+                ShowInfo(ExpiryPushSwitch.IsOn ? "已开启 Cookie 过期微信提醒" : "已关闭 Cookie 过期微信提醒",
+                    InfoBarSeverity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowInfo($"保存提醒开关失败：{ex.Message}", InfoBarSeverity.Error);
+            await RefreshExpiryPushAsync();
+        }
+    }
+
+    private async void OnExpiryBindClick(object sender, RoutedEventArgs e) => await StartExpiryPushBindingAsync();
+
+    private async void OnExpiryTestClick(object sender, RoutedEventArgs e)
+    {
+        ExpiryTestButton.IsEnabled = false;
+        try
+        {
+            var result = await _cloud.ExpiryPushTestAsync();
+            ShowInfo(result.Ok ? "测试推送已发送，请查看微信" : (result.Msg ?? "测试推送失败"),
+                result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
+        }
+        catch (Exception ex)
+        {
+            ShowInfo($"测试推送失败：{ex.Message}", InfoBarSeverity.Error);
+        }
+        finally
+        {
+            ExpiryTestButton.IsEnabled = true;
+        }
+    }
+
+    private async void OnExpiryUnbindClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var st = await _cloud.ExpiryPushUnbindAsync();
+            if (st is not null)
+            {
+                ApplyExpiryPushStatus(st);
+            }
+            ShowInfo("已解除微信提醒绑定", InfoBarSeverity.Success);
+        }
+        catch (Exception ex)
+        {
+            ShowInfo($"解绑失败：{ex.Message}", InfoBarSeverity.Error);
+        }
+    }
+
+    /// <summary>生成一次性个人二维码，弹窗展示并轮询绑定结果（微信扫码，无需填 token）。</summary>
+    private async Task StartExpiryPushBindingAsync()
+    {
+        ExpiryBindButton.IsEnabled = false;
+        try
+        {
+            var qr = await _cloud.ExpiryPushQrAsync();
+            if (!qr.Ok || string.IsNullOrWhiteSpace(qr.Url))
+            {
+                ShowInfo(qr.Detail ?? "生成二维码失败：请确认管理员已配置 PushPlus", InfoBarSeverity.Warning);
+                return;
+            }
+
+            var image = new Image
+            {
+                Width = 300,
+                Height = 300,
+                Stretch = Stretch.Uniform,
+                Source = new BitmapImage(new Uri(qr.Url!))
+            };
+            var status = new TextBlock
+            {
+                Text = "请用微信扫码，扫码成功后会自动绑定",
+                TextWrapping = TextWrapping.Wrap,
+                TextAlignment = TextAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            var tip = new TextBlock
+            {
+                Text = "二维码 10 分钟内有效，仅能扫描一次。",
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.Gray)
+            };
+            var panel = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center };
+            panel.Children.Add(image);
+            panel.Children.Add(status);
+            panel.Children.Add(tip);
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "微信扫码绑定过期提醒",
+                Content = panel,
+                CloseButtonText = "关闭"
+            };
+
+            using var cts = new CancellationTokenSource();
+            _ = Task.Run(() => PollExpiryPushBindingAsync(status, dialog, cts.Token));
+            try
+            {
+                await dialog.ShowAsync();
+            }
+            finally
+            {
+                cts.Cancel();
+            }
+            await RefreshExpiryPushAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("生成微信提醒二维码失败。", ex);
+            ShowInfo($"生成二维码失败：{ex.Message}", InfoBarSeverity.Error);
+        }
+        finally
+        {
+            ExpiryBindButton.IsEnabled = true;
+        }
+    }
+
+    /// <summary>2 秒一次查询绑定状态；pushplus 回调命中的那一刻关掉弹窗并刷新开关。</summary>
+    private async Task PollExpiryPushBindingAsync(TextBlock status, ContentDialog dialog, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(2000, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            ExpiryPushStatusDto st;
+            try
+            {
+                st = await _cloud.ExpiryPushStatusAsync(ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                DispatcherQueue.TryEnqueue(() => status.Text = $"查询绑定状态失败：{ex.Message}");
+                continue;
+            }
+
+            if (!st.Bound)
+            {
+                continue;
+            }
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                status.Text = "绑定成功";
+                dialog.Hide();
+                ShowInfo("微信提醒绑定成功，检测到 Cookie 失效会推送通知", InfoBarSeverity.Success);
+                _ = RefreshExpiryPushAsync();
+            });
+            return;
+        }
     }
 
     private void ShowInfo(string message, InfoBarSeverity severity)

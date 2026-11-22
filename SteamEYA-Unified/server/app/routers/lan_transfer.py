@@ -14,15 +14,49 @@
 """
 from __future__ import annotations
 
+import ipaddress
 import threading
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from ..config import DATA_DIR
 
-router = APIRouter(prefix="/api/lan/tr", tags=["lan-transfer"])
+# 这些接口没有登录态（供局域网发送端直连），不能暴露在公网：
+# 否则任何人都能往接收目录写文件、把磁盘塞满。按来源 IP 做局域网白名单。
+_LAN_NETS = [ipaddress.ip_network(n) for n in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8",
+    "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10",
+)]
+
+
+def _source_ip(request: Request) -> str:
+    """取真实来源 IP：经 nginx 反代时对端是回环，真实地址在 X-Forwarded-For。"""
+    peer = request.client.host if request.client else ""
+    if peer in ("127.0.0.1", "::1"):
+        xf = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        if xf:
+            return xf
+    return peer
+
+
+def require_lan(request: Request) -> None:
+    """非局域网来源一律 403（公网直连 8898/8897 或经反代都会被拦下）。"""
+    ip = _source_ip(request)
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        raise HTTPException(403, "仅限局域网访问")
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped:
+        addr = mapped
+    nets = [n for n in _LAN_NETS if n.version == addr.version]
+    if not any(addr in n for n in nets):
+        raise HTTPException(403, "仅限局域网访问")
+
+
+router = APIRouter(prefix="/api/lan/tr", tags=["lan-transfer"], dependencies=[Depends(require_lan)])
 
 # 接收目录：随网关数据目录（由客户端 EYA_DATA_DIR 指向非 C 盘）
 RECV_DIR = DATA_DIR / "lan_received"

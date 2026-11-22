@@ -245,6 +245,37 @@ internal sealed class StokenPollDto
     public int Matched { get; set; }
 }
 
+/// <summary>GET /api/cloud/expiry-push：Cookie 过期微信提醒的绑定状态。</summary>
+internal sealed class ExpiryPushStatusDto
+{
+    public bool Ok { get; set; }
+
+    /// <summary>服务端是否已配置 PushPlus（Token + SecretKey）。</summary>
+    public bool Configured { get; set; }
+
+    public bool Bound { get; set; }
+    public bool Enabled { get; set; }
+    public string? Nickname { get; set; }
+
+    [JsonPropertyName("boundAt")]
+    public long BoundAt { get; set; }
+
+    public string? Detail { get; set; }
+}
+
+/// <summary>POST /api/cloud/expiry-push/qr：一次性个人二维码。</summary>
+internal sealed class ExpiryPushQrDto
+{
+    public bool Ok { get; set; }
+    public string? Url { get; set; }
+    public string? Nonce { get; set; }
+
+    [JsonPropertyName("expiresIn")]
+    public int ExpiresIn { get; set; }
+
+    public string? Detail { get; set; }
+}
+
 /// <summary>GET /api/mihoyo/gacha/roles：扫码 stoken 绑定的游戏角色。</summary>
 internal sealed class GachaRolesDto
 {
@@ -438,6 +469,8 @@ internal sealed class CloudCreateGameDto
 [JsonSerializable(typeof(CloudCreateGameDto))]
 [JsonSerializable(typeof(StokenCreateDto))]
 [JsonSerializable(typeof(StokenPollDto))]
+[JsonSerializable(typeof(ExpiryPushStatusDto))]
+[JsonSerializable(typeof(ExpiryPushQrDto))]
 [JsonSerializable(typeof(GachaRolesDto))]
 [JsonSerializable(typeof(GachaRoleDto))]
 [JsonSerializable(typeof(GachaLinkDto))]

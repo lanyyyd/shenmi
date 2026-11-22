@@ -161,6 +161,42 @@ internal sealed class CloudGameService
         return await SendAsync(req, CloudApiJsonContext.Default.StokenPollDto, ct) ?? new StokenPollDto();
     }
 
+    // ---------------- Cookie 过期提醒（PushPlus 扫码绑定） ----------------
+    /// <summary>查询当前账号的提醒绑定状态。</summary>
+    public async Task<ExpiryPushStatusDto> ExpiryPushStatusAsync(CancellationToken ct = default)
+        => await SendAsync(Auth(HttpMethod.Get, "/api/cloud/expiry-push"),
+            CloudApiJsonContext.Default.ExpiryPushStatusDto, ct) ?? new ExpiryPushStatusDto();
+
+    /// <summary>生成一次性个人二维码（微信扫码后自动绑定，无需填 token）。</summary>
+    public async Task<ExpiryPushQrDto> ExpiryPushQrAsync(CancellationToken ct = default)
+    {
+        using var req = Auth(HttpMethod.Post, "/api/cloud/expiry-push/qr");
+        return await SendAsync(req, CloudApiJsonContext.Default.ExpiryPushQrDto, ct) ?? new ExpiryPushQrDto();
+    }
+
+    /// <summary>开启/关闭提醒；未绑定时返回 null。</summary>
+    public async Task<ExpiryPushStatusDto?> ExpiryPushEnabledAsync(bool enabled, CancellationToken ct = default)
+    {
+        var json = new JsonObject { ["enabled"] = enabled }.ToJsonString();
+        using var req = Auth(HttpMethod.Post, "/api/cloud/expiry-push/enabled");
+        req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+        return await SendAsync(req, CloudApiJsonContext.Default.ExpiryPushStatusDto, ct);
+    }
+
+    /// <summary>解除微信绑定。</summary>
+    public async Task<ExpiryPushStatusDto?> ExpiryPushUnbindAsync(CancellationToken ct = default)
+    {
+        using var req = Auth(HttpMethod.Post, "/api/cloud/expiry-push/unbind");
+        return await SendAsync(req, CloudApiJsonContext.Default.ExpiryPushStatusDto, ct);
+    }
+
+    /// <summary>发一条测试推送，验证绑定是否可用。</summary>
+    public async Task<CloudActionResultDto> ExpiryPushTestAsync(CancellationToken ct = default)
+    {
+        using var req = Auth(HttpMethod.Post, "/api/cloud/expiry-push/test");
+        return await SendAsync(req, CloudApiJsonContext.Default.CloudActionResultDto, ct) ?? new CloudActionResultDto();
+    }
+
     // ---------------- 抽卡链接（米游社 stoken -> Auth Key B） ----------------
 
     /// <summary>列出 stoken 账号下绑定的原神/星铁角色。</summary>

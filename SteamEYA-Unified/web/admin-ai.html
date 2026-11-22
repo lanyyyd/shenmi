@@ -43,8 +43,7 @@ html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
 .fld textarea{resize:vertical;line-height:1.7;font-family:inherit}
 .fld .row{display:flex;gap:8px;align-items:center}
 .fld .row input{flex:1;min-width:0}
-.sw{display:inline-flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;cursor:pointer;user-select:none}
-.sw input{width:auto}
+.swrow{display:flex;align-items:center;gap:9px;font-size:13.5px;font-weight:600;user-select:none}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
 .grid2 .fld{margin-bottom:0}
 .hint{font-size:12px;color:var(--hint);margin-top:6px;line-height:1.7}
@@ -74,7 +73,7 @@ html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
       <div class="card-h"><h2>基础</h2></div>
       <div class="form">
         <div class="fld">
-          <label class="sw"><input type="checkbox" id="enabled"> 启用小火人</label>
+          <div class="swrow"><button type="button" class="sw" id="enabled" role="switch" aria-checked="false" onclick="toggleSwitch('enabled')"></button><span>启用小火人</span></div>
           <div class="hint">关闭后小火人不再回复私聊与群聊 @。</div>
         </div>
         <div class="fld"><label>显示名</label>
@@ -116,7 +115,7 @@ html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
       <div class="card-h"><h2>主动发言</h2></div>
       <div class="form">
         <div class="fld">
-          <label class="sw"><input type="checkbox" id="active_speak"> 开启主动发言</label>
+          <div class="swrow"><button type="button" class="sw" id="active_speak" role="switch" aria-checked="false" onclick="toggleSwitch('active_speak')"></button><span>开启主动发言</span></div>
           <div class="hint">开启后，群聊安静到设定时长时小火人会主动说话。</div>
         </div>
         <div class="grid2">
@@ -185,6 +184,15 @@ const BOOL_FIELDS = ['enabled','active_speak'];
 function setMsg(t, err){ const el=$('msg'); if(!el) return;
   el.textContent = t || ''; el.className = 'form-msg ' + (err ? 'err' : 'ok'); }
 
+/* 开关统一用全局 .sw 样式（button），避免原生 checkbox 和开关样式叠在一起 */
+function setSwitch(id, on){
+  const el = $(id); if(!el) return;
+  el.classList.toggle('on', !!on);
+  el.setAttribute('aria-checked', on ? 'true' : 'false');
+}
+function toggleSwitch(id){ const el = $(id); if(el) setSwitch(id, !el.classList.contains('on')); }
+function isSwitchOn(id){ const el = $(id); return !!(el && el.classList.contains('on')); }
+
 /* 显示/隐藏 API Key */
 function toggleKey(){
   const inp = $('api_key');
@@ -208,14 +216,14 @@ async function loadConfig(){
 function fillForm(c){
   TEXT_FIELDS.forEach(k=>{ const el=$(k); if(el) el.value = (c[k] ?? ''); });
   NUM_FIELDS.forEach(k=>{ const el=$(k); if(el) el.value = (c[k] ?? ''); });
-  BOOL_FIELDS.forEach(k=>{ const el=$(k); if(el) el.checked = !!c[k]; });
+  BOOL_FIELDS.forEach(k=>setSwitch(k, !!c[k]));
   const kEl = $('api_key'); if(kEl) kEl.value = (c.api_key ?? '');
   kEl && (kEl.type = 'password'); $('keyToggle').textContent = '显示';
 }
 async function saveConfig(){
   const body = {};
   TEXT_FIELDS.forEach(k=>{ body[k] = ($(k).value ?? '').trim(); });
-  BOOL_FIELDS.forEach(k=>{ body[k] = !!$(k).checked; });
+  BOOL_FIELDS.forEach(k=>{ body[k] = isSwitchOn(k); });
   for(const k of NUM_FIELDS){
     const raw = ($(k).value ?? '').trim();
     const n = Number(raw);

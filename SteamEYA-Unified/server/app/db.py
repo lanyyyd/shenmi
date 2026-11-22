@@ -183,6 +183,26 @@ CREATE TABLE IF NOT EXISTS cloud_stokens (
 );
 CREATE INDEX IF NOT EXISTS idx_cloud_stokens_stuid ON cloud_stokens(user_id, stuid);
 
+-- PushPlus 扫码绑定：用户微信扫码后，pushplus 回调把好友令牌绑到账号上。
+-- 令牌加密存储，只用于给本人推送云游戏 Cookie 失效提醒。
+CREATE TABLE IF NOT EXISTS push_bindings (
+    user_id      INTEGER PRIMARY KEY,
+    friend_token BLOB NOT NULL,
+    nickname     TEXT DEFAULT '',
+    enabled      INTEGER DEFAULT 1,
+    bound_at     INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL
+);
+
+-- 一次性绑定票据：客户端生成二维码时写入，回调命中后立即删除。
+CREATE TABLE IF NOT EXISTS push_bind_nonces (
+    nonce      TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_push_nonce_exp ON push_bind_nonces(expires_at);
+
 -- ============ 聊天室 ============
 CREATE TABLE IF NOT EXISTS messages (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -720,6 +740,8 @@ def init_db() -> None:
         ("refresh_at", "ALTER TABLE cloud_cookies ADD COLUMN refresh_at INTEGER"),
         ("refresh_ok", "ALTER TABLE cloud_cookies ADD COLUMN refresh_ok INTEGER"),
         ("refresh_msg", "ALTER TABLE cloud_cookies ADD COLUMN refresh_msg TEXT"),
+        # 0=本次失效还没推送；1=已推送。恢复有效时清零，下次失效才会再提醒。
+        ("expiry_notified", "ALTER TABLE cloud_cookies ADD COLUMN expiry_notified INTEGER DEFAULT 0"),
     ):
         if cloud_cols and col not in cloud_cols:
             with cursor() as cur:

@@ -195,16 +195,22 @@ def _exchange(url: str, stoken: str, mid: str, device_id: str, client_type: str)
 
 
 def _apply(cookies: list, ltoken: str, cookie_token: str) -> tuple[list, list]:
-    """把新 token 写回 Cookie 数组（兼容 v1/v2 字段名），返回 (新数组, 更新字段)。"""
+    """把新 token 写回 Cookie 数组，返回 (新数组, 更新字段)。
+
+    只更新 v1 的 ltoken / cookie_token。passport 换票只返回 v1 票，
+    而 ltoken_v2 / cookie_token_v2 是网页端格式更长的 v2 票据，把 v1 值写进
+    v2 槽位会让网页登录态失效（表现为「后台检测正常但客户端登录不上」），
+    所以这两个字段一律不动：v2 过期只能由客户端重新抓取。
+    """
     new_cookies: list = []
     updated: list = []
     for c in cookies:
         item = dict(c)
         name = item.get("name")
-        if name in ("ltoken", "ltoken_v2"):
+        if name == "ltoken":
             item["value"] = ltoken
             updated.append(name)
-        elif name in ("cookie_token", "cookie_token_v2"):
+        elif name == "cookie_token":
             item["value"] = cookie_token
             updated.append(name)
         new_cookies.append(item)

@@ -42,8 +42,7 @@ html[data-theme="light"] .card{background:#fff;box-shadow:var(--shadow)}
 .fld textarea{resize:vertical;line-height:1.7;font-family:inherit}
 .fld .row{display:flex;gap:8px;align-items:center}
 .fld .row input{flex:1;min-width:0}
-.sw{display:inline-flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;cursor:pointer;user-select:none}
-.sw input{width:auto}
+.swrow{display:flex;align-items:center;gap:9px;font-size:13.5px;font-weight:600;user-select:none}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
 .grid2 .fld{margin-bottom:0}
 .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}
@@ -95,11 +94,11 @@ tbody tr:hover{background:var(--hover,rgba(0,0,0,.02))}
       <div class="card-h"><h2>总开关</h2><div class="spacer"></div><span id="readyTag" class="tag canceled">未就绪</span></div>
       <div class="form">
         <div class="fld">
-          <label class="sw"><input type="checkbox" id="enabled"> 启用 AI 自动配图</label>
+          <div class="swrow"><button type="button" class="sw" id="enabled" role="switch" aria-checked="false" onclick="toggleSwitch('enabled')"></button><span>启用 AI 自动配图</span></div>
           <div class="hint">关闭后不再处理队列；已生成的图片不受影响。</div>
         </div>
         <div class="fld">
-          <label class="sw"><input type="checkbox" id="auto_on_create"> 新建店铺/菜品时自动生成</label>
+          <div class="swrow"><button type="button" class="sw" id="auto_on_create" role="switch" aria-checked="false" onclick="toggleSwitch('auto_on_create')"></button><span>新建店铺/菜品时自动生成</span></div>
           <div class="hint">只对没有图片的新对象生效；用户自己上传过图片的永远不会被覆盖。</div>
         </div>
         <div class="grid2" style="margin-top:14px">
@@ -305,6 +304,16 @@ const BOOL_FIELDS = ['enabled','auto_on_create'];
 const KEY_FIELDS = ['text_api_key','image_api_key'];
 
 function setMsg(t, err){ const el=$('msg'); el.textContent=t||''; el.className='form-msg '+(err?'err':'ok'); }
+
+/* 开关统一用全局 .sw 样式（button），避免原生 checkbox 和开关样式叠在一起 */
+function setSwitch(id, on){
+  const el = $(id); if(!el) return;
+  el.classList.toggle('on', !!on);
+  el.setAttribute('aria-checked', on ? 'true' : 'false');
+}
+function toggleSwitch(id){ const el = $(id); if(el) setSwitch(id, !el.classList.contains('on')); }
+function isSwitchOn(id){ const el = $(id); return !!(el && el.classList.contains('on')); }
+
 function toggleKey(id, btn){ const inp=$(id); const show=inp.type==='password';
   inp.type=show?'text':'password'; btn.textContent=show?'隐藏':'显示'; }
 const clearedKeys = {};
@@ -331,7 +340,7 @@ function fillForm(c){
     if(![...el.options].some(o=>o.value===c[k])) el.add(new Option(c[k], c[k]));
     el.value=c[k];
   }});
-  BOOL_FIELDS.forEach(k=>{ const el=$(k); if(el) el.checked=!!c[k]; });
+  BOOL_FIELDS.forEach(k=>setSwitch(k, !!c[k]));
   KEY_FIELDS.forEach(k=>{ const el=$(k); if(el){ el.value=(c[k] ?? ''); el.type='password'; } delete clearedKeys[k]; });
 }
 
@@ -354,7 +363,7 @@ function renderStats(s){
 async function saveConfig(){
   const body = {};
   TEXT_FIELDS.forEach(k=>{ body[k]=($(k).value ?? '').trim(); });
-  BOOL_FIELDS.forEach(k=>{ body[k]=!!$(k).checked; });
+  BOOL_FIELDS.forEach(k=>{ body[k]=isSwitchOn(k); });
   SELECT_FIELDS.forEach(k=>{ body[k]=$(k).value; });
   for(const k of NUM_FIELDS){
     const raw=($(k).value ?? '').trim(); const n=Number(raw);

@@ -53,7 +53,8 @@ def _game_name(game: str) -> str:
         return fixed
     # 自定义游戏取后台配置的显示名
     row = query_one("SELECT name FROM cloud_games WHERE game_key=?", (game,))
-    return (row or {}).get("name") or game
+    # sqlite3.Row 没有 .get()，必须按列名取值
+    return (row["name"] if row else "") or game
 
 
 def note_cloud_login(user_id: int, game: str, uid: str = "") -> None:
@@ -108,7 +109,7 @@ def note_playing(user_id: int, game: str, uid: str = "") -> None:
     with _lock:
         _activity.pop(user_id, None)
         _sessions[user_id] = {
-            "game": game, "uid": (row or {}).get("game_uid") or uid,
+            "game": game, "uid": (row["game_uid"] if row else "") or uid,
             "name": name, "until": now + CLIENT_TTL,
             "last": None, "miss": 0, "client": True,
             "next": now + CLIENT_TTL,
@@ -184,7 +185,7 @@ def _probe_cloud(now: float) -> None:
             "SELECT combo_token FROM cloud_cookies WHERE user_id=? AND game=? AND game_uid=?",
             (uid, snap["game"], snap["uid"]),
         )
-        token = (row or {}).get("combo_token") or ""
+        token = (row["combo_token"] if row else "") or ""
         free = None
         if token:
             wr = _get_mihoyo_free_duration(token, snap["game"])

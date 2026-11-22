@@ -282,15 +282,24 @@ def _all_usernames() -> list[str]:
 
 @router.get("/push-config")
 def get_push_config(admin: dict = Depends(require_admin)):
-    config = _get_json_setting("push_config", {})
+    config = dict(_get_json_setting("push_config", {}) or {})
+    # secretKey 和密码同级，只在保存时提交，回显一律打码。
+    if config.get("secretKey"):
+        config["secretKey"] = "******"
     return {"ok": True, "users": _all_usernames(), "config": config}
 
 
 @router.post("/push-config")
 def save_push_config(payload: dict = Body(...), admin: dict = Depends(require_admin)):
+    old = _get_json_setting("push_config", {}) or {}
+    secret = str(payload.get("secretKey", "")).strip()
+    if not secret or secret == "******":
+        secret = str(old.get("secretKey") or "")
     config = {
         "enabled": bool(payload.get("enabled")),
         "token": str(payload.get("token", "")).strip(),
+        # 开放接口凭证：云游戏过期提醒生成个人二维码时换 AccessKey。
+        "secretKey": secret,
         "topic": str(payload.get("topic", "")).strip(),
         "throttleSeconds": int(payload.get("throttleSeconds") or 0),
         "watchGroup": bool(payload.get("watchGroup")),

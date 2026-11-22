@@ -65,7 +65,7 @@ textarea.cell:focus{border-color:var(--primary);outline:none}
 input.num{width:74px;padding:7px 9px;border-radius:8px;font-size:13px;text-align:center;
   background:var(--input-bg);border:1.5px solid var(--line);color:var(--text)}
 input.num:focus{border-color:var(--primary);outline:none}
-.sw{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);cursor:pointer}
+.swrow{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:600;color:var(--text)}
 @media(max-width:760px){
   .tbl thead{display:none}
   .tbl tr{display:block;border-bottom:1px solid var(--line);padding:10px 4px}
@@ -109,9 +109,9 @@ input.num:focus{border-color:var(--primary);outline:none}
           </div>
           <div class="fld">
             <label>总开关</label>
-            <label class="sw" style="margin-top:10px">
-              <input id="cfgEnabled" type="checkbox" checked> 参与随机
-            </label>
+            <div class="swrow" style="margin-top:10px">
+              <button type="button" class="sw on" id="cfgEnabled" role="switch" aria-checked="true" onclick="toggleSwitch('cfgEnabled');updateRatio()"></button><span>参与随机</span>
+            </div>
           </div>
         </div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -184,7 +184,7 @@ async function loadAll(){
   TIPS = d.tips || []; CFG = d.config || {};
   $('cfgApi').value = CFG.api || '';
   $('cfgWeight').value = CFG.hitokotoWeight ?? 1;
-  $('cfgEnabled').checked = !!CFG.hitokotoEnabled;
+  setSwitch('cfgEnabled', !!CFG.hitokotoEnabled);
   render(); updateRatio();
 }
 
@@ -199,23 +199,31 @@ function render(){
         <textarea class="cell" onblur="saveContent(${x.id}, this)" onkeydown="if(event.key==='Enter'&&event.ctrlKey){this.blur();}">${esc(x.content)}</textarea>
       </td>
       <td data-l="权重"><input class="num" type="number" min="0" max="1000" value="${x.weight}" onchange="saveWeight(${x.id}, this.value)"></td>
-      <td data-l="启用"><label class="sw"><input type="checkbox" ${x.active?'checked':''} onchange="saveActive(${x.id}, this.checked)"></label></td>
+      <td data-l="启用"><button type="button" class="sw ${x.active?'on':''}" role="switch" aria-checked="${x.active?'true':'false'}" onclick="saveActive(${x.id}, this.classList.toggle('on'))"></button></td>
       <td data-l="操作"><div class="acts">
         <button class="dg" onclick="delTip(${x.id})">删除</button>
       </div></td>
     </tr>`).join('');
 }
 
+/* 开关统一用全局 .sw 样式（button），避免原生 checkbox 和开关样式叠在一起 */
+function setSwitch(id, on){
+  const el = $(id); if(!el) return;
+  el.classList.toggle('on', !!on);
+  el.setAttribute('aria-checked', on ? 'true' : 'false');
+}
+function toggleSwitch(id){ const el = $(id); if(el) setSwitch(id, !el.classList.contains('on')); }
+function isSwitchOn(id){ const el = $(id); return !!(el && el.classList.contains('on')); }
+
 function updateRatio(){
   const manual = TIPS.filter(x=>x.active).reduce((a,x)=>a+Number(x.weight||0),0);
-  const hk = $('cfgEnabled').checked ? Math.max(0, Number($('cfgWeight').value)||0) : 0;
+  const hk = isSwitchOn('cfgEnabled') ? Math.max(0, Number($('cfgWeight').value)||0) : 0;
   const total = manual + hk;
   if(total <= 0){ $('ratioHint').textContent = '当前没有任何可抽内容'; return; }
   const pct = (v)=> (v/total*100).toFixed(v/total > 0.995 ? 0 : 1);
   $('ratioHint').textContent = `手动 ${pct(manual)}% · 一言 ${pct(hk)}%`;
 }
 $('cfgWeight').addEventListener('input', updateRatio);
-$('cfgEnabled').addEventListener('change', updateRatio);
 
 async function saveConfig(){
   const btn = $('cfgBtn'); btn.disabled = true;
@@ -225,7 +233,7 @@ async function saveConfig(){
       body: JSON.stringify({
         api: $('cfgApi').value.trim(),
         hitokotoWeight: Number($('cfgWeight').value) || 0,
-        hitokotoEnabled: $('cfgEnabled').checked,
+        hitokotoEnabled: isSwitchOn('cfgEnabled'),
       })
     });
     const d = await r.json().catch(()=>({}));

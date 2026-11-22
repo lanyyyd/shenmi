@@ -92,6 +92,45 @@
                 Click="OnGachaLink"
                 ToolTipService.ToolTip="用已扫码的 stoken 生成原神/星铁的抽卡记录链接" />
 
+            <!-- Cookie 过期微信提醒：扫码绑定 PushPlus，每日检测失效后推送 -->
+            <Border
+                Padding="12,10"
+                CornerRadius="8"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderThickness="1"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                <StackPanel Spacing="8">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Spacing="2">
+                            <TextBlock Text="Cookie 过期微信提醒" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                x:Name="ExpiryPushText"
+                                FontSize="12"
+                                TextWrapping="Wrap"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="微信扫码绑定后，每日检测到 Cookie 失效会推送提醒。" />
+                        </StackPanel>
+                        <ToggleSwitch
+                            x:Name="ExpiryPushSwitch"
+                            Grid.Column="1"
+                            MinWidth="0"
+                            OnContent=""
+                            OffContent=""
+                            VerticalAlignment="Center"
+                            Toggled="OnExpiryPushToggled" />
+                    </Grid>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button x:Name="ExpiryBindButton" Content="扫码绑定" Click="OnExpiryBindClick" />
+                        <Button x:Name="ExpiryTestButton" Content="测试推送" Click="OnExpiryTestClick" Visibility="Collapsed" />
+                        <Button x:Name="ExpiryUnbindButton" Content="解绑" Click="OnExpiryUnbindClick" Visibility="Collapsed" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
             <InfoBar x:Name="PageInfoBar" IsOpen="False" IsClosable="True" />
 
             <TextBlock

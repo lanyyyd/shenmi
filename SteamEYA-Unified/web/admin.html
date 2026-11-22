@@ -155,6 +155,23 @@ html[data-theme="light"] #pUsers label{background:#F7F8FA}
           <input id="pToken" placeholder="在 pushplus.plus 个人中心 → 一对一推送 获取">
         </div>
         <div class="prow">
+          <label>PushPlus SecretKey（云游戏过期提醒扫码绑定用）</label>
+          <input id="pSecret" type="password" placeholder="pushplus 后台 → 开发设置 → secretKey；已配置会显示 ******">
+          <div class="mono" style="margin-top:6px;line-height:1.7">
+            需要在 pushplus 后台开启「开放接口」，并把本服务器出口 IP 加入安全 IP 列表，否则生成二维码会失败。
+          </div>
+        </div>
+        <div class="prow">
+          <label>回调地址（填到 pushplus 后台 → 功能设置 → 回调地址）</label>
+          <div class="row">
+            <input id="pCallback" readonly>
+            <button class="btn" onclick="copyCallback()">复制</button>
+          </div>
+          <div class="mono" style="margin-top:6px;line-height:1.7">
+            扫码绑定、群组加入等事件都会回调到这里；客户端扫码后会自动完成绑定。
+          </div>
+        </div>
+        <div class="prow">
           <label>群组编码 topic（可选，不填仅推给自己）</label>
           <input id="pTopic" placeholder="留空即可">
         </div>
@@ -181,7 +198,7 @@ html[data-theme="light"] #pUsers label{background:#F7F8FA}
           <button class="btn" onclick="testPush()">发送测试推送</button>
           <button class="btn" onclick="loadPush()">重新加载</button>
         </div>
-        <div class="form-msg" id="pMsg" style="text-align:left"></div>
+        <div class="form-msg" id="pushMsg" style="text-align:left"></div>
         <div class="mono" style="margin-top:12px;line-height:1.8">
           逻辑：命中监听条件的消息会立即推送；上次推送后节流秒数内的新消息会被忽略、不再重复提醒；被「排除用户」勾选的账号自己发的消息一律不推送；节流秒数设为 0 表示不节流、每条都推。
         </div>
@@ -542,6 +559,8 @@ async function loadPush(){
   const c = d.config || {};
   $('pEnabled').checked = !!c.enabled;
   $('pToken').value = c.token || '';
+  $('pSecret').value = c.secretKey || '';
+  $('pCallback').value = location.origin + '/api/cloud/pushplus/callback';
   $('pTopic').value = c.topic || '';
   $('pThrottle').value = (c.throttleSeconds ?? 60);
   $('pGroup').checked = !!c.watchGroup;
@@ -562,6 +581,7 @@ async function savePush(){
   const body = {
     enabled: $('pEnabled').checked,
     token: $('pToken').value.trim(),
+    secretKey: $('pSecret').value.trim(),
     topic: $('pTopic').value.trim(),
     throttleSeconds: Number($('pThrottle').value)||0,
     watchGroup: $('pGroup').checked,
@@ -571,12 +591,23 @@ async function savePush(){
   };
   const r = await fetch('/api/admin/push-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const d = await r.json();
-  const m = $('pMsg');
+  const m = $('pushMsg');
   if(d.ok){ m.textContent='✅ 已保存'+(watchUsers.length?`，私聊监听 ${watchUsers.length} 人`:'')+(excludeUsers.length?`，排除 ${excludeUsers.length} 人`:'')+(body.watchGroup?'，含群聊':''); m.className='form-msg ok'; toast('推送配置已保存'); }
   else { m.textContent='❌ '+(d.error||'保存失败'); m.className='form-msg err'; }
 }
+async function copyCallback(){
+  const el = $('pCallback');
+  try {
+    await navigator.clipboard.writeText(el.value);
+    toast('回调地址已复制');
+  } catch {
+    el.select();
+    document.execCommand('copy');
+    toast('回调地址已复制');
+  }
+}
 async function testPush(){
-  const m = $('pMsg'); m.textContent='发送中…'; m.className='form-msg';
+  const m = $('pushMsg'); m.textContent='发送中…'; m.className='form-msg';
   const r = await fetch('/api/admin/push-test',{method:'POST'});
   const d = await r.json();
   if(d.ok){ m.textContent='✅ '+d.msg; m.className='form-msg ok'; }

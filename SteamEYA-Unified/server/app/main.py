@@ -69,15 +69,17 @@ async def _capture_event_loop():
 @app.on_event("startup")
 def _startup():
     init_db()
-    # 上次进程被强杀/崩溃时 online 表会留下连接记录，启动时先清空，避免离线模式
-    # 的在线列表出现「幽灵用户」。
-    try:
-        from .db import execute as _execute
-
-        _execute("DELETE FROM online")
-    except Exception as e:
-        log.warning("清理在线表失败：%s", e)
     log.info("统一后端网关已启动，数据目录: %s", UPLOAD_DIR.parent)
+    # 清掉上次进程遗留的在线记录：进程退出/被重启时 WebSocket 已经全部断开，
+    # hub.remove 不会执行，这些行会永久留在 online 表里，被前台当成「在线设备」。
+    # 客户端连上后会重新写入，所以这里清空不影响真实在线的连接。
+    try:
+        from .db import execute_update
+        removed = execute_update("DELETE FROM online")
+        if removed:
+            log.info("已清理上次遗留的在线记录 %d 条", removed)
+    except Exception as e:
+        log.warning("清理遗留在线记录失败：%s", e)
     # 局域网发现（UDP 广播）：
     #   - 离线模式（EYA_LAN_MODE=1）默认开启；
     #   - 在线模式可显式设 EYA_LAN_DISCOVERY=1 开启，以支持“在线状态下也能做局域网互传”。
