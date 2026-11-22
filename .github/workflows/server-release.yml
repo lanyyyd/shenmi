@@ -35,7 +35,7 @@ jobs:
 
           mkdir -p dist
           cd SteamEYA-Unified
-          zip -r "../dist/teatt-server-$TAG.zip" \
+          zip -r "../dist/teatt-$TAG.zip" \
             server/app \
             server/static \
             server/requirements.txt \
