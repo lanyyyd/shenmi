@@ -1,0 +1,63 @@
+name: Release Server Package
+
+# 只打包服务端（server + web）并发到 GitHub Release，不触发电脑客户端构建。
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release 标签（留空自动生成 server-<时间>-<run>）'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: server-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package server + web
+        id: pack
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="server-$(date -u +%Y%m%d-%H%M)-${{ github.run_number }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          mkdir -p dist
+          cd SteamEYA-Unified
+          zip -r "../dist/teatt-server-$TAG.zip" \
+            server/app \
+            server/static \
+            server/requirements.txt \
+            server/run_server.py \
+            server/run_local.py \
+            server/gateway_main.py \
+            web \
+            -x '*__pycache__*' '*.pyc' 'web/css/*.bak*'
+          cd ..
+          ls -lh dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.pack.outputs.tag }}
+          name: 服务端 ${{ steps.pack.outputs.tag }}
+          body: |
+            服务端 + 网页后台打包（不含电脑客户端）。
+
+            - 解压后把 `server/` 与 `web/` 放到部署目录
+            - 首次部署：`pip install -r server/requirements.txt`
+            - 重启 `python server/run_server.py` 后生效
+            - 本次包含：PushPlus 扫码绑定与云游戏 Cookie 失效提醒、后台开关样式修复
+          files: dist/*.zip
+          prerelease: false
