@@ -98,10 +98,11 @@ object AutoRefreshCenter {
     }
 
     private suspend fun fetchAccounts(token: String): List<CloudAccountDto> {
-        runCatching { CloudApi.my(token) }.getOrNull()?.let { return it }
+        // 静默续期只处理自己的账号，别人分享过来的不参与自动登录。
+        runCatching { CloudApi.my(token, includeShared = false) }.getOrNull()?.let { return it }
         // 冷启动时网络可能还没就绪，退避 3 秒再试一次
         delay(3_000)
-        return runCatching { CloudApi.my(token) }.getOrNull().orEmpty()
+        return runCatching { CloudApi.my(token, includeShared = false) }.getOrNull().orEmpty()
     }
 
     private suspend fun run(

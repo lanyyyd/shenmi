@@ -7,6 +7,9 @@ import com.teatt.pocket.core.CloudDownloadDto
 import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CloudGamesDto
 import com.teatt.pocket.core.CloudMyDto
+import com.teatt.pocket.core.CloudShareSaveDto
+import com.teatt.pocket.core.CloudShareUsersDto
+import com.teatt.pocket.core.CloudUserDto
 import com.teatt.pocket.core.CookieDto
 import com.teatt.pocket.core.ExpiryPushQrDto
 import com.teatt.pocket.core.ExpiryPushStatusDto
@@ -52,8 +55,10 @@ object AuthApi {
 
 object CloudApi {
 
-    suspend fun my(token: String): List<CloudAccountDto> {
-        val dto: CloudMyDto = Api.decode(Api.get("/api/cloud/my", token))
+    /** includeShared 为 true 时，列表里会附带别人分享给我的账号（只读、可直接上号）。 */
+    suspend fun my(token: String, includeShared: Boolean = true): List<CloudAccountDto> {
+        val query = buildMap { if (includeShared) put("include_shared", "1") }
+        val dto: CloudMyDto = Api.decode(Api.get("/api/cloud/my", token, query))
         return dto.games
     }
 
@@ -62,13 +67,45 @@ object CloudApi {
         return dto.games
     }
 
-    /** 拉某个账号的 Cookie（uid 为空取该游戏最新一条）；服务端会先按需用 stoken 换票。 */
-    suspend fun download(token: String, game: String, uid: String = ""): CloudDownloadDto {
+    /**
+     * 拉某个账号的 Cookie（uid 为空取该游戏最新一条）；服务端会先按需用 stoken 换票。
+     * owner 非 0 表示上号的是别人分享给我的账号。
+     */
+    suspend fun download(token: String, game: String, uid: String = "", owner: Int = 0): CloudDownloadDto {
         val query = buildMap {
             put("game", game)
             if (uid.isNotBlank()) put("uid", uid)
+            if (owner > 0) put("owner", owner.toString())
         }
         return Api.decode(Api.get("/api/cloud/download", token, query))
+    }
+
+    // ---------------- 账号分享 ----------------
+
+    /** 可分享的用户列表（不含自己 / 停用 / AI）。 */
+    suspend fun shareUsers(token: String): List<CloudUserDto> {
+        val dto: CloudShareUsersDto = Api.decode(Api.get("/api/cloud/share/users", token))
+        return dto.users
+    }
+
+    /** 某个账号当前分享给了谁（弹窗回显）。 */
+    suspend fun shareTargets(token: String, game: String, uid: String): List<CloudUserDto> {
+        val dto: CloudShareUsersDto = Api.decode(
+            Api.get("/api/cloud/share", token, mapOf("game" to game, "uid" to uid))
+        )
+        return dto.users
+    }
+
+    /** 整组保存分享对象；传空数组等于取消该账号的全部分享。 */
+    suspend fun saveShares(token: String, game: String, uid: String, userIds: List<Int>): CloudShareSaveDto {
+        val body = buildJsonObject {
+            put("game", JsonPrimitive(game))
+            put("uid", JsonPrimitive(uid))
+            put("user_ids", buildJsonArray {
+                userIds.forEach { add(JsonPrimitive(it)) }
+            })
+        }.toString()
+        return Api.decode(Api.postJson("/api/cloud/share", body, token))
     }
 
     /** 上传 Cookie。服务端会先跑一次有效性检测，用 game_uid 区分同游戏多账号。 */

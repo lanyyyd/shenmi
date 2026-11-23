@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -32,7 +33,9 @@ import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -75,6 +78,7 @@ import com.teatt.pocket.core.CloudCredential
 import com.teatt.pocket.core.CloudCredentialStore
 import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CookieDto
+import com.teatt.pocket.core.CloudUserDto
 import com.teatt.pocket.core.ExpiryPushStatusDto
 import com.teatt.pocket.core.GachaLinkDto
 import com.teatt.pocket.core.GachaRoleDto
@@ -111,6 +115,8 @@ fun CloudScreen(
     var pushStatus by remember { mutableStateOf<ExpiryPushStatusDto?>(null) }
     var pushQrOpen by remember { mutableStateOf(false) }
     var pushBusy by remember { mutableStateOf(false) }
+    /** 正在设置分享的账号；null 表示分享弹窗关闭。 */
+    var shareTarget by remember { mutableStateOf<CloudAccountDto?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -120,6 +126,8 @@ fun CloudScreen(
             when (account.game) {
                 "genshin" -> "https://ys.mihoyo.com/cloud/#/"
                 "starrail" -> "https://sr.mihoyo.com/cloud/#/"
+                "yihuan" -> "https://yh.wanmei.com/cloud/index.html"
+                "bilibili" -> "https://www.bilibili.com/"
                 else -> ""
             }
         }
@@ -374,11 +382,12 @@ fun CloudScreen(
                             )
                         }
                     }
-                    items(list, key = { it.game + ":" + it.gameUid }) { account ->
+                    items(list, key = { it.key }) { account ->
                         AccountCard(
                             account = account,
                             busy = busyKey == account.game || busyKey == account.key,
                             credential = creds[account.key],
+                            canPlay = playUrl(account).isNotBlank(),
                             onCredential = { credTarget = account },
                             onPlay = {
                                 val url = playUrl(account)
@@ -392,11 +401,13 @@ fun CloudScreen(
                                             account.displayName,
                                             account.gameUid,
                                             account.nickname,
-                                            url
+                                            url,
+                                            account.ownerId
                                         )
                                     )
                                 }
                             },
+                            onShare = { shareTarget = account },
                             onCheck = {
                                 busyKey = account.key
                                 scope.launch {
@@ -485,6 +496,19 @@ fun CloudScreen(
                 scanTarget = null
                 dialog = "扫码成功" to msg
                 scope.launch { reload() }
+            }
+        )
+    }
+
+    shareTarget?.let { account ->
+        ShareDialog(
+            token = token,
+            account = account,
+            onDismiss = { shareTarget = null },
+            onSaved = { count ->
+                shareTarget = null
+                dialog = "分享设置" to
+                    if (count > 0) "已分享给 $count 位用户，他们可以直接上号" else "已取消该账号的全部分享"
             }
         )
     }
@@ -1040,8 +1064,10 @@ private fun AccountCard(
     account: CloudAccountDto,
     busy: Boolean,
     credential: CloudCredential?,
+    canPlay: Boolean,
     onCredential: () -> Unit,
     onPlay: () -> Unit,
+    onShare: () -> Unit,
     onCheck: () -> Unit,
     onRecapture: () -> Unit,
     onPaste: () -> Unit,
@@ -1085,7 +1111,16 @@ private fun AccountCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            if (account.renewalText.isNotBlank()) {
+            if (account.shared) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "来自 ${account.ownerName.ifBlank { account.ownerUsername.ifBlank { "好友" } }} 的分享",
+                    fontSize = 11.sp,
+                    color = BrandPink
+                )
+            }
+
+            if (!account.shared && account.renewalText.isNotBlank()) {
                 Spacer(Modifier.height(2.dp))
                 Text(
                     account.renewalText,
@@ -1094,7 +1129,7 @@ private fun AccountCard(
                 )
             }
 
-            if (account.game in setOf("genshin", "starrail")) {
+            if (!account.shared && account.game in setOf("genshin", "starrail")) {
                 Spacer(Modifier.height(2.dp))
                 Text(
                     when {
@@ -1118,50 +1153,59 @@ private fun AccountCard(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    if (account.game in setOf("genshin", "starrail")) {
+                    if (canPlay) {
                         TextButton(onClick = onPlay, enabled = !busy) {
                             Icon(Icons.Filled.PlayArrow, null, Modifier.size(15.dp))
                             Spacer(Modifier.size(4.dp))
                             Text("上号", fontSize = 13.sp)
                         }
                     }
-                    TextButton(onClick = onCheck, enabled = !busy) {
-                        if (busy) {
-                            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
-                        } else {
-                            Icon(Icons.Filled.Refresh, null, Modifier.size(15.dp))
-                            Spacer(Modifier.size(4.dp))
-                            Text("检测", fontSize = 13.sp)
+                    if (!account.shared) {
+                        TextButton(onClick = onCheck, enabled = !busy) {
+                            if (busy) {
+                                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+                            } else {
+                                Icon(Icons.Filled.Refresh, null, Modifier.size(15.dp))
+                                Spacer(Modifier.size(4.dp))
+                                Text("检测", fontSize = 13.sp)
+                            }
                         }
-                    }
-                    TextButton(onClick = onRecapture, enabled = !busy) {
-                        Icon(Icons.Filled.OpenInBrowser, null, Modifier.size(15.dp))
-                        Spacer(Modifier.size(4.dp))
-                        Text("重抓", fontSize = 13.sp)
-                    }
-                    TextButton(onClick = onPaste, enabled = !busy) {
-                        Icon(Icons.Filled.ContentPaste, null, Modifier.size(15.dp))
-                        Spacer(Modifier.size(4.dp))
-                        Text("粘贴", fontSize = 13.sp)
-                    }
-                    if (account.game in setOf("genshin", "starrail")) {
-                        TextButton(onClick = onCredential, enabled = !busy) {
-                            Text("续期", fontSize = 13.sp)
-                        }
-                        TextButton(onClick = onStoken, enabled = !busy) {
-                            Icon(Icons.Filled.QrCodeScanner, null, Modifier.size(15.dp))
+                        TextButton(onClick = onRecapture, enabled = !busy) {
+                            Icon(Icons.Filled.OpenInBrowser, null, Modifier.size(15.dp))
                             Spacer(Modifier.size(4.dp))
-                            Text("扫码", fontSize = 13.sp)
+                            Text("重抓", fontSize = 13.sp)
+                        }
+                        TextButton(onClick = onPaste, enabled = !busy) {
+                            Icon(Icons.Filled.ContentPaste, null, Modifier.size(15.dp))
+                            Spacer(Modifier.size(4.dp))
+                            Text("粘贴", fontSize = 13.sp)
+                        }
+                        if (account.game in setOf("genshin", "starrail")) {
+                            TextButton(onClick = onCredential, enabled = !busy) {
+                                Text("续期", fontSize = 13.sp)
+                            }
+                            TextButton(onClick = onStoken, enabled = !busy) {
+                                Icon(Icons.Filled.QrCodeScanner, null, Modifier.size(15.dp))
+                                Spacer(Modifier.size(4.dp))
+                                Text("扫码", fontSize = 13.sp)
+                            }
+                        }
+                        TextButton(onClick = onShare, enabled = !busy) {
+                            Icon(Icons.Filled.Share, null, Modifier.size(15.dp))
+                            Spacer(Modifier.size(4.dp))
+                            Text("分享", fontSize = 13.sp)
                         }
                     }
                 }
-                IconButton(onClick = onDelete, enabled = !busy) {
-                    Icon(
-                        Icons.Filled.DeleteOutline,
-                        contentDescription = "删除",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
-                    )
+                if (!account.shared) {
+                    IconButton(onClick = onDelete, enabled = !busy) {
+                        Icon(
+                            Icons.Filled.DeleteOutline,
+                            contentDescription = "删除",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }
@@ -1208,6 +1252,161 @@ private fun PasteDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+/**
+ * 分享账号：所有用户单选/多选，保存时整组替换。
+ * 被分享的人会在自己的云游戏列表里看到这张卡（只读、可直接上号）。
+ */
+@Composable
+private fun ShareDialog(
+    token: String,
+    account: CloudAccountDto,
+    onDismiss: () -> Unit,
+    onSaved: (Int) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    var users by remember { mutableStateOf<List<CloudUserDto>>(emptyList()) }
+    var selected by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var loading by remember { mutableStateOf(true) }
+    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    var keyword by remember { mutableStateOf("") }
+
+    LaunchedEffect(account.key) {
+        runCatching {
+            users = CloudApi.shareUsers(token)
+            selected = CloudApi.shareTargets(token, account.game, account.gameUid)
+                .map { it.id }.toSet()
+        }.onFailure {
+            error = it.message ?: "加载用户列表失败"
+        }
+        loading = false
+    }
+
+    val filtered = remember(users, keyword) {
+        val kw = keyword.trim()
+        if (kw.isEmpty()) {
+            users
+        } else {
+            users.filter {
+                it.username.contains(kw, ignoreCase = true) ||
+                    it.nickname.contains(kw, ignoreCase = true)
+            }
+        }
+    }
+
+    fun toggle(id: Int) {
+        selected = if (id in selected) selected - id else selected + id
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!saving) onDismiss() },
+        title = { Text("分享账号") },
+        text = {
+            Column {
+                Text(
+                    buildString {
+                        append(account.nickname.ifBlank { account.displayName })
+                        if (account.gameUid.isNotBlank()) append(" · UID ${account.gameUid}")
+                    },
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                when {
+                    loading -> Box(
+                        Modifier.fillMaxWidth().height(120.dp),
+                        contentAlignment = Alignment.Center
+                    ) { CircularProgressIndicator(color = BrandPink, strokeWidth = 2.dp) }
+
+                    error.isNotBlank() -> Text(
+                        error,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.error
+                    )
+
+                    else -> {
+                        OutlinedTextField(
+                            value = keyword,
+                            onValueChange = { keyword = it },
+                            placeholder = { Text("搜索用户", fontSize = 13.sp) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "已选 ${selected.size} 人",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (users.isEmpty()) {
+                            Text(
+                                "还没有其他用户可以分享",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 20.dp)
+                            )
+                        } else {
+                            LazyColumn(
+                                Modifier.fillMaxWidth().heightIn(max = 300.dp)
+                            ) {
+                                items(filtered, key = { it.id }) { user ->
+                                    val checked = user.id in selected
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clickable { toggle(user.id) }
+                                            .padding(vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Checkbox(
+                                            checked = checked,
+                                            onCheckedChange = { toggle(user.id) }
+                                        )
+                                        Column {
+                                            Text(user.displayName, fontSize = 14.sp)
+                                            if (user.nickname.isNotBlank() && user.username.isNotBlank()) {
+                                                Text(
+                                                    user.username,
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !loading && !saving && error.isBlank(),
+                onClick = {
+                    saving = true
+                    scope.launch {
+                        try {
+                            val result = CloudApi.saveShares(
+                                token, account.game, account.gameUid, selected.toList()
+                            )
+                            onSaved(result.count)
+                        } catch (e: Exception) {
+                            error = e.message ?: "保存失败"
+                        } finally {
+                            saving = false
+                        }
+                    }
+                }
+            ) { Text(if (saving) "保存中…" else "保存") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !saving) { Text("取消") }
         }
     )
 }

@@ -196,12 +196,18 @@ data class CloudAccountDto(
     @SerialName("refresh_ok") val refreshOk: Int? = null,
     @SerialName("refresh_msg") val refreshMsg: String = "",
     /** 是否已补长期 stoken（能自动续期）；米哈游游戏才有意义。 */
-    @SerialName("has_stoken") val hasStoken: Boolean = false
+    @SerialName("has_stoken") val hasStoken: Boolean = false,
+    /** 是否是别人分享给我的账号（只读，可直接上号）。 */
+    val shared: Boolean = false,
+    /** 分享者用户 id；自己的账号为 0。上号下载 Cookie 时要用它。 */
+    @SerialName("owner_id") val ownerId: Int = 0,
+    @SerialName("owner_name") val ownerName: String = "",
+    @SerialName("owner_username") val ownerUsername: String = ""
 ) {
     val displayName: String get() = gameName.ifBlank { game }
 
     /** 同游戏多账号的唯一标识（busy 状态、列表 key 都用它区分）。 */
-    val key: String get() = "$game:$gameUid"
+    val key: String get() = "$game:$gameUid:$ownerId"
 
     val statusText: String get() = when (valid) {
         1 -> "有效"
@@ -310,6 +316,30 @@ data class ExpiryPushQrDto(
     val nonce: String = "",
     @SerialName("expiresIn") val expiresIn: Int = 0,
     val detail: String = ""
+)
+
+/** 可分享的用户。 */
+@Serializable
+data class CloudUserDto(
+    val id: Int = 0,
+    val username: String = "",
+    val nickname: String = "",
+    val avatar: String = ""
+) {
+    val displayName: String get() = nickname.ifBlank { username }
+}
+
+@Serializable
+data class CloudShareUsersDto(
+    val ok: Boolean = false,
+    val users: List<CloudUserDto> = emptyList()
+)
+
+@Serializable
+data class CloudShareSaveDto(
+    val ok: Boolean = false,
+    val count: Int = 0,
+    val users: List<CloudUserDto> = emptyList()
 )
 
 @Serializable

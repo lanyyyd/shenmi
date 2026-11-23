@@ -168,6 +168,20 @@ CREATE TABLE IF NOT EXISTS cloud_login_logs (
     client_ip TEXT
 );
 
+-- 云账号分享：owner 把某个账号（game + game_uid）共享给 target，target 可直接上号。
+-- 用 game + game_uid 关联，账号重新上传（UPSERT）后分享关系仍然有效。
+CREATE TABLE IF NOT EXISTS cloud_shares (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id   INTEGER NOT NULL,
+    game       TEXT NOT NULL,
+    game_uid   TEXT NOT NULL DEFAULT '',
+    target_id  INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(owner_id, game, game_uid, target_id)
+);
+CREATE INDEX IF NOT EXISTS idx_cloud_shares_target ON cloud_shares(target_id, game);
+CREATE INDEX IF NOT EXISTS idx_cloud_shares_owner ON cloud_shares(owner_id, game, game_uid);
+
 -- 米游社扫码补的 stoken：云游戏 Cookie 里没有 stoken 时，拿这里的长期凭据去换票。
 -- 同一个用户按 mid 只留一条；stuid（账号 aid）用于和 Cookie 里的 stuid 对上。
 CREATE TABLE IF NOT EXISTS cloud_stokens (

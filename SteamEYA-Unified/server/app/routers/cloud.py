@@ -549,9 +549,11 @@ def internal_relay(request: Request, payload: dict = Body(...)):
 
 
 @router.get("/download")
-def download(request: Request, game: str = "genshin", uid: str = "",
+def download(request: Request, game: str = "genshin", uid: str = "", owner: int = 0,
              user: dict = Depends(get_current_user)):
     """下载 Cookie；传 uid 指定账号，缺省取最近上传的那个。
+
+    owner 非 0 表示上号用的是别人分享给我的账号（必须先有分享关系）。
 
     米哈游账号超过 12 小时没续期会先自动换票，客户端拿到的就是新鲜 Cookie，
     用户完全无感；换票失败不影响返回旧 Cookie，但会带上失败原因。
@@ -559,16 +561,26 @@ def download(request: Request, game: str = "genshin", uid: str = "",
     这里同时记一条上号日志：安卓端上号只调这个接口（不调 report_login），
     在服务端补记才能让各端上号记录统一。
     """
-    refresh_result = cloud_refresh.refresh_stored(user["id"], game, uid, force=False)
+    owner_id = int(owner or user["id"])
+    if owner_id != user["id"]:
+        if not uid:
+            raise HTTPException(400, "分享账号必须指定 UID")
+        shared = query_one(
+            "SELECT 1 FROM cloud_shares WHERE owner_id=? AND target_id=? AND game=? AND game_uid=?",
+            (owner_id, user["id"], game, uid),
+        )
+        if not shared:
+            raise HTTPException(403, "该账号未分享给你")
+    refresh_result = cloud_refresh.refresh_stored(owner_id, game, uid, force=False)
     need_stoken = bool(refresh_result.get("need_stoken"))
     if uid:
         row = query_one("SELECT data, combo_token, updated_at, game_uid, refresh_at, refresh_ok, refresh_msg "
                         "FROM cloud_cookies WHERE user_id=? AND game=? AND game_uid=?",
-                        (user["id"], game, uid))
+                        (owner_id, game, uid))
     else:
         row = query_one("SELECT data, combo_token, updated_at, game_uid, refresh_at, refresh_ok, refresh_msg "
                         "FROM cloud_cookies WHERE user_id=? AND game=? "
-                        "ORDER BY updated_at DESC, id DESC LIMIT 1", (user["id"], game))
+                        "ORDER BY updated_at DESC, id DESC LIMIT 1", (owner_id, game))
     if not row:
         raise HTTPException(404, "该账号尚未上传该游戏的 Cookie")
     try:
@@ -577,7 +589,8 @@ def download(request: Request, game: str = "genshin", uid: str = "",
         raise HTTPException(500, "数据解密失败")
     _record_cloud_login(user["id"], game, _client_ip(request), row["game_uid"] or uid)
     return {"ok": True, "cookies": cookies, "combo_token": row["combo_token"] or "",
-            "game_uid": row["game_uid"] or "", "updated_at": row["updated_at"],
+            "game_uid": row["game_uid"] or "", "owner_id": owner_id,
+            "updated_at": row["updated_at"],
             "refresh_at": row["refresh_at"],
             "refresh_ok": None if row["refresh_ok"] is None else bool(row["refresh_ok"]),
             "refresh_msg": row["refresh_msg"] or "",
@@ -595,13 +608,91 @@ def delete_my(game: str = "genshin", uid: str = "", user: dict = Depends(get_cur
             "DELETE FROM cloud_cookies WHERE user_id=? AND game=? AND game_uid=?",
             (user["id"], game, uid))
     else:
-        row = query_one("SELECT id FROM cloud_cookies WHERE user_id=? AND game=? "
+        row = query_one("SELECT id, game_uid FROM cloud_cookies WHERE user_id=? AND game=? "
                         "ORDER BY updated_at DESC, id DESC LIMIT 1", (user["id"], game))
         deleted = execute_update("DELETE FROM cloud_cookies WHERE id=? AND user_id=?",
                                  (row["id"], user["id"])) if row else 0
+        uid = (row["game_uid"] or "") if row else ""
     if not deleted:
         raise HTTPException(404, "没有找到要删除的云账号")
+    # 账号删掉后对应的分享关系一并清理，避免被分享的人看到幽灵账号。
+    execute_update("DELETE FROM cloud_shares WHERE owner_id=? AND game=? AND game_uid=?",
+                   (user["id"], game, uid))
     return {"ok": True, "deleted": deleted}
+
+
+# ---------------- 云账号分享 ----------------
+def _owned_account(user_id: int, game: str, uid: str):
+    if not uid:
+        raise HTTPException(400, "缺少 UID")
+    return query_one("SELECT id FROM cloud_cookies WHERE user_id=? AND game=? AND game_uid=?",
+                     (user_id, game, uid))
+
+
+@router.get("/share/users")
+def share_users(user: dict = Depends(get_current_user)):
+    """分享弹窗的用户列表（不含自己、停用账号和 AI 助手）。"""
+    rows = query_all(
+        "SELECT id, username, nickname, avatar FROM users "
+        "WHERE id<>? AND is_active=1 AND is_ai=0 ORDER BY id ASC", (user["id"],),
+    )
+    return {"ok": True, "users": [dict(r) for r in rows]}
+
+
+@router.get("/share")
+def share_targets(game: str = "", uid: str = "", user: dict = Depends(get_current_user)):
+    """某个账号当前分享给了谁，用于弹窗回显。"""
+    if not _owned_account(user["id"], game, uid):
+        raise HTTPException(404, "账号不存在")
+    rows = query_all(
+        "SELECT u.id, u.username, u.nickname, u.avatar FROM cloud_shares s "
+        "JOIN users u ON u.id=s.target_id "
+        "WHERE s.owner_id=? AND s.game=? AND s.game_uid=? ORDER BY u.id ASC",
+        (user["id"], game, uid),
+    )
+    return {"ok": True, "users": [dict(r) for r in rows]}
+
+
+@router.post("/share")
+def save_share(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    """整组保存分享对象：传空数组表示取消该账号的全部分享。"""
+    game = str(payload.get("game") or "")
+    uid = str(payload.get("uid") or "")
+    raw_ids = payload.get("user_ids") or []
+    if not _owned_account(user["id"], game, uid):
+        raise HTTPException(404, "账号不存在")
+    ids = []
+    for value in raw_ids if isinstance(raw_ids, list) else []:
+        try:
+            target_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if target_id and target_id != user["id"] and target_id not in ids:
+            ids.append(target_id)
+    # 只允许分享给真实存在且启用的普通用户。
+    valid_ids = []
+    if ids:
+        placeholders = ",".join("?" for _ in ids)
+        rows = query_all(
+            f"SELECT id FROM users WHERE id IN ({placeholders}) "
+            "AND is_active=1 AND is_ai=0", ids,
+        )
+        valid_ids = [int(r["id"]) for r in rows]
+    execute_update("DELETE FROM cloud_shares WHERE owner_id=? AND game=? AND game_uid=?",
+                   (user["id"], game, uid))
+    now = security.now_s()
+    for target_id in valid_ids:
+        execute(
+            "INSERT OR IGNORE INTO cloud_shares (owner_id, game, game_uid, target_id, created_at) "
+            "VALUES (?,?,?,?,?)", (user["id"], game, uid, target_id, now),
+        )
+    users = []
+    if valid_ids:
+        placeholders = ",".join("?" for _ in valid_ids)
+        users = [dict(r) for r in query_all(
+            f"SELECT id, username, nickname, avatar FROM users WHERE id IN ({placeholders}) "
+            "ORDER BY id ASC", valid_ids)]
+    return {"ok": True, "count": len(valid_ids), "users": users}
 
 
 # ---------------- 米游社扫码补 stoken ----------------
@@ -713,29 +804,59 @@ def check(payload: dict = Body(...), user: dict = Depends(get_current_user)):
 
 
 @router.get("/my")
-def my(user: dict = Depends(get_current_user)):
+def my(include_shared: int = 0, user: dict = Depends(get_current_user)):
+    """我的云账号；include_shared=1 时附带别人分享给我的账号（可直接上号）。"""
     rows = query_all(
         "SELECT game, updated_at, valid, checked_at, nickname, game_uid, free_duration, total_duration, "
         "refresh_at, refresh_ok, refresh_msg, data FROM cloud_cookies WHERE user_id=? "
         "ORDER BY game, updated_at DESC, id DESC", (user["id"],),
     )
     names = game_name_map()
-    out = []
-    for row in rows:
+
+    def build(row, owner_id: int = 0, owner_name: str = "", owner_username: str = "",
+              shared: bool = False) -> dict:
         item = dict(row)
         blob = item.pop("data", None)
         item["refresh_at"] = int(item.get("refresh_at") or 0)
         item["refresh_msg"] = item.get("refresh_msg") or ""
         item["game_name"] = names.get(item["game"]) or item["game"]
+        item["shared"] = shared
+        item["owner_id"] = owner_id
+        item["owner_name"] = owner_name
+        item["owner_username"] = owner_username
         # 客户端据此显示「stoken 未补」并引导扫码；会话型游戏恒为 False。
         has_stoken = False
         if item["game"] in cloud_refresh.MIHOYO_GAMES and blob:
             try:
-                has_stoken = cloud_refresh.stoken_bound(user["id"], security.decrypt_blob(blob))
+                has_stoken = cloud_refresh.stoken_bound(owner_id or user["id"],
+                                                        security.decrypt_blob(blob))
             except Exception:
                 has_stoken = False
         item["has_stoken"] = has_stoken
-        out.append(item)
+        return item
+
+    out = [build(row) for row in rows]
+    if include_shared:
+        shared_rows = query_all(
+            "SELECT c.game, c.updated_at, c.valid, c.checked_at, c.nickname, c.game_uid, "
+            "c.free_duration, c.total_duration, c.refresh_at, c.refresh_ok, c.refresh_msg, c.data, "
+            "c.user_id AS owner_id, u.username AS owner_username, u.nickname AS owner_nickname "
+            "FROM cloud_shares s "
+            "JOIN cloud_cookies c ON c.user_id=s.owner_id AND c.game=s.game "
+            "AND c.game_uid=s.game_uid "
+            "JOIN users u ON u.id=s.owner_id "
+            "WHERE s.target_id=? ORDER BY c.game, c.updated_at DESC, c.id DESC",
+            (user["id"],),
+        )
+        for row in shared_rows:
+            item = dict(row)
+            owner_id = int(item.pop("owner_id") or 0)
+            owner_nickname = item.pop("owner_nickname", "") or ""
+            owner_username = item.pop("owner_username", "") or ""
+            out.append(build(item, owner_id=owner_id,
+                             owner_name=owner_nickname or owner_username or f"用户{owner_id}",
+                             owner_username=owner_username,
+                             shared=True))
     return {"ok": True, "games": out}
 
 
@@ -985,9 +1106,12 @@ def save_admin_settings(payload: dict = Body(...), admin: dict = Depends(require
 
 @router.delete("/admin/accounts/{row_id}")
 def admin_delete(row_id: int, admin: dict = Depends(require_admin)):
-    if not query_one("SELECT id FROM cloud_cookies WHERE id = ?", (row_id,)):
+    row = query_one("SELECT user_id, game, game_uid FROM cloud_cookies WHERE id = ?", (row_id,))
+    if not row:
         raise HTTPException(404, "记录不存在")
     execute("DELETE FROM cloud_cookies WHERE id = ?", (row_id,))
+    execute_update("DELETE FROM cloud_shares WHERE owner_id=? AND game=? AND game_uid=?",
+                   (row["user_id"], row["game"], row["game_uid"] or ""))
     return {"ok": True}
 
 

@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
@@ -62,6 +63,7 @@ class CloudPlayActivity : ComponentActivity() {
         private const val EXTRA_UID = "uid"
         private const val EXTRA_NICKNAME = "nickname"
         private const val EXTRA_URL = "url"
+        private const val EXTRA_OWNER = "owner"
 
         fun intent(
             context: Context,
@@ -69,13 +71,15 @@ class CloudPlayActivity : ComponentActivity() {
             gameName: String,
             uid: String,
             nickname: String,
-            url: String
+            url: String,
+            owner: Int = 0
         ): Intent = Intent(context, CloudPlayActivity::class.java).apply {
             putExtra(EXTRA_GAME, game)
             putExtra(EXTRA_GAME_NAME, gameName)
             putExtra(EXTRA_UID, uid)
             putExtra(EXTRA_NICKNAME, nickname)
             putExtra(EXTRA_URL, url)
+            putExtra(EXTRA_OWNER, owner)
         }
 
         // 小米浏览器 UA（Android 16 / 真机机型），带 Mobile 且不带 WebView 的 "; wv" 标记。
@@ -100,6 +104,8 @@ class CloudPlayActivity : ComponentActivity() {
     private lateinit var uid: String
     private lateinit var nickname: String
     private lateinit var startUrl: String
+    /** 非 0 表示这是别人分享给我的账号，下载 Cookie 时要带 owner。 */
+    private var ownerId = 0
     private var gachaArmed = false
     private var gachaCaptured = false
 
@@ -116,7 +122,18 @@ class CloudPlayActivity : ComponentActivity() {
         gameName = intent.getStringExtra(EXTRA_GAME_NAME).orEmpty()
         uid = intent.getStringExtra(EXTRA_UID).orEmpty()
         nickname = intent.getStringExtra(EXTRA_NICKNAME).orEmpty()
-        startUrl = intent.getStringExtra(EXTRA_URL).orEmpty().ifBlank { "https://ys.mihoyo.com/cloud/" }
+        ownerId = intent.getIntExtra(EXTRA_OWNER, 0)
+        startUrl = intent.getStringExtra(EXTRA_URL).orEmpty().ifBlank {
+            when (game) {
+                "bilibili" -> "https://www.bilibili.com/"
+                "yihuan" -> "https://yh.wanmei.com/cloud/index.html"
+                else -> "https://ys.mihoyo.com/cloud/"
+            }
+        }
+        // 哔哩哔哩是视频网站（不是横屏串流）：保持竖屏浏览，视频全屏时再临时转横屏。
+        if (game == "bilibili") {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
         // 开关打开且是原神/星铁时，本次上号尝试顺手抓抽卡链接
         gachaArmed = CloudGachaHistory.isEnabled(this) &&
             game in setOf("genshin", "starrail")
@@ -248,6 +265,10 @@ class CloudPlayActivity : ComponentActivity() {
                         callback?.onCustomViewHidden()
                         return
                     }
+                    // 哔哩哔哩默认竖屏浏览，视频全屏时临时转横屏
+                    if (game == "bilibili") {
+                        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    }
                     fullscreenView = view
                     fullscreenCallback = callback
                     root.addView(
@@ -332,7 +353,7 @@ class CloudPlayActivity : ComponentActivity() {
     /** 先拉新鲜 Cookie 注入，再打开云游戏页；拉取失败也照常打开，用户可在页面内手动登录。 */
     private fun injectCookiesThenLoad() {
         lifecycleScope.launch {
-            val result = runCatching { CloudApi.download(Session.token(), game, uid) }
+            val result = runCatching { CloudApi.download(Session.token(), game, uid, ownerId) }
             result.onFailure {
                 Toast.makeText(
                     this@CloudPlayActivity,
@@ -396,6 +417,9 @@ class CloudPlayActivity : ComponentActivity() {
         val view = fullscreenView ?: return
         root.removeView(view)
         fullscreenView = null
+        if (game == "bilibili") {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
         webView.visibility = View.VISIBLE
         fullscreenCallback?.onCustomViewHidden()
         fullscreenCallback = null
