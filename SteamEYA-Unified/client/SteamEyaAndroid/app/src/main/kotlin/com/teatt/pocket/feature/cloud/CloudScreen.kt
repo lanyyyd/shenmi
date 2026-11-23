@@ -57,6 +57,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -945,53 +946,78 @@ private fun ExpiryPushCard(
 ) {
     val bound = status?.bound == true
     val configured = status?.configured == true
+    val enabled = bound && status?.enabled == true
+    // 绑定成功后就折叠成一行；点标题行再展开按钮。
+    var expanded by remember(bound) { mutableStateOf(!bound) }
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surface,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Notifications, null, Modifier.size(18.dp), tint = BrandPink)
-                Spacer(Modifier.size(9.dp))
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .then(if (bound) Modifier.clickable { expanded = !expanded } else Modifier),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.Notifications, null, Modifier.size(15.dp), tint = BrandPink)
+                Spacer(Modifier.size(7.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Cookie 过期微信提醒", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                    Spacer(Modifier.height(2.dp))
+                    Text("Cookie 过期微信提醒", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     Text(
                         when {
                             status == null -> "正在读取绑定状态…"
                             !configured -> "管理员尚未配置 PushPlus，暂时无法绑定"
-                            bound -> {
-                                val nick = status?.nickname.orEmpty()
-                                "已绑定${if (nick.isBlank()) "" else "（$nick）"}：检测到失效会推送微信提醒"
-                            }
-                            else -> "微信扫码绑定后，每日检测到 Cookie 失效会推送提醒"
+                            bound -> if (enabled) "已开启，失效会推送微信提醒" else "已绑定，当前未开启提醒"
+                            else -> "绑定后 Cookie 失效会推送微信提醒"
                         },
-                        fontSize = 11.5.sp,
+                        fontSize = 10.5.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                if (bound) {
+                    Text(
+                        if (expanded) "收起" else "设置",
+                        fontSize = 11.sp,
+                        color = BrandPink,
+                        modifier = Modifier.padding(end = 2.dp)
+                    )
+                }
                 Switch(
-                    checked = bound && status?.enabled == true,
+                    checked = enabled,
                     enabled = !busy && configured,
-                    onCheckedChange = onToggle
+                    onCheckedChange = onToggle,
+                    modifier = Modifier.scale(0.85f)
                 )
             }
-            if (configured) {
+            if (expanded && configured) {
                 Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp),
+                    Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    TextButton(onClick = onBind, enabled = !busy) {
-                        Icon(Icons.Filled.QrCodeScanner, null, Modifier.size(15.dp))
-                        Spacer(Modifier.size(4.dp))
-                        Text(if (bound) "重新绑定" else "扫码绑定", fontSize = 13.sp)
+                    TextButton(
+                        onClick = onBind,
+                        enabled = !busy,
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        if (!bound) {
+                            Icon(Icons.Filled.QrCodeScanner, null, Modifier.size(14.dp))
+                            Spacer(Modifier.size(4.dp))
+                        }
+                        Text(if (bound) "重新绑定" else "扫码绑定", fontSize = 12.sp)
                     }
                     if (bound) {
-                        TextButton(onClick = onTest, enabled = !busy) { Text("测试推送", fontSize = 13.sp) }
-                        TextButton(onClick = onUnbind, enabled = !busy) { Text("解绑", fontSize = 13.sp) }
+                        TextButton(
+                            onClick = onTest,
+                            enabled = !busy,
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        ) { Text("测试推送", fontSize = 12.sp) }
+                        TextButton(
+                            onClick = onUnbind,
+                            enabled = !busy,
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        ) { Text("解绑", fontSize = 12.sp) }
                     }
                 }
             }

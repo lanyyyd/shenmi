@@ -65,6 +65,21 @@
                     </StackPanel>
                 </StackPanel>
             </Border>
+
+            <!-- 官网入口：默认浏览器打开 -->
+            <Border Style="{StaticResource CardBorderStyle}">
+                <StackPanel Spacing="8">
+                    <TextBlock
+                        Text="{x:Bind Strings.Get('About_Site_Section'), Mode=OneWay}"
+                        Style="{StaticResource SectionTitleTextStyle}" />
+                    <HyperlinkButton NavigateUri="https://t.teatt.top/teatt.html" Padding="0">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE774;" FontSize="14" />
+                            <TextBlock Text="https://t.teatt.top/teatt.html" />
+                        </StackPanel>
+                    </HyperlinkButton>
+                </StackPanel>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </Page>

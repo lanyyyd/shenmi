@@ -203,9 +203,21 @@ def _get_mihoyo_free_duration(combo_token: str, game: str) -> dict:
     # 畅玩卡（付费时长）：接口给的是剩余秒数；play_card.short_msg 是「已过期」之类的人类可读状态。
     card = d.get("play_card") or {}
     try:
-        paid_duration = max(int(float(card.get("remaining_sec")) // 60), 0)
+        card_minutes = max(int(float(card.get("remaining_sec")) // 60), 0)
     except (TypeError, ValueError):
-        paid_duration = None
+        card_minutes = None
+    coin = (d.get("coin") or {}).get("coin_num")
+    # 游玩币按 10 币 = 1 分钟折算成付费时长，不再单独展示游玩币。
+    try:
+        coin_minutes = max(int(float(coin) // 10), 0)
+    except (TypeError, ValueError):
+        coin_minutes = None
+    if card_minutes is None:
+        paid_duration = coin_minutes
+    elif coin_minutes is None:
+        paid_duration = card_minutes
+    else:
+        paid_duration = card_minutes + coin_minutes
     # total_time 是账号当前可用的总分钟数（免费 + 付费），没有单独的付费余额接口。
     try:
         total_duration = int(d.get("total_time"))
@@ -214,7 +226,7 @@ def _get_mihoyo_free_duration(combo_token: str, game: str) -> dict:
     return {"ok": True, "free_duration": free_duration, "paid_duration": paid_duration,
             "total_duration": total_duration,
             "play_card": card.get("short_msg", "") or "",
-            "coin": (d.get("coin") or {}).get("coin_num"), "msg": "查询成功"}
+            "coin": coin, "msg": "查询成功"}
 
 
 WALLET_FIELDS = ("free_duration", "paid_duration", "total_duration", "play_card", "coin")
@@ -225,9 +237,10 @@ def _wallet_fields(wr: dict) -> dict:
 
 
 def _wallet_text(wr: dict) -> str:
-    """「剩余付费x分钟 剩余免费x分钟 游玩币x」；钱包没查到就返回空串。
+    """「剩余付费x分钟 剩余免费x分钟」；钱包没查到就返回空串。
 
     即使 Cookie 已经失效，combo_token 还能查钱包，剩余时长也照样显示出来。
+    游玩币已按 10 币 = 1 分钟折算进付费时长，不再单独显示。
     """
     if not wr.get("ok"):
         return ""
@@ -236,8 +249,6 @@ def _wallet_text(wr: dict) -> str:
         parts.append(f"剩余付费{wr['paid_duration']}分钟")
     if wr.get("free_duration") is not None:
         parts.append(f"剩余免费{wr['free_duration']}分钟")
-    if wr.get("coin") not in (None, ""):
-        parts.append(f"游玩币{wr['coin']}")
     return " ".join(parts)
 
 
