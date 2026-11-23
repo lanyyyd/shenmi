@@ -540,16 +540,18 @@ def upload(payload: dict = Body(...), user: dict = Depends(get_current_user)):
     now = security.now_s()
     execute(
         "INSERT INTO cloud_cookies (user_id, game, game_uid, data, combo_token, updated_at, "
-        "valid, checked_at, nickname, free_duration, total_duration) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+        "valid, checked_at, nickname, free_duration, paid_duration, total_duration) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(user_id, game, game_uid) DO UPDATE SET data=excluded.data, "
         # 新数据没带 combo_token 时保留旧的，别把之前能用的凭证清掉
         "combo_token=COALESCE(NULLIF(excluded.combo_token,''), cloud_cookies.combo_token), "
         "updated_at=excluded.updated_at, valid=excluded.valid, "
         "checked_at=excluded.checked_at, nickname=excluded.nickname, "
-        "free_duration=excluded.free_duration, total_duration=excluded.total_duration",
+        "free_duration=excluded.free_duration, paid_duration=excluded.paid_duration, "
+        "total_duration=excluded.total_duration",
         (user["id"], game, game_uid, blob, combo_token, now,
          1 if result.get("valid") else 0, now, result.get("nickname", ""),
-         result.get("free_duration"), result.get("total_duration")),
+         result.get("free_duration"), result.get("paid_duration"), result.get("total_duration")),
     )
     # 自定义游戏：首个成功上传的人让它对所有人可见，其他人就不用再自己建一遍。
     execute_update("UPDATE cloud_games SET visible=1 WHERE game_key=? AND visible=0", (game,))
@@ -643,17 +645,19 @@ def internal_relay(request: Request, payload: dict = Body(...)):
     now = security.now_s()
     execute(
         "INSERT INTO cloud_cookies (user_id, game, game_uid, data, combo_token, updated_at, valid, "
-        "checked_at, nickname, free_duration, total_duration) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+        "checked_at, nickname, free_duration, paid_duration, total_duration) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(user_id, game, game_uid) DO UPDATE SET data=excluded.data, "
         # 新数据没带 combo_token 时保留旧的，别把之前能用的凭证清掉
         "combo_token=COALESCE(NULLIF(excluded.combo_token,''), cloud_cookies.combo_token), "
         "updated_at=excluded.updated_at, valid=excluded.valid, "
         "checked_at=excluded.checked_at, nickname=excluded.nickname, "
-        "free_duration=excluded.free_duration, total_duration=excluded.total_duration",
+        "free_duration=excluded.free_duration, paid_duration=excluded.paid_duration, "
+        "total_duration=excluded.total_duration",
         (user["id"], game, game_uid, security.encrypt_blob(cookies),
          str(payload.get("combo_token") or ""), now, valid_val, now,
          str(payload.get("nickname") or ""), payload.get("free_duration"),
-         payload.get("total_duration")))
+         payload.get("paid_duration"), payload.get("total_duration")))
     return {"ok": True, "userId": user["id"], "username": user["username"], "uid": game_uid}
 
 
@@ -912,12 +916,13 @@ def check(payload: dict = Body(...), user: dict = Depends(get_current_user)):
             refresh_msg = rr.get("msg") or "自动续期失败"
             need_stoken = bool(rr.get("need_stoken"))
     execute(
-        "UPDATE cloud_cookies SET valid=?, checked_at=?, game_uid=?, nickname=?, free_duration=?, total_duration=? "
-        "WHERE id=?",
+        "UPDATE cloud_cookies SET valid=?, checked_at=?, game_uid=?, nickname=?, free_duration=?, "
+        "paid_duration=?, total_duration=? WHERE id=?",
         (1 if result.get("valid") else (0 if result.get("valid") is False else None),
          security.now_s(), result.get("game_uid") or row["game_uid"] or "",
          result.get("nickname") or row["nickname"] or "",
-         result.get("free_duration"), result.get("total_duration"), row_id),
+         result.get("free_duration"), result.get("paid_duration"),
+         result.get("total_duration"), row_id),
     )
     return {"ok": True, **result, "refresh_msg": refresh_msg, "need_stoken": need_stoken}
 
@@ -926,8 +931,8 @@ def check(payload: dict = Body(...), user: dict = Depends(get_current_user)):
 def my(include_shared: int = 0, user: dict = Depends(get_current_user)):
     """我的云账号；include_shared=1 时附带别人分享给我的账号（可直接上号）。"""
     rows = query_all(
-        "SELECT game, updated_at, valid, checked_at, nickname, game_uid, free_duration, total_duration, "
-        "refresh_at, refresh_ok, refresh_msg, data FROM cloud_cookies WHERE user_id=? "
+        "SELECT game, updated_at, valid, checked_at, nickname, game_uid, free_duration, paid_duration, "
+        "total_duration, refresh_at, refresh_ok, refresh_msg, data FROM cloud_cookies WHERE user_id=? "
         "ORDER BY game, updated_at DESC, id DESC", (user["id"],),
     )
     names = game_name_map()
@@ -943,10 +948,11 @@ def my(include_shared: int = 0, user: dict = Depends(get_current_user)):
         item["owner_id"] = owner_id
         item["owner_name"] = owner_name
         item["owner_username"] = owner_username
-        # 付费时长 = 总时长 - 免费时长（游玩币已按 10:1 折算进钱包的 total_time）。
-        free, total = item.get("free_duration"), item.get("total_duration")
-        item["paid_duration"] = (max(int(total) - int(free), 0)
-                                if free is not None and total is not None else None)
+        # 付费时长：优先用检测时写入的值（游玩币已折算）；老数据按「总时长 - 免费时长」兜底。
+        if item.get("paid_duration") is None:
+            free, total = item.get("free_duration"), item.get("total_duration")
+            item["paid_duration"] = (max(int(total) - int(free), 0)
+                                    if free is not None and total is not None else None)
         # 客户端据此显示「stoken 未补」并引导扫码；会话型游戏恒为 False。
         has_stoken = False
         if item["game"] in cloud_refresh.MIHOYO_GAMES and blob:
@@ -962,7 +968,8 @@ def my(include_shared: int = 0, user: dict = Depends(get_current_user)):
     if include_shared:
         shared_rows = query_all(
             "SELECT c.game, c.updated_at, c.valid, c.checked_at, c.nickname, c.game_uid, "
-            "c.free_duration, c.total_duration, c.refresh_at, c.refresh_ok, c.refresh_msg, c.data, "
+            "c.free_duration, c.paid_duration, c.total_duration, c.refresh_at, c.refresh_ok, "
+            "c.refresh_msg, c.data, "
             "c.user_id AS owner_id, u.username AS owner_username, u.nickname AS owner_nickname "
             "FROM cloud_shares s "
             "JOIN cloud_cookies c ON c.user_id=s.owner_id AND c.game=s.game "
@@ -1097,7 +1104,7 @@ def admin_stats(admin: dict = Depends(require_admin)):
 def admin_accounts(admin: dict = Depends(require_admin)):
     rows = query_all(
         "SELECT c.id, c.user_id, c.game, c.combo_token, c.updated_at, c.valid, c.checked_at, "
-        "c.game_uid, c.nickname, c.free_duration, c.total_duration, c.data, "
+        "c.game_uid, c.nickname, c.free_duration, c.paid_duration, c.total_duration, c.data, "
         "COALESCE(NULLIF(u.nickname,''), u.username, '（已注销用户）') AS user_name, u.username "
         "FROM cloud_cookies c LEFT JOIN users u ON u.id = c.user_id ORDER BY c.updated_at DESC")
     out = []
@@ -1134,19 +1141,23 @@ def check_account_row(row: dict) -> dict:
     result = check_cookie_valid(cookies, row["game"], row["combo_token"] or "")
     valid_val = 1 if result.get("valid") is True else (0 if result.get("valid") is False else None)
     if valid_val is None:
-        # 无法判定（网络异常 / 风控拦截）时只更新时间与资料，不覆盖原来的有效性结论。
+        # 无法判定（网络异常 / 风控拦截）时只更新资料与时长，不覆盖原来的有效性结论。
         execute(
-            "UPDATE cloud_cookies SET checked_at=?, game_uid=?, nickname=? WHERE id=?",
+            "UPDATE cloud_cookies SET checked_at=?, game_uid=?, nickname=?, free_duration=?, "
+            "paid_duration=?, total_duration=? WHERE id=?",
             (security.now_s(), result.get("game_uid") or row["game_uid"] or "",
-             result.get("nickname") or row["nickname"] or "", row_id),
+             result.get("nickname") or row["nickname"] or "",
+             result.get("free_duration"), result.get("paid_duration"),
+             result.get("total_duration"), row_id),
         )
     else:
         execute(
-            "UPDATE cloud_cookies SET valid=?, checked_at=?, game_uid=?, nickname=?, free_duration=?, total_duration=? "
-            "WHERE id=?",
+            "UPDATE cloud_cookies SET valid=?, checked_at=?, game_uid=?, nickname=?, free_duration=?, "
+            "paid_duration=?, total_duration=? WHERE id=?",
             (valid_val, security.now_s(), result.get("game_uid") or row["game_uid"] or "",
              result.get("nickname") or row["nickname"] or "",
-             result.get("free_duration"), result.get("total_duration"), row_id),
+             result.get("free_duration"), result.get("paid_duration"),
+             result.get("total_duration"), row_id),
         )
 
     # 失效提醒：只在「有效/未判定 → 失效」的转折点推一次；恢复有效后清零，

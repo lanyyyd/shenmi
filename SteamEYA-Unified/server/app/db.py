@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS cloud_cookies (
     checked_at    INTEGER,
     nickname      TEXT,
     free_duration INTEGER,
+    paid_duration INTEGER,
     total_duration INTEGER,
     refresh_at    INTEGER,
     refresh_ok    INTEGER,
@@ -736,6 +737,7 @@ def init_db() -> None:
                     checked_at INTEGER,
                     nickname TEXT,
                     free_duration INTEGER,
+                    paid_duration INTEGER,
                     total_duration INTEGER,
                     UNIQUE(user_id, game, game_uid)
                 );
@@ -756,6 +758,8 @@ def init_db() -> None:
         ("refresh_msg", "ALTER TABLE cloud_cookies ADD COLUMN refresh_msg TEXT"),
         # 0=本次失效还没推送；1=已推送。恢复有效时清零，下次失效才会再提醒。
         ("expiry_notified", "ALTER TABLE cloud_cookies ADD COLUMN expiry_notified INTEGER DEFAULT 0"),
+        # 剩余付费时长（分钟）：畅玩卡 + 游玩币/10，检测时写入，账号列表直接展示。
+        ("paid_duration", "ALTER TABLE cloud_cookies ADD COLUMN paid_duration INTEGER"),
     ):
         if cloud_cols and col not in cloud_cols:
             with cursor() as cur:

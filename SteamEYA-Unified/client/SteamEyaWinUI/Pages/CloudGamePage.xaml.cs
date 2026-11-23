@@ -58,20 +58,25 @@ public sealed partial class CloudGamePage : Page
     /// </summary>
     private async Task AutoCheckAsync()
     {
-        var accounts = _status.Where(g => g.Valid != 0 && !g.Shared).ToArray();
+        // 失效的账号也检测：钱包时长（剩余付费/免费）照样能查出来，右侧列表才能显示完整信息。
+        var accounts = _status.Where(g => !g.Shared).ToArray();
         if (accounts.Length == 0)
         {
             return;
         }
-        try
+        // 单个账号失败不影响其它账号，检测完统一回填一次列表。
+        await Task.WhenAll(accounts.Select(async g =>
         {
-            await Task.WhenAll(accounts.Select(g => _cloud.CheckAsync(g.Game, g.GameUid)));
-            await RefreshStatusAsync();
-        }
-        catch (Exception ex)
-        {
-            AppLog.Warn($"自动检测云游戏 Cookie 失败：{ex.Message}");
-        }
+            try
+            {
+                await _cloud.CheckAsync(g.Game, g.GameUid);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Debug($"自动检测 {g.Game}/{g.GameUid} 失败：{ex.Message}");
+            }
+        }));
+        await RefreshStatusAsync();
     }
 
     private async Task EnsureEngineAsync()
@@ -572,19 +577,15 @@ public sealed partial class CloudGamePage : Page
         try
         {
             var result = await _cloud.CheckAsync(CurrentGame, uid);
-            // 服务端 check 的 msg 已含「有效，剩余免费时长 X 分钟」，优先展示它（detail 只有 upload 才返回）。
+            // 检测提示只显示结论；剩余时长、续期/ stoken 提示都在右侧账号列表里。
             var text = result.Ok
-                ? (result.Msg ?? result.Detail ?? "检测完成")
+                ? result.Valid switch
+                {
+                    true => "Cookie有效",
+                    false => "Cookie无效",
+                    _ => "无法判定登录状态"
+                }
                 : (result.Msg ?? result.Detail ?? "检测失败");
-            // 服务端检测到失效时会先用 stoken 续期再复检，把这一步的结果告诉用户。
-            if (!string.IsNullOrWhiteSpace(result.RefreshMsg))
-            {
-                text += $"\n{result.RefreshMsg}";
-            }
-            if (result.NeedStoken)
-            {
-                text += "\nCookie 里没有 stoken：请点「扫码补 stoken」用米游社 App 扫一次";
-            }
             var severity = result.Valid switch
             {
                 true => InfoBarSeverity.Success,
