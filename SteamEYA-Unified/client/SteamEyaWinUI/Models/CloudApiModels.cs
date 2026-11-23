@@ -78,9 +78,26 @@ internal sealed class CloudGameItem
     [JsonPropertyName("free_duration")]
     public int? FreeDuration { get; set; }
 
+    /// <summary>剩余付费时长（分钟）：总时长 - 免费时长，游玩币按 10:1 折算在内。</summary>
+    [JsonPropertyName("paid_duration")]
+    public int? PaidDuration { get; set; }
+
     /// <summary>剩余总时长（分钟，完美世界类游戏才有）。</summary>
     [JsonPropertyName("total_duration")]
     public int? TotalDuration { get; set; }
+
+    /// <summary>是否是别人分享给我的账号（只读，可直接上号）。</summary>
+    public bool Shared { get; set; }
+
+    /// <summary>分享者用户 id；自己的账号为 0。上号下载 Cookie 时要用它。</summary>
+    [JsonPropertyName("owner_id")]
+    public int OwnerId { get; set; }
+
+    [JsonPropertyName("owner_name")]
+    public string OwnerName { get; set; } = string.Empty;
+
+    [JsonPropertyName("owner_username")]
+    public string OwnerUsername { get; set; } = string.Empty;
 
     /// <summary>服务端解析好的显示名（含用户自定义游戏）；老服务端不返回时为空。</summary>
     [JsonPropertyName("game_name")]
@@ -109,16 +126,20 @@ internal sealed class CloudGameItem
         ? GameNameFromServer
         : Services.CloudGameService.DisplayName(Game);
 
-    public string StatusText => Valid switch
+    public string InfoText
     {
-        1 => "Cookie 有效",
-        0 => "Cookie 失效",
-        _ => "未检测"
-    };
-
-    public string InfoText => string.IsNullOrEmpty(Nickname) && string.IsNullOrEmpty(GameUid)
-        ? "暂无账号信息"
-        : $"{Nickname} {GameUid}".Trim();
+        get
+        {
+            var text = string.IsNullOrEmpty(Nickname) && string.IsNullOrEmpty(GameUid)
+                ? "暂无账号信息"
+                : $"{Nickname} {GameUid}".Trim();
+            if (Shared && !string.IsNullOrWhiteSpace(OwnerName))
+            {
+                text += $" · 分享自 {OwnerName}";
+            }
+            return text;
+        }
+    }
 
     /// <summary>左侧「账号」下拉的显示文本：同一游戏可以有多条，必须能靠昵称/UID 区分。</summary>
     public string PickerLabel
@@ -133,13 +154,43 @@ internal sealed class CloudGameItem
                 0 => "失效",
                 _ => "未检测"
             };
-            return $"{nick}{uid} · {status}";
+            var share = Shared ? " · 分享" : string.Empty;
+            return $"{nick}{uid} · {status}{share}";
         }
     }
 
-    public string DurationText => FreeDuration is not null
-        ? $"剩余免费 {FreeDuration} 分钟"
-        : (TotalDuration is not null ? $"剩余时长 {TotalDuration} 分钟" : string.Empty);
+    /// <summary>
+    /// 右侧账号卡片的时长文案，和检测结果保持同一格式：
+    /// 「Cookie有效 剩余付费39分钟 剩余免费365分钟」。
+    /// </summary>
+    public string DurationText
+    {
+        get
+        {
+            var parts = new List<string>
+            {
+                Valid switch
+                {
+                    1 => "Cookie有效",
+                    0 => "Cookie无效",
+                    _ => "Cookie未检测"
+                }
+            };
+            if (PaidDuration is not null)
+            {
+                parts.Add($"剩余付费{PaidDuration}分钟");
+            }
+            if (FreeDuration is not null)
+            {
+                parts.Add($"剩余免费{FreeDuration}分钟");
+            }
+            else if (TotalDuration is not null)
+            {
+                parts.Add($"剩余时长{TotalDuration}分钟");
+            }
+            return string.Join(" ", parts);
+        }
+    }
 
     /// <summary>自动续期状态：米哈游账号由服务端用 stoken 定期换票，这里只做展示。</summary>
     public string RenewalText
@@ -478,6 +529,32 @@ internal sealed class CloudPlayingDto
     public CloudPlayerDto? Playing { get; set; }
 }
 
+/// <summary>可分享的用户（GET /api/cloud/share/users、/api/cloud/share）。</summary>
+internal sealed class CloudUserDto
+{
+    public int Id { get; set; }
+    public string Username { get; set; } = string.Empty;
+    public string Nickname { get; set; } = string.Empty;
+    public string Avatar { get; set; } = string.Empty;
+
+    public string DisplayName => string.IsNullOrWhiteSpace(Nickname) || Nickname == Username
+        ? Username
+        : $"{Nickname}（{Username}）";
+}
+
+internal sealed class CloudShareUsersDto
+{
+    public bool Ok { get; set; }
+    public List<CloudUserDto>? Users { get; set; }
+}
+
+internal sealed class CloudShareSaveDto
+{
+    public bool Ok { get; set; }
+    public int Count { get; set; }
+    public List<CloudUserDto>? Users { get; set; }
+}
+
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
 [JsonSerializable(typeof(UserDto))]
 [JsonSerializable(typeof(AuthResultDto))]
@@ -490,6 +567,8 @@ internal sealed class CloudPlayingDto
 [JsonSerializable(typeof(CloudGamesDto))]
 [JsonSerializable(typeof(CloudCreateGameDto))]
 [JsonSerializable(typeof(CloudPlayingDto))]
+[JsonSerializable(typeof(CloudShareUsersDto))]
+[JsonSerializable(typeof(CloudShareSaveDto))]
 [JsonSerializable(typeof(StokenCreateDto))]
 [JsonSerializable(typeof(StokenPollDto))]
 [JsonSerializable(typeof(ExpiryPushStatusDto))]

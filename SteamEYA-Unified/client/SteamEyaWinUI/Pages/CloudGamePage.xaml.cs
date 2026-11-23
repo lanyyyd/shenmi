@@ -41,9 +41,10 @@ public sealed partial class CloudGamePage : Page
 
         Loaded += async (_, _) =>
         {
+            // 切到本页先把账号列表刷出来（含别人分享给我的账号），再准备引擎和检测。
+            await RefreshStatusAsync();
             await LoadGamesAsync();
             await EnsureEngineAsync();
-            await RefreshStatusAsync();
             await AutoCheckAsync();
             await RefreshExpiryPushAsync();
         };
@@ -57,7 +58,7 @@ public sealed partial class CloudGamePage : Page
     /// </summary>
     private async Task AutoCheckAsync()
     {
-        var accounts = _status.Where(g => g.Valid != 0).ToArray();
+        var accounts = _status.Where(g => g.Valid != 0 && !g.Shared).ToArray();
         if (accounts.Length == 0)
         {
             return;
@@ -340,8 +341,8 @@ public sealed partial class CloudGamePage : Page
             var driverPath = await BrowserDriverProvisioner.EnsureAsync(CurrentBrowser, driverProgress);
 
             SetLoginProgress("正在获取账号 Cookie", 62, indeterminate: true);
-            // 带 uid 下载，确保上的是选中的那个号，而不是该游戏最近上传的那个。
-            var data = await _cloud.DownloadAsync(game, uid);
+            // 带 uid / owner 下载，确保上的是选中的那个号（分享账号还要带分享者 id）。
+            var data = await _cloud.DownloadAsync(game, uid, account.OwnerId);
             if (!data.Ok || data.Cookies is not { } cookies)
             {
                 ShowInfo(data.Msg ?? "该账号尚未上传 Cookie，请先「更新 Cookie」", InfoBarSeverity.Warning);
@@ -560,6 +561,11 @@ public sealed partial class CloudGamePage : Page
             ShowInfo("该游戏还没有上传账号，请先「更新 Cookie」并「抓取并上传」", InfoBarSeverity.Warning);
             return;
         }
+        if (account.Shared)
+        {
+            ShowInfo("这是别人分享给你的账号，只有分享者可以检测有效性", InfoBarSeverity.Warning);
+            return;
+        }
 
         var uid = account.GameUid;
         CheckButton.IsEnabled = false;
@@ -591,6 +597,95 @@ public sealed partial class CloudGamePage : Page
         finally
         {
             CheckButton.IsEnabled = true;
+        }
+    }
+
+    // ---------------- 账号分享 ----------------
+
+    /// <summary>
+    /// 分享当前选中的账号：弹窗里勾选要分享给的用户，保存时整组替换。
+    /// 再次打开会回显已分享的人，取消勾选保存后对方就看不到这个账号了。
+    /// </summary>
+    private async void OnShareAccount(object sender, RoutedEventArgs e)
+    {
+        var account = CurrentAccount;
+        if (account is null)
+        {
+            ShowInfo("先在「账号」里选择一个要分享的账号", InfoBarSeverity.Warning);
+            return;
+        }
+        if (account.Shared)
+        {
+            ShowInfo("这是别人分享给你的账号，只有分享者可以修改共享设置", InfoBarSeverity.Warning);
+            return;
+        }
+
+        List<CloudUserDto> users;
+        HashSet<int> selected;
+        try
+        {
+            users = await _cloud.ShareUsersAsync();
+            selected = (await _cloud.ShareTargetsAsync(account.Game, account.GameUid))
+                .Select(u => u.Id).ToHashSet();
+        }
+        catch (Exception ex)
+        {
+            ShowInfo($"读取分享列表失败：{ex.Message}", InfoBarSeverity.Error);
+            return;
+        }
+        if (users.Count == 0)
+        {
+            ShowInfo("还没有其他用户可以分享", InfoBarSeverity.Warning);
+            return;
+        }
+
+        var boxes = new List<CheckBox>();
+        var panel = new StackPanel { Spacing = 4 };
+        foreach (var user in users)
+        {
+            var box = new CheckBox
+            {
+                Content = user.DisplayName,
+                IsChecked = selected.Contains(user.Id),
+                Tag = user.Id
+            };
+            boxes.Add(box);
+            panel.Children.Add(box);
+        }
+        var dialog = new ContentDialog
+        {
+            Title = "分享账号",
+            Content = new ScrollViewer
+            {
+                Content = panel,
+                MaxHeight = 360,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            },
+            PrimaryButtonText = "保存",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        var ids = boxes.Where(b => b.IsChecked == true)
+            .Select(b => (int)b.Tag)
+            .ToList();
+        try
+        {
+            var result = await _cloud.SaveSharesAsync(account.Game, account.GameUid, ids);
+            ShowInfo(result.Count > 0
+                    ? $"已分享给 {result.Count} 位用户，他们可以在自己的云游戏页面直接上号"
+                    : "已取消该账号的全部分享",
+                InfoBarSeverity.Success);
+            await RefreshStatusAsync(account.GameUid);
+        }
+        catch (Exception ex)
+        {
+            ShowInfo($"保存分享失败：{ex.Message}", InfoBarSeverity.Error);
         }
     }
 

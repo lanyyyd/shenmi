@@ -80,6 +80,12 @@
             </StackPanel>
             <Button x:Name="CheckButton" Content="检测 Cookie 有效性" HorizontalAlignment="Stretch" Click="OnCheck" />
             <Button
+                x:Name="ShareAccountButton"
+                Content="分享该账号（可多选用户）"
+                HorizontalAlignment="Stretch"
+                Click="OnShareAccount"
+                ToolTipService.ToolTip="分享后对方可在自己的云游戏列表里直接上号；再次打开可取消勾选" />
+            <Button
                 x:Name="StokenButton"
                 Content="扫码补 stoken（米游社）"
                 HorizontalAlignment="Stretch"
@@ -167,10 +173,7 @@
                             <StackPanel Spacing="2">
                                 <TextBlock Text="{x:Bind GameName}" Style="{StaticResource BodyStrongTextBlockStyle}" />
                                 <TextBlock Text="{x:Bind InfoText}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                <StackPanel Orientation="Horizontal" Spacing="12">
-                                    <TextBlock Text="{x:Bind StatusText}" />
-                                    <TextBlock Text="{x:Bind DurationText}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                </StackPanel>
+                                <TextBlock Text="{x:Bind DurationText}" />
                                 <TextBlock
                                     Text="{x:Bind RenewalText}"
                                     FontSize="12"

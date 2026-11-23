@@ -943,6 +943,10 @@ def my(include_shared: int = 0, user: dict = Depends(get_current_user)):
         item["owner_id"] = owner_id
         item["owner_name"] = owner_name
         item["owner_username"] = owner_username
+        # 付费时长 = 总时长 - 免费时长（游玩币已按 10:1 折算进钱包的 total_time）。
+        free, total = item.get("free_duration"), item.get("total_duration")
+        item["paid_duration"] = (max(int(total) - int(free), 0)
+                                if free is not None and total is not None else None)
         # 客户端据此显示「stoken 未补」并引导扫码；会话型游戏恒为 False。
         has_stoken = False
         if item["game"] in cloud_refresh.MIHOYO_GAMES and blob:

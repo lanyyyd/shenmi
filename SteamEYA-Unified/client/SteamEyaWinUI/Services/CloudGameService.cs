@@ -101,17 +101,23 @@ internal sealed class CloudGameService
     }
 
     // ---------------- 云端 Cookie ----------------
-    public async Task<CloudMyDto> MyAsync(CancellationToken ct = default)
-        => await SendAsync(Auth(HttpMethod.Get, "/api/cloud/my"), CloudApiJsonContext.Default.CloudMyDto, ct)
-           ?? new CloudMyDto();
+    /// <summary>我的云账号；默认附带别人分享给我的账号（只读、可直接上号）。</summary>
+    public async Task<CloudMyDto> MyAsync(bool includeShared = true, CancellationToken ct = default)
+        => await SendAsync(Auth(HttpMethod.Get,
+               "/api/cloud/my" + (includeShared ? "?include_shared=1" : string.Empty)),
+               CloudApiJsonContext.Default.CloudMyDto, ct) ?? new CloudMyDto();
 
     /// <summary>下载指定账号的 Cookie；uid 为空时服务端取该游戏最近上传的一条。</summary>
-    public async Task<CloudDownloadDto> DownloadAsync(string game, string uid = "", CancellationToken ct = default)
+    public async Task<CloudDownloadDto> DownloadAsync(string game, string uid = "", int owner = 0, CancellationToken ct = default)
     {
         var query = $"/api/cloud/download?game={Uri.EscapeDataString(game)}";
         if (!string.IsNullOrEmpty(uid))
         {
             query += $"&uid={Uri.EscapeDataString(uid)}";
+        }
+        if (owner > 0)
+        {
+            query += $"&owner={owner}";
         }
         return await SendAsync(Auth(HttpMethod.Get, query),
             CloudApiJsonContext.Default.CloudDownloadDto, ct) ?? new CloudDownloadDto();
@@ -142,6 +148,41 @@ internal sealed class CloudGameService
         var dto = await SendAsync(Auth(HttpMethod.Get, query),
             CloudApiJsonContext.Default.CloudPlayingDto, ct);
         return dto?.Playing;
+    }
+
+    // ---------------- 账号分享 ----------------
+
+    /// <summary>可分享的用户列表（不含自己、停用账号和 AI）。</summary>
+    public async Task<List<CloudUserDto>> ShareUsersAsync(CancellationToken ct = default)
+    {
+        var dto = await SendAsync(Auth(HttpMethod.Get, "/api/cloud/share/users"),
+            CloudApiJsonContext.Default.CloudShareUsersDto, ct);
+        return dto?.Users ?? [];
+    }
+
+    /// <summary>某个账号当前分享给了谁（弹窗回显与取消勾选都用它）。</summary>
+    public async Task<List<CloudUserDto>> ShareTargetsAsync(string game, string uid, CancellationToken ct = default)
+    {
+        var path = $"/api/cloud/share?game={Uri.EscapeDataString(game)}&uid={Uri.EscapeDataString(uid)}";
+        var dto = await SendAsync(Auth(HttpMethod.Get, path),
+            CloudApiJsonContext.Default.CloudShareUsersDto, ct);
+        return dto?.Users ?? [];
+    }
+
+    /// <summary>整组保存分享对象：传空数组等于取消该账号的全部分享。</summary>
+    public async Task<CloudShareSaveDto> SaveSharesAsync(
+        string game, string uid, IEnumerable<int> userIds, CancellationToken ct = default)
+    {
+        var ids = new JsonArray();
+        foreach (var id in userIds)
+        {
+            ids.Add(JsonValue.Create(id)!);
+        }
+        var obj = new JsonObject { ["game"] = game, ["uid"] = uid, ["user_ids"] = ids };
+        using var req = Auth(HttpMethod.Post, "/api/cloud/share");
+        req.Content = new StringContent(obj.ToJsonString(), Encoding.UTF8, "application/json");
+        return await SendAsync(req, CloudApiJsonContext.Default.CloudShareSaveDto, ct)
+               ?? new CloudShareSaveDto();
     }
 
     public async Task<CloudActionResultDto> UploadAsync(string game, JsonElement cookies, string comboToken, CancellationToken ct = default)
