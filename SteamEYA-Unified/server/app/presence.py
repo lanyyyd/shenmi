@@ -166,6 +166,37 @@ def activity_of(user_id: int) -> str:
     return ""
 
 
+def player_of(game: str, uid: str = "", exclude_user: int = 0) -> dict | None:
+    """谁正在玩这个游戏账号（上号前查冲突用）。
+
+    uid 为空表示只按游戏判断；会话里没有 uid（旧版本上号留下的探测会话）时
+    不当作冲突，避免误报「已经被别人在使用了」。
+    """
+    if not game:
+        return None
+    now = time.time()
+    found = 0
+    with _lock:
+        for user_id, s in _sessions.items():
+            if user_id == exclude_user or s["until"] <= now or s["game"] != game:
+                continue
+            if uid and s["uid"] != uid:
+                continue
+            found = user_id
+            break
+    if not found:
+        return None
+    row = query_one("SELECT id, username, nickname FROM users WHERE id=?", (found,))
+    return {
+        "user_id": found,
+        "username": (row["username"] if row else "") or "",
+        "nickname": (row["nickname"] if row else "") or "",
+        "game": game,
+        "game_name": _game_name(game),
+        "uid": uid,
+    }
+
+
 def _probe_cloud(now: float) -> None:
     from .routers.cloud import _get_mihoyo_free_duration
 

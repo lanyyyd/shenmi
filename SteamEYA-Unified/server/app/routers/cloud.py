@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import time
 import uuid
 from datetime import datetime
@@ -44,6 +45,16 @@ MIHOYO_CLOUD_WALLET = {
                 "host": "api-cloudgame.mihoyo.com", "referer": "https://app.mihoyo.com/", "origin": "https://ys.mihoyo.com"},
     "starrail": {"url": "https://cg-hkrpg-api.mihoyo.com/hkrpg_cn/cg/wallet/wallet/get?cost_method=0",
                  "host": "cg-hkrpg-api.mihoyo.com", "referer": "https://sr.mihoyo.com/", "origin": "https://sr.mihoyo.com"},
+}
+
+# 云游戏网页真实登录态校验。角色接口（getUserGameRolesByCookie）只校验 ltoken_v2，
+# 经常出现「接口说有效、云游戏页面却要求重新登录」；这个 passport 接口才是准绳。
+MIHOYO_WEB_VERIFY_API = "https://passport-api.mihoyo.com/account/ma-cn-session/web/webVerifyForGame"
+MIHOYO_WEB_VERIFY = {
+    "genshin": {"app_id": "c76ync6mutq8", "biz": "hk4e_cn",
+                "origin": "https://ys.mihoyo.com", "referer": "https://ys.mihoyo.com/cloud/"},
+    "starrail": {"app_id": "c90mr1bwo2rk", "biz": "hkrpg_cn",
+                 "origin": "https://sr.mihoyo.com", "referer": "https://sr.mihoyo.com/cloud/"},
 }
 
 DEFAULT_GAME_KEY = "genshin"
@@ -189,9 +200,81 @@ def _get_mihoyo_free_duration(combo_token: str, game: str) -> dict:
         free_duration = int(ft.get("free_time"))
     except (TypeError, ValueError):
         free_duration = None
-    return {"ok": True, "free_duration": free_duration, "total_duration": None,
-            "play_card": (d.get("play_card") or {}).get("short_msg", ""),
+    # 畅玩卡（付费时长）：接口给的是剩余秒数；play_card.short_msg 是「已过期」之类的人类可读状态。
+    card = d.get("play_card") or {}
+    try:
+        paid_duration = max(int(float(card.get("remaining_sec")) // 60), 0)
+    except (TypeError, ValueError):
+        paid_duration = None
+    # total_time 是账号当前可用的总分钟数（免费 + 付费），没有单独的付费余额接口。
+    try:
+        total_duration = int(d.get("total_time"))
+    except (TypeError, ValueError):
+        total_duration = None
+    return {"ok": True, "free_duration": free_duration, "paid_duration": paid_duration,
+            "total_duration": total_duration,
+            "play_card": card.get("short_msg", "") or "",
             "coin": (d.get("coin") or {}).get("coin_num"), "msg": "查询成功"}
+
+
+WALLET_FIELDS = ("free_duration", "paid_duration", "total_duration", "play_card", "coin")
+
+
+def _wallet_fields(wr: dict) -> dict:
+    return {key: wr.get(key) for key in WALLET_FIELDS}
+
+
+def _wallet_text(wr: dict) -> str:
+    """「剩余付费x分钟 剩余免费x分钟 游玩币x」；钱包没查到就返回空串。
+
+    即使 Cookie 已经失效，combo_token 还能查钱包，剩余时长也照样显示出来。
+    """
+    if not wr.get("ok"):
+        return ""
+    parts = []
+    if wr.get("paid_duration") is not None:
+        parts.append(f"剩余付费{wr['paid_duration']}分钟")
+    if wr.get("free_duration") is not None:
+        parts.append(f"剩余免费{wr['free_duration']}分钟")
+    if wr.get("coin") not in (None, ""):
+        parts.append(f"游玩币{wr['coin']}")
+    return " ".join(parts)
+
+
+def _mihoyo_web_verify(cookie_str: str, cmap: dict, game: str) -> dict:
+    """云游戏网页登录态：passport-api webVerifyForGame。
+
+    返回 state：True 已登录 / False 登录态失效 / None 无法判定（网络或接口变动）。
+    """
+    cfg = MIHOYO_WEB_VERIFY.get(game)
+    if not cfg:
+        return {"state": None, "msg": ""}
+    headers = {
+        "Cookie": cookie_str,
+        "User-Agent": UA,
+        "x-rpc-app_id": cfg["app_id"],
+        "x-rpc-client_type": "25",
+        "x-rpc-game_biz": cfg["biz"],
+        "x-rpc-device_id": cmap.get("_MHYUUID") or uuid.uuid4().hex,
+        "x-rpc-device_fp": cmap.get("DEVICEFP") or uuid.uuid4().hex[:13],
+        "x-rpc-lifecycle_id": (cmap.get("MIHOYO_LOGIN_PLATFORM_LIFECYCLE_ID")
+                               or str(random.randint(10 ** 9, 10 ** 10 - 1))),
+        "x-rpc-sdk_version": "2.50.1",
+        "Origin": cfg["origin"],
+        "Referer": cfg["referer"],
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/plain, */*",
+    }
+    try:
+        data = requests.post(MIHOYO_WEB_VERIFY_API, headers=headers, timeout=12).json()
+    except Exception as e:
+        return {"state": None, "msg": f"云游戏登录态接口请求失败：{e}"}
+    retcode = data.get("retcode")
+    if retcode == 0:
+        return {"state": True, "msg": "云游戏登录态有效"}
+    if retcode == -100:
+        return {"state": False, "msg": data.get("message") or "登录状态失效，请重新登录"}
+    return {"state": None, "msg": f"云游戏登录态接口无法判定（retcode={retcode}）"}
 
 
 # B 站风控/限流类返回码：这些不是「Cookie 失效」，而是这次请求被拦了，不能覆盖成失效。
@@ -321,63 +404,78 @@ def check_cookie_valid(cookies: list, game: str, combo_token: str = "") -> dict:
         return _check_wanmei_valid(cookie_str)
     if cfg.get("vendor") == "bilibili":
         return _check_bilibili_valid(cookie_str, cmap)
+    # ---------- 旧方法第一步：角色接口（拿昵称 / UID；只校验 ltoken_v2） ----------
     url = f"https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie?game_biz={cfg['biz']}"
     headers = {"Cookie": cookie_str, "User-Agent": UA, "Referer": "https://webstatic.mihoyo.com/",
                "Accept": "application/json, text/plain, */*"}
+    legacy = {"valid": None, "msg": "无法确定登录态"}
     try:
         data = requests.get(url, headers=headers, timeout=12).json()
     except Exception as e:
-        return {"valid": None, "msg": f"请求失败：{e}"}
-    retcode = data.get("retcode")
-    if retcode == 0:
-        roles = (data.get("data") or {}).get("list") or []
-        result = {"valid": True, "msg": "有效",
-                  "nickname": roles[0].get("nickname", "") if roles else "",
-                  "game_uid": str(roles[0].get("game_uid", "")) if roles else "",
-                  "level": roles[0].get("level") if roles else None,
-                  "region": roles[0].get("region_name", "") if roles else "",
-                  "role_count": len(roles)}
-        if not roles:
-            result["msg"] = "Cookie 有效（未查询到角色）"
+        legacy = {"valid": None, "msg": f"请求失败：{e}"}
+    else:
+        retcode = data.get("retcode")
+        if retcode == 0:
+            roles = (data.get("data") or {}).get("list") or []
+            legacy = {"valid": True, "msg": "Cookie 有效",
+                      "nickname": roles[0].get("nickname", "") if roles else "",
+                      "game_uid": str(roles[0].get("game_uid", "")) if roles else "",
+                      "level": roles[0].get("level") if roles else None,
+                      "region": roles[0].get("region_name", "") if roles else "",
+                      "role_count": len(roles)}
+            if not roles:
+                legacy["msg"] = "Cookie 有效（未查询到角色）"
+        elif retcode in (-100, -101, 10001, -110):
+            legacy = {"valid": False, "msg": data.get("message", "Cookie 已失效")}
+        else:
+            legacy = {"valid": False, "msg": f"{data.get('message', '验证失败')}（retcode={retcode}）"}
+
+    # ---------- 旧方法第二步：钱包时长（剩余免费 / 付费 / 游玩币） ----------
+    # Cookie 失效也照常查：combo_token 还能用时，照样把剩余分钟数显示出来，
+    # 「每日签到」领云原神免费时长也依赖这里返回的数值。
+    wallet = _get_mihoyo_free_duration(combo_token, game) if combo_token else {"ok": False}
+    dur_text = _wallet_text(wallet)
+
+    # ---------- 新方法：云游戏网页登录态（最终判定） ----------
+    verify = _mihoyo_web_verify(cookie_str, cmap, game)
+
+    result = {
+        "nickname": legacy.get("nickname", ""),
+        "game_uid": legacy.get("game_uid", ""),
+        "level": legacy.get("level"),
+        "region": legacy.get("region", ""),
+        "role_count": legacy.get("role_count", 0),
+        "verify_msg": verify.get("msg", ""),
+        **_wallet_fields(wallet),
+    }
+
+    def finish(valid, head: str) -> dict:
+        result["valid"] = valid
+        result["msg"] = f"{head} {dur_text}".strip()
+        return result
+
+    if verify.get("state") is True:
+        return finish(True, "Cookie有效")
+    if verify.get("state") is False:
+        # 角色接口可能还报有效，但云游戏网页已经要求重新登录了 —— 以这里为准。
+        return finish(False, "Cookie无效")
+
+    # 新接口无法判定（网络 / 风控 / 接口变动）时回退到旧结论。
+    if legacy.get("valid") is True:
         # 原神 / 星穹铁道云游戏上号必须带 combo_token，拿不到就不算抓取成功
         if not combo_token:
-            return {
-                "valid": False,
-                "msg": "未抓取到游戏凭证 combo_token，请先进入云游戏再抓取",
-                "nickname": result.get("nickname", ""),
-                "game_uid": result.get("game_uid", ""),
-                "level": result.get("level"),
-                "region": result.get("region", ""),
-                "role_count": result.get("role_count", 0),
-                "free_duration": None,
-                "total_duration": None,
-            }
-        wr = _get_mihoyo_free_duration(combo_token, game)
-        if not wr.get("ok") or wr.get("free_duration") is None:
-            if wr.get("expired"):
+            return finish(False, "未抓取到游戏凭证 combo_token，请先进入云游戏再抓取")
+        if not wallet.get("ok") or wallet.get("free_duration") is None:
+            if wallet.get("expired"):
                 msg = "云游戏凭证已失效，请重新抓取"
-                if wr.get("msg"):
-                    msg += f"：{wr['msg']}"
             else:
-                msg = f"未获取到剩余免费时长，判定 Cookie 无效：{wr.get('msg') or '接口未返回时长'}"
-            return {
-                "valid": False,
-                "msg": msg,
-                "nickname": result.get("nickname", ""),
-                "game_uid": result.get("game_uid", ""),
-                "level": result.get("level"),
-                "region": result.get("region", ""),
-                "role_count": result.get("role_count", 0),
-                "free_duration": None,
-                "total_duration": None,
-            }
-        result["free_duration"] = wr["free_duration"]
-        result["total_duration"] = wr.get("total_duration")
-        result["msg"] = f"有效，剩余免费时长 {wr['free_duration']} 分钟"
-        return result
-    if retcode in (-100, -101, 10001, -110):
-        return {"valid": False, "msg": data.get("message", "Cookie 已失效")}
-    return {"valid": False, "msg": f"{data.get('message', '验证失败')}（retcode={retcode}）"}
+                msg = f"未获取到剩余免费时长：{wallet.get('msg') or '接口未返回时长'}"
+            return finish(False, msg)
+        return finish(True, "Cookie有效")
+    if legacy.get("valid") is False:
+        reason = legacy.get("msg") or ""
+        return finish(False, f"Cookie无效（{reason}）" if reason else "Cookie无效")
+    return finish(legacy.get("valid"), legacy.get("msg") or "无法确定登录态")
 
 
 def _client_ip(request: Request) -> str:
@@ -729,7 +827,8 @@ def stoken_poll(payload: dict = Body(...), user: dict = Depends(get_current_user
 @router.post("/report_login")
 def report_login(request: Request, payload: dict = Body(...), user: dict = Depends(get_current_user)):
     game = payload.get("game") or "genshin"
-    _record_cloud_login(user["id"], game, _client_ip(request))
+    uid = str(payload.get("uid") or "").strip()
+    _record_cloud_login(user["id"], game, _client_ip(request), uid)
     hub.broadcast_online_threadsafe()
     return {"ok": True}
 
@@ -759,6 +858,15 @@ def report_steam(payload: dict = Body(...), user: dict = Depends(get_current_use
     presence.note_steam(user["id"], bool(payload.get("running")))
     hub.broadcast_online_threadsafe()
     return {"ok": True}
+
+
+@router.get("/playing")
+def playing(game: str = "", uid: str = "", user: dict = Depends(get_current_user)):
+    """上号前查冲突：这个游戏账号现在是不是已经有别人在玩。"""
+    if not game:
+        raise HTTPException(400, "缺少游戏")
+    player = presence.player_of(game, uid, exclude_user=user["id"])
+    return {"ok": True, "playing": player}
 
 
 @router.post("/check")

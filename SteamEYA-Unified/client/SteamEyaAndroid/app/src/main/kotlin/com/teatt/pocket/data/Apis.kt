@@ -7,6 +7,8 @@ import com.teatt.pocket.core.CloudDownloadDto
 import com.teatt.pocket.core.CloudGameDto
 import com.teatt.pocket.core.CloudGamesDto
 import com.teatt.pocket.core.CloudMyDto
+import com.teatt.pocket.core.CloudPlayerDto
+import com.teatt.pocket.core.CloudPlayingDto
 import com.teatt.pocket.core.CloudShareSaveDto
 import com.teatt.pocket.core.CloudShareUsersDto
 import com.teatt.pocket.core.CloudUserDto
@@ -133,6 +135,16 @@ object CloudApi {
             if (uid.isNotBlank()) put("uid", JsonPrimitive(uid))
         }.toString()
         return Api.decode(Api.postJson("/api/cloud/check", body, token))
+    }
+
+    /** 上号前查这个账号是否已经有人在玩；没人玩返回 null。 */
+    suspend fun playing(token: String, game: String, uid: String = ""): CloudPlayerDto? {
+        val query = buildMap {
+            put("game", game)
+            if (uid.isNotBlank()) put("uid", uid)
+        }
+        val dto: CloudPlayingDto = Api.decode(Api.get("/api/cloud/playing", token, query))
+        return dto.playing
     }
 
     /** 开始游戏 / 心跳：每 60 秒调一次，服务端 90 秒收不到就认为已退出。 */

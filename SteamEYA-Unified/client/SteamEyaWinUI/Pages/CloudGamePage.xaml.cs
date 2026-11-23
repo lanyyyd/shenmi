@@ -297,6 +297,35 @@ public sealed partial class CloudGamePage : Page
         LoginButton.IsEnabled = false;
         try
         {
+            // 同一个账号已经有人在玩时先提醒，避免两个人互相挤号。
+            try
+            {
+                var occupant = await _cloud.PlayingAsync(game, uid);
+                if (occupant is not null)
+                {
+                    var who = !string.IsNullOrWhiteSpace(occupant.Username)
+                        ? occupant.Username
+                        : (!string.IsNullOrWhiteSpace(occupant.Nickname) ? occupant.Nickname : "其他用户");
+                    var dialog = new ContentDialog
+                    {
+                        Title = "账号正在使用",
+                        Content = $"这个账号似乎已经被{who}在使用了喵~小心被挤号喵~",
+                        PrimaryButtonText = "继续登录",
+                        CloseButtonText = "取消",
+                        DefaultButton = ContentDialogButton.Close,
+                        XamlRoot = XamlRoot
+                    };
+                    if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+                    {
+                        return;
+                    }
+                }
+            }
+            catch
+            {
+                // 查冲突失败不影响上号
+            }
+
             // 先把驱动准备好（命中缓存就秒过，缺失则从国内镜像多线程下），
             // 避免 Selenium Manager 在上号过程中同步联网下载把界面卡住。
             var driverProgress = new Progress<DriverProgress>(p => SetLoginProgress(
@@ -345,7 +374,7 @@ public sealed partial class CloudGamePage : Page
             HideLoginProgressSoon();
             ShowInfo((loggedIn ? "登录成功，浏览器已打开" : "已注入 Cookie，请在浏览器确认登录状态") + refreshNote,
                 failedRefresh ? InfoBarSeverity.Warning : (loggedIn ? InfoBarSeverity.Success : InfoBarSeverity.Warning));
-            await _cloud.ReportLoginAsync(game);
+            await _cloud.ReportLoginAsync(game, uid);
             StartPlayHeartbeat(game, uid);
         }
         finally
@@ -550,7 +579,13 @@ public sealed partial class CloudGamePage : Page
             {
                 text += "\nCookie 里没有 stoken：请点「扫码补 stoken」用米游社 App 扫一次";
             }
-            ShowInfo(text, result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Error);
+            var severity = result.Valid switch
+            {
+                true => InfoBarSeverity.Success,
+                false => InfoBarSeverity.Error,
+                _ => InfoBarSeverity.Warning
+            };
+            ShowInfo(text, severity);
             await RefreshStatusAsync(uid);
         }
         finally

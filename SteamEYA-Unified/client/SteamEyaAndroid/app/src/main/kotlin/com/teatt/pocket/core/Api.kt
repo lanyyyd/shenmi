@@ -345,6 +345,22 @@ data class CloudShareSaveDto(
     val users: List<CloudUserDto> = emptyList()
 )
 
+/** 正在玩某个云账号的人（上号冲突提示）。 */
+@Serializable
+data class CloudPlayerDto(
+    @SerialName("user_id") val userId: Int = 0,
+    val username: String = "",
+    val nickname: String = "",
+    val game: String = "",
+    @SerialName("game_name") val gameName: String = "",
+    val uid: String = ""
+) {
+    val displayName: String get() = username.ifBlank { nickname.ifBlank { "其他用户" } }
+}
+
+@Serializable
+data class CloudPlayingDto(val ok: Boolean = false, val playing: CloudPlayerDto? = null)
+
 @Serializable
 data class GachaRoleDto(
     @SerialName("game_biz") val gameBiz: String = "",

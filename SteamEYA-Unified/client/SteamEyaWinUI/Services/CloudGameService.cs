@@ -131,6 +131,19 @@ internal sealed class CloudGameService
         return await SendAsync(req, CloudApiJsonContext.Default.CloudActionResultDto, ct) ?? new CloudActionResultDto();
     }
 
+    /// <summary>上号前查这个账号是否已经有人在玩；没人玩返回 null。</summary>
+    public async Task<CloudPlayerDto?> PlayingAsync(string game, string uid = "", CancellationToken ct = default)
+    {
+        var query = $"/api/cloud/playing?game={Uri.EscapeDataString(game)}";
+        if (!string.IsNullOrEmpty(uid))
+        {
+            query += $"&uid={Uri.EscapeDataString(uid)}";
+        }
+        var dto = await SendAsync(Auth(HttpMethod.Get, query),
+            CloudApiJsonContext.Default.CloudPlayingDto, ct);
+        return dto?.Playing;
+    }
+
     public async Task<CloudActionResultDto> UploadAsync(string game, JsonElement cookies, string comboToken, CancellationToken ct = default)
     {
         var obj = new JsonObject
@@ -220,9 +233,14 @@ internal sealed class CloudGameService
         return await SendAsync(req, CloudApiJsonContext.Default.GachaLinkDto, ct) ?? new GachaLinkDto();
     }
 
-    public async Task ReportLoginAsync(string game, CancellationToken ct = default)
+    public async Task ReportLoginAsync(string game, string uid = "", CancellationToken ct = default)
     {
-        var json = new JsonObject { ["game"] = game }.ToJsonString();
+        var obj = new JsonObject { ["game"] = game };
+        if (!string.IsNullOrWhiteSpace(uid))
+        {
+            obj["uid"] = uid;
+        }
+        var json = obj.ToJsonString();
         using var req = Auth(HttpMethod.Post, "/api/cloud/report_login");
         req.Content = new StringContent(json, Encoding.UTF8, "application/json");
         try

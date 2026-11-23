@@ -62,12 +62,20 @@ func (s *session) close() {
 	}
 }
 
+// alive reports whether the browser behind this session is still usable.
+//
+// Login sessions are user-facing browser windows that outlive the engine. A
+// single CDP probe can time out (busy page, profile lock, launcher hand-off)
+// while the window is perfectly fine, so either signal keeps it alive.
+// Treating a transient probe failure as "gone" is what made the window flash
+// and disappear: the caller closes the session, and closing a session cancels
+// its CDP target, which closes the tab — the only tab, i.e. the whole window.
 func (s *session) alive() bool {
 	if s == nil || s.port <= 0 {
 		return false
 	}
-	if s.kind == kindLogin && s.pid > 0 && !processAlive(s.pid) {
-		return false
+	if s.kind == kindLogin {
+		return processAlive(s.pid) || cdpAlive(s.port)
 	}
 	return cdpAlive(s.port)
 }
@@ -188,6 +196,8 @@ func (e *engine) getLogin(game, browserType string) (*session, bool, error) {
 		if s.alive() {
 			return s, true, nil
 		}
+		// alive() 对登录会话是「进程或 CDP 任一存活」；走到这里说明两者都没了，
+		// 关闭 session 不会误伤还开着的窗口。
 		s.close()
 		delete(e.login, game)
 	}
@@ -226,10 +236,13 @@ func (e *engine) aliveGames() map[string]bool {
 	for game, s := range e.login {
 		if s.alive() {
 			alive[game] = true
-		} else {
-			s.close()
-			delete(e.login, game)
+			continue
 		}
+		// 不要在这里 s.close()：/engine/status 是上号后每 45 秒轮询一次的接口，
+		// 关闭 session 会 cancel CDP 并把接管的标签页关掉；如果那是窗口里唯一
+		// 的标签，整个浏览器窗口就会闪一下消失。这里只丢掉引用，浏览器本身
+		// 已经不可控了（进程与 CDP 都探测不到）。
+		delete(e.login, game)
 	}
 	for game, entry := range e.registry.snapshot() {
 		if alive[game] {

@@ -117,6 +117,8 @@ fun CloudScreen(
     var pushBusy by remember { mutableStateOf(false) }
     /** 正在设置分享的账号；null 表示分享弹窗关闭。 */
     var shareTarget by remember { mutableStateOf<CloudAccountDto?>(null) }
+    /** 上号冲突：账号 + 正在使用的用户名；null 表示没有弹窗。 */
+    var conflict by remember { mutableStateOf<Pair<CloudAccountDto, String>?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -149,6 +151,40 @@ fun CloudScreen(
         // 过期提醒状态单独容错：接口没部署/断网时静默保留旧值，不影响账号列表。
         pushStatus = runCatching { CloudApi.expiryPushStatus(token) }.getOrNull() ?: pushStatus
         loading = false
+    }
+
+    /** 打开云游戏上号页（已确认没有冲突，或用户选择继续登录）。 */
+    fun openPlay(account: CloudAccountDto) {
+        val url = playUrl(account)
+        if (url.isBlank()) {
+            dialog = "无法上号" to "该游戏还没有配置打开地址"
+            return
+        }
+        context.startActivity(
+            CloudPlayActivity.intent(
+                context,
+                account.game,
+                account.displayName,
+                account.gameUid,
+                account.nickname,
+                url,
+                account.ownerId
+            )
+        )
+    }
+
+    /** 上号前先问服务端有没有人在用同一个账号，有人用先弹确认。 */
+    fun play(account: CloudAccountDto) {
+        scope.launch {
+            val player = runCatching {
+                CloudApi.playing(token, account.game, account.gameUid)
+            }.getOrNull()
+            if (player != null) {
+                conflict = account to player.displayName
+            } else {
+                openPlay(account)
+            }
+        }
     }
 
     fun refreshPushStatus() {
@@ -389,24 +425,7 @@ fun CloudScreen(
                             credential = creds[account.credentialKey],
                             canPlay = playUrl(account).isNotBlank(),
                             onCredential = { credTarget = account },
-                            onPlay = {
-                                val url = playUrl(account)
-                                if (url.isBlank()) {
-                                    dialog = "无法上号" to "该游戏还没有配置打开地址"
-                                } else {
-                                    context.startActivity(
-                                        CloudPlayActivity.intent(
-                                            context,
-                                            account.game,
-                                            account.displayName,
-                                            account.gameUid,
-                                            account.nickname,
-                                            url,
-                                            account.ownerId
-                                        )
-                                    )
-                                }
-                            },
+                            onPlay = { play(account) },
                             onShare = { shareTarget = account },
                             onCheck = {
                                 busyKey = account.key
@@ -416,9 +435,15 @@ fun CloudScreen(
                                         dialog = "检测完成" to buildString {
                                             append("账号：").append(account.displayName)
                                             if (account.gameUid.isNotBlank()) append(" · UID ${account.gameUid}")
-                                            append("\n有效性：").append(if (result.valid == true) "通过" else "未通过")
+                                            append("\n有效性：").append(
+                                                when (result.valid) {
+                                                    true -> "通过"
+                                                    false -> "未通过"
+                                                    else -> "无法判定"
+                                                }
+                                            )
                                             if (result.nickname.isNotBlank()) append("\n昵称：${result.nickname}")
-                                            result.freeDuration?.let { append("\n剩余：$it 分钟") }
+                                            // msg 已包含「剩余付费/免费时长、游玩币」，Cookie 失效也会带上
                                             if (result.msg.isNotBlank()) append("\n").append(result.msg)
                                             if (result.refreshMsg.isNotBlank()) append("\n").append(result.refreshMsg)
                                         }
@@ -473,6 +498,26 @@ fun CloudScreen(
             text = { Text(body) },
             confirmButton = {
                 TextButton(onClick = { dialog = null }) { Text("好") }
+            }
+        )
+    }
+
+    // 同一个账号已经有人在玩：先提醒会被挤号，用户仍可选择继续登录。
+    conflict?.let { (account, who) ->
+        AlertDialog(
+            onDismissRequest = { conflict = null },
+            title = { Text("账号正在使用") },
+            text = { Text("这个账号似乎已经被${who}在使用了喵~小心被挤号喵~") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        conflict = null
+                        openPlay(account)
+                    }
+                ) { Text("继续登录") }
+            },
+            dismissButton = {
+                TextButton(onClick = { conflict = null }) { Text("取消") }
             }
         )
     }

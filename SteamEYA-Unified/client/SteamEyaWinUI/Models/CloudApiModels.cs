@@ -456,6 +456,28 @@ internal sealed class CloudCreateGameDto
     public bool Visible { get; set; }
 }
 
+/// <summary>GET /api/cloud/playing：正在玩某个云账号的人（上号冲突提示）。</summary>
+internal sealed class CloudPlayerDto
+{
+    [JsonPropertyName("user_id")]
+    public int UserId { get; set; }
+
+    public string? Username { get; set; }
+    public string? Nickname { get; set; }
+    public string? Game { get; set; }
+
+    [JsonPropertyName("game_name")]
+    public string? GameName { get; set; }
+
+    public string? Uid { get; set; }
+}
+
+internal sealed class CloudPlayingDto
+{
+    public bool Ok { get; set; }
+    public CloudPlayerDto? Playing { get; set; }
+}
+
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
 [JsonSerializable(typeof(UserDto))]
 [JsonSerializable(typeof(AuthResultDto))]
@@ -467,6 +489,7 @@ internal sealed class CloudCreateGameDto
 [JsonSerializable(typeof(CloudActionResultDto))]
 [JsonSerializable(typeof(CloudGamesDto))]
 [JsonSerializable(typeof(CloudCreateGameDto))]
+[JsonSerializable(typeof(CloudPlayingDto))]
 [JsonSerializable(typeof(StokenCreateDto))]
 [JsonSerializable(typeof(StokenPollDto))]
 [JsonSerializable(typeof(ExpiryPushStatusDto))]
