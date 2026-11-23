@@ -209,6 +209,9 @@ data class CloudAccountDto(
     /** 同游戏多账号的唯一标识（busy 状态、列表 key 都用它区分）。 */
     val key: String get() = "$game:$gameUid:$ownerId"
 
+    /** 本机静默续期凭据的 key（只按游戏 + UID，分享账号不参与）。 */
+    val credentialKey: String get() = "$game:$gameUid"
+
     val statusText: String get() = when (valid) {
         1 -> "有效"
         0 -> "已失效"

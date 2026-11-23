@@ -386,7 +386,7 @@ fun CloudScreen(
                         AccountCard(
                             account = account,
                             busy = busyKey == account.game || busyKey == account.key,
-                            credential = creds[account.key],
+                            credential = creds[account.credentialKey],
                             canPlay = playUrl(account).isNotBlank(),
                             onCredential = { credTarget = account },
                             onPlay = {
@@ -536,7 +536,7 @@ fun CloudScreen(
     credTarget?.let { account ->
         CredentialDialog(
             account = account,
-            existing = creds[account.key],
+            existing = creds[account.credentialKey],
             onDismiss = { credTarget = null },
             onSaved = {
                 credTarget = null
