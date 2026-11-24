@@ -277,39 +277,25 @@ func (e *engine) aliveGames() map[string]bool {
 }
 
 func launchSession(dataDir, game, kind, browserType string, detach bool, initialURL string) (*session, error) {
-	prefix := "capture_profile_"
+	// 登录浏览器每次都用全新的 profile：
+	// 1) 避免和旧窗口发生 Edge 单实例交接（旧进程会接管命令但不带调试端口）；
+	// 2) 每次上号都会重新注入 Cookie，不需要旧 profile 的登录态；
+	// 3) 不会再出现「默认 profile 一个窗口 + 新 profile 一个窗口」。
+	profile := ""
 	if kind == kindLogin {
-		prefix = "login_profile_"
-	}
-	profile := filepath.Join(dataDir, prefix+game)
-	if err := os.MkdirAll(profile, 0o755); err != nil {
-		return nil, fmt.Errorf("创建浏览器 profile 失败：%w", err)
-	}
-
-	// 启动前只清理「进程还在、但调试端口已经不可用」的旧浏览器。
-	// 如果端口还活着，说明可以接管，交给上层 attach，不能杀。
-	if port := readDevToolsPort(profile); port <= 0 || !cdpAlive(port) {
-		if n := killBrowserProfileProcesses(profile); n > 0 {
-			log.Printf("启动前清理 %d 个失效的浏览器进程 [%s/%s]", n, game, kind)
-			time.Sleep(400 * time.Millisecond)
+		profile = filepath.Join(dataDir,
+			fmt.Sprintf("login_profile_%s_%d", game, time.Now().UnixNano()))
+	} else {
+		profile = filepath.Join(dataDir, "capture_profile_"+game)
+		if port := readDevToolsPort(profile); port <= 0 || !cdpAlive(port) {
+			if n := killBrowserProfileProcesses(profile); n > 0 {
+				log.Printf("启动前清理 %d 个失效的浏览器进程 [%s/%s]", n, game, kind)
+				time.Sleep(400 * time.Millisecond)
+			}
 		}
 	}
 
-	s, err := launchWithProfile(profile, game, kind, browserType, detach, initialURL)
-	if err == nil {
-		return s, nil
-	}
-
-	// 默认 profile 启动失败（多半是旧进程还占着单实例锁）：换一个全新的 profile。
-	// 每次上号都会从服务端重新注入 Cookie，所以换 profile 不会丢登录态。
-	fresh := filepath.Join(dataDir,
-		fmt.Sprintf("%s%s_%d", prefix, game, time.Now().Unix()))
-	log.Printf("默认 profile 启动失败：%v；改用新 profile %s", err, fresh)
-	s2, err2 := launchWithProfile(fresh, game, kind, browserType, detach, initialURL)
-	if err2 == nil {
-		return s2, nil
-	}
-	return nil, fmt.Errorf("%v；新 profile 启动也失败：%v", err, err2)
+	return launchWithProfile(profile, game, kind, browserType, detach, initialURL)
 }
 
 // launchWithProfile 用固定调试端口启动浏览器，并等待 CDP 真正可用。
@@ -342,11 +328,13 @@ func launchWithProfile(profile, game, kind, browserType string, detach bool, ini
 		if cmd.ProcessState != nil {
 			exitCode = cmd.ProcessState.ExitCode()
 		}
+		killPIDTree(cmd.Process.Pid)
 		return nil, fmt.Errorf("%w（exit=%d，日志：%s）", err, exitCode, logPath)
 	}
 
 	wsURL, err := browserWSURL(port)
 	if err != nil {
+		killPIDTree(cmd.Process.Pid)
 		return nil, fmt.Errorf("读取浏览器调试地址失败：%w", err)
 	}
 	s, err := attachCDP(game, kind, browserType, exe, profile, cmd.Process.Pid, port, wsURL)
@@ -359,6 +347,8 @@ func launchWithProfile(profile, game, kind, browserType string, detach bool, ini
 		}
 	}
 	if err != nil {
+		// 端口开了但 CDP 一直连不上，这个窗口留着也没用，关掉避免残留。
+		killPIDTree(cmd.Process.Pid)
 		return nil, err
 	}
 	return s, nil
@@ -657,7 +647,6 @@ func browserArgs(profile, initialURL string, port int) []string {
 		"--disable-popup-blocking",
 		"--start-maximized",
 		"--disable-extensions",
-		"--enable-logging=stderr",
 		initialURL,
 	}
 }

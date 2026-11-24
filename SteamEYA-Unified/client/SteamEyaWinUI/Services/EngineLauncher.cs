@@ -40,14 +40,34 @@ internal static class EngineLauncher
     /// <summary>确保引擎服务在运行；已运行或启动成功返回 true。</summary>
     public static async Task<bool> EnsureStartedAsync(CancellationToken ct = default)
     {
-        if (await HealthAsync(ct))
-        {
-            return true;
-        }
-
         var engineDir = Path.Combine(AppContext.BaseDirectory, "engine");
         var exe = Path.Combine(engineDir, "steameya-engine.exe");
         var script = Path.Combine(engineDir, "local_service.py");
+
+        // 只认「本次 App 拉起的引擎」。旧版本/手动测试留下的引擎即使健康，
+        // 也可能是旧二进制，直接结束掉，避免新功能一直不生效。
+        if (_process is { HasExited: false })
+        {
+            if (await HealthAsync(ct))
+            {
+                return true;
+            }
+            try
+            {
+                _process.Kill(entireProcessTree: true);
+                _process.WaitForExit(2000);
+            }
+            catch
+            {
+                // 已自行退出
+            }
+        }
+        KillExternalEngines(exe);
+        if (await HealthAsync(ct))
+        {
+            // 端口仍被占用（通常是没权限结束的进程），交给系统报错，不再重复启动。
+            return true;
+        }
 
         var psi = new ProcessStartInfo { UseShellExecute = false, CreateNoWindow = true };
         if (File.Exists(exe))
@@ -102,6 +122,43 @@ internal static class EngineLauncher
             }
         }
         return false;
+    }
+
+    /// <summary>结束同名且路径相同的旧引擎进程（例如手动测试或上一版残留）。</summary>
+    private static void KillExternalEngines(string exePath)
+    {
+        try
+        {
+            var target = Path.GetFullPath(exePath);
+            foreach (var process in Process.GetProcessesByName("steameya-engine"))
+            {
+                try
+                {
+                    if (_process is not null && process.Id == _process.Id)
+                    {
+                        continue;
+                    }
+                    var fileName = process.MainModule?.FileName;
+                    if (fileName is null
+                        || !string.Equals(Path.GetFullPath(fileName), target,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    AppLog.Info($"结束旧云游戏引擎进程：pid={process.Id}");
+                    process.Kill(entireProcessTree: true);
+                    process.WaitForExit(2000);
+                }
+                catch
+                {
+                    // 单个进程没权限就算了，继续处理下一个
+                }
+            }
+        }
+        catch
+        {
+            // 枚举失败不阻断启动
+        }
     }
 
     /// <summary>关闭本机引擎进程（含 PyInstaller onefile 派生出的子进程与驱动）。应用退出时调用。</summary>

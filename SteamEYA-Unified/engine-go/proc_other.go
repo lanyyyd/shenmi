@@ -22,3 +22,5 @@ func sysProcAttrRetry(detach bool) *syscall.SysProcAttr {
 
 // 非 Windows 平台没有云游戏浏览器接管需求，清理操作直接返回 0。
 func killBrowserProfileProcesses(_ string) int { return 0 }
+
+func killPIDTree(_ int) {}

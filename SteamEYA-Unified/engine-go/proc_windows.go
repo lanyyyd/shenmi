@@ -50,6 +50,14 @@ func killBrowserProfileProcesses(profile string) int {
 	return killed
 }
 
+// killPIDTree 结束指定进程及其子进程（启动失败时清理本次拉起的浏览器）。
+func killPIDTree(pid int) {
+	if pid <= 0 {
+		return
+	}
+	_ = exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F").Run()
+}
+
 // processAlive reports whether pid is still running (STILL_ACTIVE).
 func processAlive(pid int) bool {
 	if pid <= 0 {
