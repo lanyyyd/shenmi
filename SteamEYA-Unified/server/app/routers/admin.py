@@ -321,7 +321,7 @@ def push_test(admin: dict = Depends(require_admin)):
         import requests
         body = {
             "token": token,
-            "title": "SteamEYA 测试推送",
+            "title": "测试推送",
             "content": f"这是一条来自管理后台的测试消息（{security.now_ms()}）。",
             "template": (config or {}).get("template") or "markdown",
         }

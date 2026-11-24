@@ -29,6 +29,8 @@ from .db import execute, execute_update, query_one
 log = logging.getLogger("pushplus")
 
 OPEN_API = "https://www.pushplus.plus/api/open"
+# 注意：换取 AccessKey 的地址不在 /api/open 下，官方文档为 /api/common/openApi/getAccessKey。
+ACCESS_KEY_API = "https://www.pushplus.plus/api/common/openApi/getAccessKey"
 SEND_API = "https://www.pushplus.plus/send"
 
 # 二维码有效期（秒）与扫码次数：一次性绑定，扫过就失效。
@@ -74,7 +76,7 @@ def _access_key_value(force: bool = False) -> str:
             return _access_key
         try:
             resp = requests.post(
-                f"{OPEN_API}/getAccessKey",
+                ACCESS_KEY_API,
                 json={"token": token, "secretKey": secret},
                 timeout=12,
             ).json()
@@ -82,7 +84,10 @@ def _access_key_value(force: bool = False) -> str:
             raise RuntimeError(f"获取 AccessKey 失败：{e}") from e
         if int(resp.get("code") or 0) != 200:
             msg = str(resp.get("msg") or "获取 AccessKey 失败")
-            raise RuntimeError(msg + "（请确认已开启开放接口，且服务器 IP 在安全 IP 列表中）")
+            detail = str(resp.get("data") or "").strip()
+            if detail and detail not in msg:
+                msg += f"（{detail}）"
+            raise RuntimeError(msg + "；请确认已开启开放接口，且服务器 IP 在安全 IP 列表中")
         data = resp.get("data") or {}
         key = str(data.get("accessKey") or "").strip()
         if not key:
@@ -220,7 +225,7 @@ def send_to_user(user_id: int, title: str, content_html: str) -> bool:
 
 def notify_expired(user_id: int, game_name: str, account: str) -> None:
     """云游戏 Cookie 失效提醒（后台线程发送，不阻塞检测）。"""
-    title = "SteamEYA · 云游戏账号失效提醒"
+    title = "云游戏账号失效提醒"
     content = (
         "<b>云游戏 Cookie 已失效</b><br>"
         f"游戏：{html.escape(game_name or '未知游戏')}<br>"
@@ -244,4 +249,4 @@ def send_test(user_id: int) -> bool:
         "<b>绑定成功</b><br>"
         "这是一条测试消息。之后云游戏 Cookie 被每日检测判定为失效时，会通过微信提醒你。"
     )
-    return send_to_user(user_id, "SteamEYA · 推送绑定测试", content)
+    return send_to_user(user_id, "推送绑定测试", content)

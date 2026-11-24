@@ -13,10 +13,12 @@ GitHub Release。这个模块让服务器自己去 Release 拉包，管理员不
 from __future__ import annotations
 
 import json
+import logging
 import pathlib
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 import requests
@@ -39,8 +41,15 @@ DEFAULT_CONFIG = {
 
 UA = "SteamEYA-GH-Updater/1.0"
 MAX_INSTALLER = 500 * 1024 * 1024
-PROBE_TIMEOUT = 8
+PROBE_TIMEOUT = 5            # 单个下载源测速上限（秒），含 HEAD 失败后的那次重试
+PROBE_BATCH = 10             # 同时测速的节点数
+DOWNLOAD_DEADLINE_SECONDS = 60    # 单源下载超过这个时长仍未完成，判定为该源不可用
+SOURCE_BLOCK_SECONDS = 24 * 3600  # 被判定不可用的源暂停使用 1 天
+BLOCK_KEY = "gh_update_blocks"
+
 DOWNLOAD_TIMEOUT = (10, 60)   # 读超时压到 60 秒：卡住的源尽快判失败并切下一个
+
+log = logging.getLogger("gh_update")
 
 _lock = threading.Lock()
 _progress_lock = threading.Lock()
@@ -84,6 +93,39 @@ def _set_setting(key: str, value: str) -> None:
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
         (key, value, security.now_ms()),
     )
+
+
+class _SourceSlow(RuntimeError):
+    """单源下载超时/过慢，调用方据此拉黑该源。"""
+
+
+def load_blocks() -> dict:
+    """当前仍在暂停期内的下载源：{label: 过期时间(ms)}。"""
+    now = security.now_ms()
+    try:
+        raw = _get_setting(BLOCK_KEY, "")
+        data = json.loads(raw) if raw else {}
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for key, exp in data.items():
+        try:
+            exp = int(exp)
+        except (TypeError, ValueError):
+            continue
+        if exp > now:
+            out[str(key)] = exp
+    return out
+
+
+def _block_source(label: str, reason: str = "") -> None:
+    """把下载源加入暂停列表，1 天内不再用于下载（原站与加速源一视同仁）。"""
+    blocks = load_blocks()
+    blocks[label] = security.now_ms() + SOURCE_BLOCK_SECONDS * 1000
+    _set_setting(BLOCK_KEY, json.dumps(blocks, ensure_ascii=False))
+    log.warning("下载源暂停使用 %d 小时：%s（%s）", SOURCE_BLOCK_SECONDS // 3600, label, reason)
 
 
 def load_config() -> dict:
@@ -305,7 +347,12 @@ def _mirror_url(mirror: str, url: str) -> str:
 
 
 def _probe_one(url: str) -> Optional[int]:
-    """测一次响应延迟（毫秒）；不可用返回 None。HEAD 不被支持时退回 Range 请求。"""
+    """测一次响应延迟（毫秒）；不可用返回 None。单个节点总共最多等 PROBE_TIMEOUT 秒。
+
+    HEAD 被拒或超时后，只用剩余时间再试一次 Range 请求，不会再叠加一个完整超时，
+    避免节点卡住时整体长时间停在「测速中」。
+    """
+    deadline = time.time() + PROBE_TIMEOUT
     started = time.time()
     try:
         resp = requests.head(url, headers={"User-Agent": UA}, allow_redirects=True,
@@ -314,10 +361,13 @@ def _probe_one(url: str) -> Optional[int]:
             return int((time.time() - started) * 1000)
     except Exception:
         pass
+    left = deadline - time.time()
+    if left <= 0.3:
+        return None
+    started = time.time()
     try:
-        started = time.time()
         resp = requests.get(url, headers={"User-Agent": UA, "Range": "bytes=0-0"},
-                            stream=True, timeout=PROBE_TIMEOUT)
+                            stream=True, timeout=left)
         try:
             if resp.status_code < 400:
                 return int((time.time() - started) * 1000)
@@ -329,12 +379,24 @@ def _probe_one(url: str) -> Optional[int]:
 
 
 def probe_mirrors(asset_url: str, cfg: dict) -> list:
-    """返回各下载源（原站 + 加速源）的延迟，按从快到慢排序。"""
+    """返回各下载源（原站 + 加速源）的延迟，按从快到慢排序。
+
+    每批最多并发 PROBE_BATCH 个节点，批内并行、批间串行：
+    节点再多，最坏耗时也只是「批数 × 单节点超时」。
+    """
     items = [{"label": "GitHub 原站", "url": asset_url}]
     for m in cfg.get("mirrors") or []:
         items.append({"label": m, "url": _mirror_url(m, asset_url)})
-    for it in items:
-        it["ms"] = _probe_one(it["url"])
+    blocks = load_blocks()
+    if blocks:
+        allowed = [it for it in items if it["label"] not in blocks]
+        # 全部源都在暂停期时仍全部尝试一次，避免完全无法下载。
+        items = allowed or items
+    for i in range(0, len(items), PROBE_BATCH):
+        batch = items[i:i + PROBE_BATCH]
+        with ThreadPoolExecutor(max_workers=len(batch), thread_name_prefix="gh-probe") as pool:
+            for it, ms in zip(batch, pool.map(lambda x: _probe_one(x["url"]), batch)):
+                it["ms"] = ms
     return sorted(items, key=lambda x: (x["ms"] is None, x["ms"] or 0))
 
 
@@ -351,6 +413,9 @@ def _download(asset: dict, cfg: dict, version: str = "") -> tuple[Optional[str],
             try:
                 name = _save_asset(it["url"], asset, label=it["label"])
                 return name, it["label"], probed
+            except _SourceSlow as e:
+                _block_source(it["label"], str(e))
+                errors.append(f"{it['label']}：{e}，已暂停该源 1 天")
             except Exception as e:
                 errors.append(f"{it['label']}: {e}")
         raise RuntimeError("全部下载源均失败：" + "；".join(errors[:4]))
@@ -364,6 +429,7 @@ def _save_asset(url: str, asset: dict, label: str = "") -> str:
     dest = UPDATE_DIR / name
     tmp = dest.with_suffix(dest.suffix + ".part")
     written = 0
+    deadline_at = time.time() + DOWNLOAD_DEADLINE_SECONDS
     try:
         with requests.get(url, headers={"User-Agent": UA}, stream=True,
                           timeout=DOWNLOAD_TIMEOUT) as resp:
@@ -380,6 +446,8 @@ def _save_asset(url: str, asset: dict, label: str = "") -> str:
                 for chunk in resp.iter_content(256 * 1024):
                     if not chunk:
                         continue
+                    if time.time() > deadline_at:
+                        raise _SourceSlow(f"{DOWNLOAD_DEADLINE_SECONDS} 秒内未下载完成")
                     written += len(chunk)
                     if written > MAX_INSTALLER:
                         raise RuntimeError("安装包超过 500MB")
@@ -395,11 +463,13 @@ def _save_asset(url: str, asset: dict, label: str = "") -> str:
             raise RuntimeError(f"文件大小不符（{written}/{expected}）")
         tmp.replace(dest)
         return name
-    except Exception:
+    except Exception as e:
         try:
             tmp.unlink(missing_ok=True)
         except Exception:
             pass
+        if isinstance(e, requests.exceptions.ReadTimeout):
+            raise _SourceSlow(f"{DOWNLOAD_DEADLINE_SECONDS} 秒内未下载完成") from e
         raise
 
 

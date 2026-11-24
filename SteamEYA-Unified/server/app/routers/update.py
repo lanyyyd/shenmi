@@ -68,6 +68,28 @@ def _release_out(r) -> dict:
     }
 
 
+@router.get("/update/public/latest")
+def public_latest(platform: str = Query("windows"), edition: str = Query("standard")):
+    """官网/下载页用的公开版本信息（无需登录）。
+
+    只暴露版本号、文件名、大小与下载地址，不含公告正文、sha256、下载次数等内部字段。
+    """
+    p = _norm_platform(platform)
+    e = _norm_edition(edition)
+    row = query_one(
+        "SELECT id, version, file_name, file_size FROM app_releases "
+        "WHERE active = 1 AND platform = ? AND COALESCE(edition, 'standard') = ? "
+        "ORDER BY id DESC LIMIT 1", (p, e)
+    )
+    if not row:
+        return {"ok": True, "available": False, "platform": p, "edition": e}
+    return {"ok": True, "available": True, "platform": p, "edition": e,
+            "version": row["version"] or "",
+            "fileName": row["file_name"] or "",
+            "fileSize": row["file_size"] or 0,
+            "url": f"/api/update/download/{row['id']}"}
+
+
 @router.get("/update/latest")
 def latest(platform: str = Query("windows"), edition: str = Query("standard"),
            user: dict = Depends(get_current_user)):
@@ -229,4 +251,5 @@ def gh_update_probe(admin: dict = Depends(require_admin)):
     if not asset:
         return {"ok": False, "msg": "Release 中没有安装包"}
     probed = gh_update.probe_mirrors(asset.get("browser_download_url") or "", cfg)
-    return {"ok": True, "version": latest["version"], "asset": asset.get("name") or "", "mirrors": probed}
+    return {"ok": True, "version": latest["version"], "asset": asset.get("name") or "",
+            "mirrors": probed, "blocked": gh_update.load_blocks()}
