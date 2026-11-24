@@ -657,6 +657,7 @@ func browserArgs(profile, initialURL string, port int) []string {
 		"--disable-popup-blocking",
 		"--start-maximized",
 		"--disable-extensions",
+		"--enable-logging=stderr",
 		initialURL,
 	}
 }
@@ -698,6 +699,7 @@ func startBrowser(exe string, args []string, detach bool, logPath string) (*exec
 	if err != nil && detach {
 		// CREATE_BREAKAWAY_FROM_JOB is rejected when the parent job does not
 		// allow breakaway. Retry detached, just without the breakaway flag.
+		log.Printf("浏览器 breakaway 启动失败：%v；退回 Job 内启动", err)
 		cmd, done, err = run(sysProcAttrRetry(detach))
 	}
 	return cmd, done, err

@@ -70,21 +70,19 @@ func processAlive(pid int) bool {
 
 // sysProcAttr detaches the login browser from the engine's console/job where
 // possible, so that restarting or exiting the engine does not take the already
-// opened browser down with it.
+// opened browser down with it. 故意不加 DETACHED_PROCESS：GUI 浏览器不需要
+// console，加上它会让 Edge 在部分机器上直接退出；手动从 cmd 启动用的是
+// 同一套参数，只是没有 DETACHED_PROCESS。
 func sysProcAttr(detach bool) *syscall.SysProcAttr {
 	flags := uint32(windows.CREATE_NEW_PROCESS_GROUP)
 	if detach {
-		flags |= windows.DETACHED_PROCESS | windows.CREATE_BREAKAWAY_FROM_JOB
+		flags |= windows.CREATE_BREAKAWAY_FROM_JOB
 	}
 	return &syscall.SysProcAttr{CreationFlags: flags}
 }
 
-// sysProcAttrRetry keeps the detached semantics but without breakaway, used
-// when the parent job forbids CREATE_BREAKAWAY_FROM_JOB.
-func sysProcAttrRetry(detach bool) *syscall.SysProcAttr {
-	flags := uint32(windows.CREATE_NEW_PROCESS_GROUP)
-	if detach {
-		flags |= windows.DETACHED_PROCESS
-	}
-	return &syscall.SysProcAttr{CreationFlags: flags}
+// sysProcAttrRetry keeps the same GUI launch semantics but without breakaway,
+// used when the parent job forbids CREATE_BREAKAWAY_FROM_JOB.
+func sysProcAttrRetry(_ bool) *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{CreationFlags: uint32(windows.CREATE_NEW_PROCESS_GROUP)}
 }

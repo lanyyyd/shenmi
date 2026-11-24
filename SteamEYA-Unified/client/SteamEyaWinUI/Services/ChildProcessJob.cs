@@ -13,6 +13,9 @@ internal static partial class ChildProcessJob
 {
     private const int JobObjectExtendedLimitInformation = 9;
     private const uint JobObjectLimitKillOnJobClose = 0x2000;
+    // 允许子进程显式请求脱离 Job（云游戏浏览器会带 CREATE_BREAKAWAY_FROM_JOB）。
+    // 只给 BREAKAWAY_OK，不给 SILENT_BREAKAWAY_OK：网关/引擎本身仍然随应用退出被清理。
+    private const uint JobObjectLimitBreakawayOk = 0x0800;
 
     private static nint _job;
 
@@ -50,7 +53,7 @@ internal static partial class ChildProcessJob
         {
             BasicLimitInformation = new JobObjectBasicLimitInformation
             {
-                LimitFlags = JobObjectLimitKillOnJobClose
+                LimitFlags = JobObjectLimitKillOnJobClose | JobObjectLimitBreakawayOk
             }
         };
 
