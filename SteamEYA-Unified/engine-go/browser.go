@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -204,14 +203,20 @@ func (e *engine) getLogin(game, browserType string) (*session, bool, error) {
 	}
 
 	if entry, ok := e.registry.get(game); ok {
-		// 浏览器可能由启动器进程派生，PID 先退出但 CDP 还活着；以调试端口为准。
-		if cdpAlive(entry.Port) {
+		// 只认固定 profile 的注册记录；v1.0.103 产生的时间戳 profile 不再复用，
+		// 否则会继续用丢失设备指纹的新 profile 上号。
+		expected := loginProfileDir(e.dataDir, game)
+		if !strings.EqualFold(filepath.Clean(entry.Profile), filepath.Clean(expected)) {
+			e.registry.remove(game)
+		} else if cdpAlive(entry.Port) {
 			if s, err := attachSession(entry); err == nil {
 				e.login[game] = s
 				return s, true, nil
 			}
+			e.registry.remove(game)
+		} else {
+			e.registry.remove(game)
 		}
-		e.registry.remove(game)
 	}
 
 	// 注册表丢了但浏览器还开着（例如旧版本启动、或者注册表被清理）：
@@ -277,25 +282,58 @@ func (e *engine) aliveGames() map[string]bool {
 }
 
 func launchSession(dataDir, game, kind, browserType string, detach bool, initialURL string) (*session, error) {
-	// 登录浏览器每次都用全新的 profile：
-	// 1) 避免和旧窗口发生 Edge 单实例交接（旧进程会接管命令但不带调试端口）；
-	// 2) 每次上号都会重新注入 Cookie，不需要旧 profile 的登录态；
-	// 3) 不会再出现「默认 profile 一个窗口 + 新 profile 一个窗口」。
-	profile := ""
+	// 登录浏览器必须复用固定的 profile：
+	// B 站等站点会把登录态/设备指纹写在 profile 里，每次换新 profile 会被当成新设备，
+	// 表现为 Cookie 注入成功但页面仍未登录。单窗口改由「启动前清理 + 失败重试」保证。
+	profile := filepath.Join(dataDir, "capture_profile_"+game)
 	if kind == kindLogin {
-		profile = filepath.Join(dataDir,
-			fmt.Sprintf("login_profile_%s_%d", game, time.Now().UnixNano()))
-	} else {
-		profile = filepath.Join(dataDir, "capture_profile_"+game)
-		if port := readDevToolsPort(profile); port <= 0 || !cdpAlive(port) {
-			if n := killBrowserProfileProcesses(profile); n > 0 {
-				log.Printf("启动前清理 %d 个失效的浏览器进程 [%s/%s]", n, game, kind)
-				time.Sleep(400 * time.Millisecond)
-			}
+		profile = filepath.Join(dataDir, "login_profile_"+game)
+	}
+	if err := os.MkdirAll(profile, 0o755); err != nil {
+		return nil, fmt.Errorf("创建浏览器 profile 失败：%w", err)
+	}
+
+	// 调试端口还活着说明可以接管，不能杀；端口已死才清理旧进程和解锁文件。
+	if port := readDevToolsPort(profile); port <= 0 || !cdpAlive(port) {
+		if n := killBrowserProfileProcesses(profile); n > 0 {
+			log.Printf("启动前清理 %d 个失效的浏览器进程 [%s/%s]", n, game, kind)
+			time.Sleep(400 * time.Millisecond)
+		}
+		removeProfileLocks(profile)
+	}
+
+	s, err := launchWithProfile(profile, game, kind, browserType, detach, initialURL)
+	if err == nil {
+		return s, nil
+	}
+
+	// 仍失败（典型是旧窗口发生单实例交接，exit=0 但没有调试端口）：
+	// 再按 profile 清一次，然后重试同一个 profile。
+	if n := killBrowserProfileProcesses(profile); n > 0 {
+		log.Printf("启动失败后清理 %d 个残留进程，重试固定 profile [%s/%s]", n, game, kind)
+		time.Sleep(600 * time.Millisecond)
+		removeProfileLocks(profile)
+		if s, retryErr := launchWithProfile(profile, game, kind, browserType, detach, initialURL); retryErr == nil {
+			return s, nil
 		}
 	}
 
-	return launchWithProfile(profile, game, kind, browserType, detach, initialURL)
+	// 最后才用新 profile 兜底；会丢失设备指纹，非必要不走这里。
+	if kind == kindLogin {
+		fresh := filepath.Join(dataDir,
+			fmt.Sprintf("login_profile_%s_%d", game, time.Now().UnixNano()))
+		log.Printf("固定 profile 两次启动失败：%v；临时改用新 profile %s", err, fresh)
+		return launchWithProfile(fresh, game, kind, browserType, detach, initialURL)
+	}
+	return nil, err
+}
+
+// removeProfileLocks 清掉上次强杀浏览器后可能残留的单实例锁文件。
+func removeProfileLocks(profile string) {
+	for _, name := range []string{"lockfile", "SingletonLock", "SingletonCookie",
+		"SingletonSocket", "DevToolsActivePort"} {
+		_ = os.Remove(filepath.Join(profile, name))
+	}
 }
 
 // launchWithProfile 用固定调试端口启动浏览器，并等待 CDP 真正可用。
@@ -386,45 +424,24 @@ func readDevToolsPort(profile string) int {
 	return port
 }
 
-// attachAnyProfile 没有注册表记录时，扫描该游戏的 profile（含换新后的
-// login_profile_<game>_<时间戳>），接管还活着的那个浏览器。
+// attachAnyProfile 没有注册表记录时，尝试接管固定 profile 里还活着的浏览器。
+// 不再扫描 v1.0.103 产生的时间戳 profile：那些 profile 没有站点设备指纹。
 func attachAnyProfile(dataDir, game, browserType string) (*session, error) {
-	prefix := "login_profile_" + game
-	entries, err := os.ReadDir(dataDir)
+	profile := loginProfileDir(dataDir, game)
+	port := readDevToolsPort(profile)
+	if port <= 0 || !cdpAlive(port) {
+		return nil, errors.New("没有可接管的调试端口")
+	}
+	wsURL, err := browserWSURL(port)
 	if err != nil {
 		return nil, err
 	}
-	type candidate struct {
-		path string
-		mod  time.Time
+	s, err := attachCDP(game, kindLogin, browserType, "", profile, 0, port, wsURL)
+	if err != nil {
+		return nil, err
 	}
-	var candidates []candidate
-	for _, de := range entries {
-		if de.IsDir() && strings.HasPrefix(de.Name(), prefix) {
-			info, err := de.Info()
-			if err == nil {
-				candidates = append(candidates, candidate{filepath.Join(dataDir, de.Name()), info.ModTime()})
-			}
-		}
-	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].mod.After(candidates[j].mod) })
-	for _, c := range candidates {
-		port := readDevToolsPort(c.path)
-		if port <= 0 || !cdpAlive(port) {
-			continue
-		}
-		wsURL, err := browserWSURL(port)
-		if err != nil {
-			continue
-		}
-		s, err := attachCDP(game, kindLogin, browserType, "", c.path, 0, port, wsURL)
-		if err != nil {
-			continue
-		}
-		log.Printf("已接管残留的登录浏览器 [%s] profile=%s port=%d", game, c.path, port)
-		return s, nil
-	}
-	return nil, errors.New("没有可接管的调试端口")
+	log.Printf("已接管残留的登录浏览器 [%s] profile=%s port=%d", game, profile, port)
+	return s, nil
 }
 
 // cleanupBrowsers 结束残留浏览器进程并清掉失效注册表；game 为空表示全部游戏。
@@ -520,6 +537,18 @@ func (e *engine) cleanupDeadOrphans() {
 		if !strings.HasPrefix(name, "login_profile_") && !strings.HasPrefix(name, "capture_profile_") {
 			continue
 		}
+		// v1.0.103 引入过「每次新 profile」的临时目录（login_profile_<game>_<时间戳>），
+		// 这些 profile 没有站点设备指纹；升级后清理掉，避免旧窗口残留。
+		if strings.HasPrefix(name, "login_profile_") {
+			parts := strings.Split(strings.TrimPrefix(name, "login_profile_"), "_")
+			if len(parts) >= 2 && isDigits(parts[len(parts)-1]) {
+				profile := filepath.Join(e.dataDir, name)
+				if n := killBrowserProfileProcesses(profile); n > 0 {
+					log.Printf("清理旧版临时登录 profile %s（%d 个进程）", name, n)
+				}
+				continue
+			}
+		}
 		profile := filepath.Join(e.dataDir, name)
 		if port := readDevToolsPort(profile); port > 0 && cdpAlive(port) {
 			continue
@@ -529,6 +558,18 @@ func (e *engine) cleanupDeadOrphans() {
 			log.Printf("启动清理残留浏览器 %d 个：%s", n, name)
 		}
 	}
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func attachSession(entry browserEntry) (*session, error) {
