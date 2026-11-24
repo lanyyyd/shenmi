@@ -20,6 +20,7 @@ from fastapi import APIRouter, Body, Depends, File, Form, Header, Request, Respo
 
 from .. import chat_logic as CL
 from .. import levelcore as LV
+from .. import media
 from .. import security
 from ..config import (AVATAR_DIR, MAX_AVATAR, MAX_STICKER, MAX_UPLOAD, STICKER_DIR, UPLOAD_DIR)
 from ..db import execute, query_all, query_one
@@ -539,7 +540,10 @@ async def upload_file(request: Request, file: UploadFile = File(...),
         LV.grant(u["id"], "upload", ref=(raw_name or name)[:80], remark="发送文件")
     except Exception:
         pass
-    return {"ok": True, "url": f"/uploads/{sub}/{name}", "name": raw_name or name,
+    # 只给图片生成气泡预览用的小图；原图保持原样，点开看的还是原文件。
+    thumb_url = media.make_thumbnail(dst) if is_img else None
+    return {"ok": True, "url": f"/uploads/{sub}/{name}", "thumbUrl": thumb_url,
+            "name": raw_name or name,
             "size": size, "isImage": is_img, "isVideo": is_vid, "dedup": dedup}
 
 

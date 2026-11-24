@@ -14,8 +14,10 @@ from typing import Optional
 from fastapi import APIRouter, Body, File, Form, UploadFile
 
 from .. import chat_logic as CL
+from .. import media
 from .. import security
 from ..config import MAX_UPLOAD, STICKER_DIR, UPLOAD_DIR
+from ..db import query_all
 from ..hub import hub
 from ..lan import (LanDiscovery, forward_control, get_discovery, inbound_message, mark_control,
                    set_discovery as _set_discovery)
@@ -88,6 +90,46 @@ def add_peer(payload: dict = Body(...)):
     return {"ok": True, "peer": peer}
 
 
+@router.get("/history")
+def history(since: int = 0, limit: int = 200):
+    """给同网段对端补历史用：返回本机群聊里 created_at > since 的消息。
+
+    只走局域网，不经过公网服务端。文件给绝对地址，让对端能直接下载。
+    """
+    if not _enabled():
+        return {"ok": False, "msg": "当前未启用局域网模式", "messages": []}
+    limit = max(1, min(int(limit or 200), 500))
+    rows = query_all(
+        "SELECT m.id, m.type, m.content, m.file_path, m.file_name, m.file_size, "
+        "m.created_at, m.install_id, m.client_msg_id, m.recalled, "
+        "COALESCE(NULLIF(u.nickname,''), u.username, '局域网用户') AS from_name "
+        "FROM messages m LEFT JOIN users u ON u.id = m.from_id "
+        "WHERE m.room = 'group' AND m.created_at > ? "
+        "ORDER BY m.created_at DESC, m.id DESC LIMIT ?",
+        (int(since or 0), limit),
+    )
+    d = get_discovery()
+    ident = d.identity() if d else {}
+    ip, port = str(ident.get("ip") or ""), int(ident.get("port") or 0)
+    messages = []
+    # 取「最新 N 条」再按时间正序返回，后加入的设备先看到最近的聊天。
+    for r in reversed(rows):
+        url = r["file_path"] or ""
+        file = None
+        if url:
+            if url.startswith("/uploads/") and ip and port:
+                url = f"http://{ip}:{port}{url}"
+            file = {"url": url, "name": r["file_name"] or "", "size": r["file_size"] or 0}
+        messages.append({
+            "type": r["type"], "content": r["content"] or "",
+            "createdAt": r["created_at"], "fromName": r["from_name"],
+            "fromIp": ip, "installId": r["install_id"] or "",
+            "clientMsgId": r["client_msg_id"] or "",
+            "recalled": bool(r["recalled"]), "file": file,
+        })
+    return {"ok": True, "messages": messages}
+
+
 # ---------------- 局域网控制指令（保队友 / 全员切换） ----------------
 @router.post("/control")
 async def control(payload: dict = Body(...)):
@@ -154,10 +196,11 @@ async def relay_file(origin: str = Form(...), clientMsgId: str = Form(...), inst
     dest = STICKER_DIR if sub == "stickers" else (UPLOAD_DIR / sub)
     (dest / name).write_bytes(data)
     url = f"/uploads/{sub}/{name}"
+    thumb = media.make_thumbnail(dest / name) if kind == "image" else None
     payload = {
         "origin": origin, "installId": installId, "clientMsgId": clientMsgId,
         "fromName": fromName, "fromIp": fromIp, "type": kind, "content": content,
-        "createdAt": createdAt, "file": {"url": url, "name": raw_name or name, "size": len(data)},
+        "createdAt": createdAt, "file": {"url": url, "thumb": thumb, "name": raw_name or name, "size": len(data)},
     }
     out = inbound_message(payload)
     if out is None:

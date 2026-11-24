@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Net.Http;
+using System.Text;
+using System.Text.Json;
 
 namespace SteamEyaWinUI.Services;
 
@@ -10,6 +12,8 @@ namespace SteamEyaWinUI.Services;
 internal static class EngineLauncher
 {
     private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(2) };
+    /// <summary>清理残留进程要调 PowerShell 枚举命令行，耗时可能超过 2 秒。</summary>
+    private static readonly HttpClient CleanupClient = new() { Timeout = TimeSpan.FromSeconds(60) };
     private static Process? _process;
 
     public static string DataDirectory { get; } = ResolveDataDirectory();
@@ -119,6 +123,22 @@ internal static class EngineLauncher
         {
             _process = null;
         }
+    }
+
+    /// <summary>结束残留的云游戏浏览器进程，返回清理数量。</summary>
+    public static async Task<int> CleanupBrowsersAsync(CancellationToken ct = default)
+    {
+        if (!await EnsureStartedAsync(ct))
+        {
+            throw new InvalidOperationException("云游戏引擎未启动");
+        }
+        using var content = new StringContent("{\"all\":true}", Encoding.UTF8, "application/json");
+        using var resp = await CleanupClient.PostAsync(
+            SessionState.EngineUrl + "/engine/browser/cleanup", content, ct);
+        resp.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+        return doc.RootElement.TryGetProperty("killed", out var killed)
+               && killed.TryGetInt32(out var count) ? count : 0;
     }
 
     private static async Task<bool> HealthAsync(CancellationToken ct)

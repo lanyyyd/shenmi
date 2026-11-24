@@ -1625,7 +1625,9 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         ImageSource? image = null;
         if (!hidden && kind is "image" or "sticker" && !string.IsNullOrEmpty(url))
         {
-            image = SafeBitmap(url);
+            // 图片气泡优先用缩略图，点开仍走 FileUrl 原图；贴纸没有缩略图。
+            var preview = kind == "image" ? Absolute(dto.FileThumb) : string.Empty;
+            image = SafeBitmap(string.IsNullOrEmpty(preview) ? url : preview);
         }
 
         var read = isMine ? ReadLabelFor(dto.Id) : string.Empty;

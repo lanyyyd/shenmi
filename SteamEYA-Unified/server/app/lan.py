@@ -14,8 +14,11 @@ import threading
 import time
 import uuid
 from typing import Dict, Optional
+from urllib.parse import urlparse
 
 import requests
+
+from .db import query_one
 
 DISCOVERY_PORT = 8899
 BEACON_INTERVAL = 3.0
@@ -106,6 +109,8 @@ class LanDiscovery:
                 changed = True
             if changed:
                 _broadcast_online()
+                # 新对端（或换人）出现：从它那里补齐本机缺失的历史消息。
+                ensure_history_sync(peer)
         self._prune()
         _broadcast_online()
 
@@ -438,3 +443,181 @@ def _forward_one(payload: dict) -> None:
             except Exception:
                 if attempt == 0:
                     time.sleep(0.2)
+
+
+# ================================================================
+# 局域网历史补齐：
+#   离线模式下每台机器只有自己的本地库，实时转发只覆盖「当时在线」的人。
+#   后加入的设备看不到之前的聊天记录，所以发现对端后主动从对端网关拉取历史，
+#   用 (install_id, client_msg_id) 幂等合并到本机库，再推给本机在线客户端。
+#   全程只走局域网，不经过公网服务端。
+# ================================================================
+
+HISTORY_INTERVAL = 20.0
+HISTORY_LIMIT = 200
+
+_history_lock = threading.Lock()
+_history_since: Dict[str, int] = {}
+_history_started = False
+
+
+def ensure_history_sync(peer: dict | None = None) -> None:
+    """启动历史补拉线程；peer 不为空时立即对该对端拉一次。"""
+    global _history_started
+    with _history_lock:
+        first = not _history_started
+        _history_started = True
+    if first:
+        threading.Thread(target=_history_loop, name="lan-history", daemon=True).start()
+    if peer:
+        threading.Thread(target=_history_worker_one, args=(dict(peer),),
+                         name="lan-history-pull", daemon=True).start()
+
+
+def _history_loop() -> None:
+    while True:
+        time.sleep(HISTORY_INTERVAL)
+        d = get_discovery()
+        if d is None:
+            continue
+        for p in d.snapshot():
+            try:
+                _pull_history(p)
+            except Exception:
+                pass
+
+
+def _history_worker_one(peer: dict) -> None:
+    try:
+        _pull_history(peer)
+    except Exception:
+        pass
+
+
+def _pull_history(peer: dict) -> None:
+    ip = str(peer.get("ip") or "").strip()
+    try:
+        port = int(peer.get("port") or 0)
+    except Exception:
+        return
+    if not ip or not port:
+        return
+    base = f"http://{ip}:{port}"
+    with _history_lock:
+        since = _history_since.get(base, 0)
+    resp = requests.get(base + "/api/lan/history",
+                        params={"since": since, "limit": HISTORY_LIMIT},
+                        timeout=(2, 8))
+    if resp.status_code != 200:
+        return
+    data = resp.json() or {}
+    messages = data.get("messages") or []
+    newest = since
+    for m in messages:
+        try:
+            created = int(m.get("createdAt") or 0)
+        except Exception:
+            created = 0
+        newest = max(newest, created)
+        payload = _history_payload(m, ip, port)
+        if payload is None:
+            continue
+        # 已有就直接跳过，别为了幂等重复下载文件。
+        if query_one("SELECT id FROM messages WHERE install_id=? AND client_msg_id=?",
+                     (payload["installId"], payload["clientMsgId"])):
+            continue
+        _materialize_history_file(payload, base)
+        out = inbound_message(payload)
+        if out is None:
+            continue
+        try:
+            from .hub import hub
+
+            hub.broadcast_threadsafe(out)
+        except Exception:
+            pass
+    if newest > since:
+        with _history_lock:
+            # 回退 1 秒做重叠，避免同一毫秒多条时漏拉；重复消息由幂等去重挡住。
+            _history_since[base] = max(newest - 1000, since)
+
+
+def _history_payload(m: dict, ip: str, port: int) -> Optional[dict]:
+    if not isinstance(m, dict) or m.get("recalled"):
+        return None
+    name = str(m.get("fromName") or "").strip()[:20]
+    install_id = str(m.get("installId") or "").strip()[:64]
+    cid = str(m.get("clientMsgId") or "").strip()[:64]
+    if not cid:
+        seed = f"{name}|{m.get('createdAt')}|{m.get('type')}|{m.get('content')}|{m.get('fileName')}"
+        cid = "hist-" + hashlib.sha1(seed.encode("utf-8", "ignore")).hexdigest()[:24]
+    if not install_id:
+        # 没有安装标识的老消息用「昵称哈希」当来源，保证从不同对端拉到同一条时能去重。
+        install_id = "hist"
+        origin = "hist-" + hashlib.sha1(name.encode("utf-8", "ignore")).hexdigest()[:12]
+    else:
+        origin = install_id
+    file = m.get("file") if isinstance(m.get("file"), dict) else None
+    if file and file.get("url"):
+        url = str(file["url"])
+        if url.startswith("/uploads/"):
+            file = {**file, "url": f"http://{ip}:{port}{url}"}
+    try:
+        created_at = int(m.get("createdAt") or 0)
+    except Exception:
+        created_at = 0
+    return {
+        "origin": origin, "installId": install_id, "clientMsgId": cid,
+        "fromName": name, "fromIp": str(m.get("fromIp") or ip),
+        "type": m.get("type") or "text", "content": str(m.get("content") or "")[:4000],
+        "createdAt": created_at, "file": file,
+    }
+
+
+def _materialize_history_file(payload: dict, base: str) -> None:
+    """把历史消息里指向对端的文件下载到本机，避免对端离线后图片裂掉。"""
+    file = payload.get("file")
+    if not isinstance(file, dict):
+        return
+    url = str(file.get("url") or "")
+    if not url.startswith("http://"):
+        return
+    try:
+        from .config import MAX_UPLOAD, UPLOAD_DIR
+
+        resp = requests.get(url, timeout=(2, 15), stream=True)
+        if resp.status_code != 200:
+            return
+        length = int(resp.headers.get("Content-Length") or 0)
+        if length and length > MAX_UPLOAD:
+            return
+        buf = bytearray()
+        for chunk in resp.iter_content(65536):
+            if not chunk:
+                continue
+            buf.extend(chunk)
+            if len(buf) > MAX_UPLOAD:
+                return
+        if not buf:
+            return
+        suffix = urlparse(url).path.rsplit(".", 1)
+        suffix = ("." + suffix[-1].lower()[:10]) if len(suffix) == 2 else ""
+        name = "lan-" + hashlib.sha1(url.encode("utf-8", "ignore")).hexdigest()[:24] + suffix
+        kind = payload.get("type")
+        sub = {"image": "images", "video": "videos", "sticker": "stickers"}.get(kind, "files")
+        dest_dir = UPLOAD_DIR / sub
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / name
+        if not dest.exists():
+            dest.write_bytes(bytes(buf))
+        file["url"] = f"/uploads/{sub}/{name}"
+        if kind == "image":
+            try:
+                from . import media
+
+                file["thumb"] = media.make_thumbnail(dest)
+            except Exception:
+                file["thumb"] = None
+    except Exception:
+        # 下载失败就保留对端绝对地址，对方在线时仍能正常显示。
+        return

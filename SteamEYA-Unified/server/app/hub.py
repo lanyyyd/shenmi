@@ -59,6 +59,16 @@ class Hub:
         except Exception as e:
             log.debug("在线快照广播失败：%s", e)
 
+    def broadcast_threadsafe(self, obj: dict) -> None:
+        """供同步线程调用：向所有连接广播一条消息（局域网补历史用）。"""
+        loop = self.loop
+        if loop is None or loop.is_closed():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self.broadcast_all(obj), loop)
+        except Exception as e:
+            log.debug("消息广播失败：%s", e)
+
     async def add(self, conn_id: str, ws, user: dict, device_id: str, ip: str = "") -> None:
         async with self._lock:
             self.clients[conn_id] = {

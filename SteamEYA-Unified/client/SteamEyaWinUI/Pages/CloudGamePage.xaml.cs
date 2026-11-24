@@ -601,6 +601,34 @@ public sealed partial class CloudGamePage : Page
         }
     }
 
+    // ---------------- 残留进程清理 ----------------
+
+    private async void OnCleanupProcesses(object sender, RoutedEventArgs e)
+    {
+        CleanupButton.IsEnabled = false;
+        try
+        {
+            var killed = await EngineLauncher.CleanupBrowsersAsync();
+            if (killed > 0)
+            {
+                ShowInfo($"已清理 {killed} 个残留的云游戏浏览器进程，可以重新上号了", InfoBarSeverity.Success);
+            }
+            else
+            {
+                ShowInfo("没有发现残留进程", InfoBarSeverity.Informational);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Debug($"清理残留进程失败：{ex.Message}");
+            ShowInfo($"清理失败：{ex.Message}", InfoBarSeverity.Error);
+        }
+        finally
+        {
+            CleanupButton.IsEnabled = true;
+        }
+    }
+
     // ---------------- 账号分享 ----------------
 
     /// <summary>

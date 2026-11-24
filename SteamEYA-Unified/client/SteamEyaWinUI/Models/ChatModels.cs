@@ -53,6 +53,8 @@ internal sealed class ChatMessageDto
     public string Content { get; set; } = string.Empty;
     public JsonElement? Mentions { get; set; }
     public string? FilePath { get; set; }
+    /// <summary>图片气泡预览用的缩略图；老图片没有缩略图时为空，回退 FilePath。</summary>
+    public string? FileThumb { get; set; }
     public string? FileName { get; set; }
     public long? FileSize { get; set; }
     public bool Recalled { get; set; }

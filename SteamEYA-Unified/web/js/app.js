@@ -1282,7 +1282,11 @@ function buildMsgEl(m) {
       <span class="video-meta">${vname}${vsize ? ' · ' + vsize : ''}</span>
     </div>`;
   } else if (mtype === 'image' && m.filePath) {
-    inner = `<div class="bubble" style="padding:6px"><img src="${esc(m.filePath)}" alt="" loading="lazy" onload="onImgLoad()" onclick="showImg('${esc(m.filePath)}')"></div>`;
+    const preview = m.fileThumb || m.filePath;
+    inner = `<div class="bubble" style="padding:6px"><img src="${esc(preview)}" alt="" loading="lazy"
+      style="min-width:80px;min-height:80px;background:rgba(127,127,127,.12)"
+      onload="onImgLoad()" onerror="if(this.dataset.full){this.onerror=null}else{this.dataset.full=1;this.src='${esc(m.filePath)}'}"
+      onclick="showImg('${esc(m.filePath)}')"></div>`;
   } else if (mtype === 'sticker' && m.filePath) {
     inner = `<div class="sticker-bubble"><img src="${esc(m.filePath)}" alt="" loading="lazy" onload="onImgLoad()"></div>`;
   } else if (mtype === 'file' && m.filePath) {

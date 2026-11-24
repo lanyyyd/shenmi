@@ -24,6 +24,8 @@ func main() {
 	setupLogging(dataDir)
 
 	eng := newEngine(dataDir)
+	// 后台做一次轻量清理：只回收调试端口已经失效的孤儿浏览器，不碰还活着的窗口。
+	go eng.cleanupDeadOrphans()
 	mux := http.NewServeMux()
 	registerRoutes(mux, eng)
 

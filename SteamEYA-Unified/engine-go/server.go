@@ -15,6 +15,7 @@ type enginePayload struct {
 	Cookies    []map[string]any `json:"cookies"`
 	ComboToken string           `json:"combo_token"`
 	DriverPath string           `json:"driver_path"`
+	All        bool             `json:"all"`
 }
 
 func decodePayload(r *http.Request) enginePayload {
@@ -104,6 +105,16 @@ func (e *engine) handleBrowserOpen(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (e *engine) handleBrowserCleanup(w http.ResponseWriter, r *http.Request) {
+	p := decodePayload(r)
+	game := p.Game
+	if p.All {
+		game = ""
+	}
+	killed := e.cleanupBrowsers(game)
+	writeJSON(w, jsonObj{"ok": true, "killed": killed})
+}
+
 func (e *engine) handleCapture(w http.ResponseWriter, r *http.Request) {
 	p := decodePayload(r)
 
@@ -188,6 +199,7 @@ func registerRoutes(mux *http.ServeMux, e *engine) {
 	mux.HandleFunc("/engine/health", e.handleHealth)
 	mux.HandleFunc("/engine/status", e.handleStatus)
 	mux.HandleFunc("/engine/browser/open", e.handleBrowserOpen)
+	mux.HandleFunc("/engine/browser/cleanup", e.handleBrowserCleanup)
 	mux.HandleFunc("/engine/capture", e.handleCapture)
 	mux.HandleFunc("/engine/login", e.handleLogin)
 	mux.HandleFunc("/engine/check", e.handleCheck)

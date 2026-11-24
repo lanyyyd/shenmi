@@ -80,6 +80,12 @@
             </StackPanel>
             <Button x:Name="CheckButton" Content="检测 Cookie 有效性" HorizontalAlignment="Stretch" Click="OnCheck" />
             <Button
+                x:Name="CleanupButton"
+                Content="清理残留进程"
+                HorizontalAlignment="Stretch"
+                Click="OnCleanupProcesses"
+                ToolTipService.ToolTip="结束上次遗留、仍占用浏览器 profile 的云游戏进程；不影响日常浏览器" />
+            <Button
                 x:Name="ShareAccountButton"
                 Content="分享该账号（可多选用户）"
                 HorizontalAlignment="Stretch"

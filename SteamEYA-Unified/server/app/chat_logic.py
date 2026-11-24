@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Optional
 
-from . import config, levelcore, security
+from . import config, levelcore, media, security
 from .db import execute, query_all, query_one
 from .hub import hub
 
@@ -70,6 +70,7 @@ def shape_msg(r, viewer) -> dict:
         "content": "" if hide else r["content"],
         "mentions": [] if hide else parse_mentions(r["mentions"]),
         "filePath": None if hide else r["file_path"],
+        "fileThumb": None if hide else media.thumb_url_for(r["file_path"]),
         "fileName": None if hide else r["file_name"],
         "fileSize": None if hide else r["file_size"],
         "recalled": recalled, "createdAt": r["created_at"],
@@ -120,7 +121,9 @@ def insert_chat(from_id: int, msg_type: str, content: str, file: Optional[dict],
         "fromLevel": levelcore.level_of(levelcore.exp_of(from_id)),
         "toId": to_id, "msgType": msg_type, "content": content,
         "mentions": parse_mentions(mentions),
-        "filePath": (file or {}).get("url"), "fileName": (file or {}).get("name"),
+        "filePath": (file or {}).get("url"),
+        "fileThumb": (file or {}).get("thumb") or media.thumb_url_for((file or {}).get("url")),
+        "fileName": (file or {}).get("name"),
         "fileSize": (file or {}).get("size"), "createdAt": ts,
     }
 

@@ -608,31 +608,85 @@ public sealed partial class CloudSavePage : Page
             return;
         }
 
-        var mcDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ".minecraft");
-        if (!Directory.Exists(Path.Combine(mcDir, "versions")))
-        {
-            ShowInfo($"未找到我的世界版本目录：{mcDir}", InfoBarSeverity.Error);
-            return;
-        }
+        // 不再只认 %APPDATA%\.minecraft：分层扫描环境变量、启动器配置和固定磁盘浅扫。
+        // 扫描可能耗时，放到后台线程，避免打开弹窗时卡 UI。
+        var instances = await Task.Run(ScanAllMcInstances);
 
-        var instances = ScanAllMcInstances(mcDir);
-        if (instances.Count == 0)
-        {
-            ShowInfo("没有找到可安装的版本实例", InfoBarSeverity.Warning);
-            return;
-        }
-
+        ContentDialog? dialog = null;
         var combo = new ComboBox { MinWidth = 460 };
-        foreach (var instance in instances)
+        void FillCombo()
         {
-            combo.Items.Add(new ComboBoxItem
+            combo.Items.Clear();
+            foreach (var instance in instances)
             {
-                Content = $"{instance.Name} · MC {instance.McVersion} · {LoaderName(instance.Loader)}",
-                Tag = instance
-            });
+                var version = string.IsNullOrWhiteSpace(instance.McVersion) ? "版本未知" : "MC " + instance.McVersion;
+                combo.Items.Add(new ComboBoxItem
+                {
+                    Content = $"{instance.Name} · {version} · {LoaderName(instance.Loader)}",
+                    Tag = instance
+                });
+            }
+            if (combo.Items.Count > 0)
+            {
+                combo.SelectedIndex = 0;
+            }
+            if (dialog is not null)
+            {
+                dialog.IsPrimaryButtonEnabled = combo.Items.Count > 0;
+            }
         }
-        combo.SelectedIndex = 0;
+        FillCombo();
+
+        var manualBtn = new Button { Content = "手动选择整合包目录…" };
+        manualBtn.Click += async (_, _) =>
+        {
+            var picked = await PickFolderAsync();
+            if (string.IsNullOrWhiteSpace(picked))
+            {
+                return;
+            }
+            var found = await Task.Run(() => ScanMcInstances(picked));
+            if (found.Count == 0)
+            {
+                ShowInfo("这个目录里没有识别到我的世界实例（需要包含 versions、mods 或 saves）",
+                    InfoBarSeverity.Warning);
+                return;
+            }
+            foreach (var instance in found)
+            {
+                if (!instances.Any(i => string.Equals(i.GameDir, instance.GameDir, StringComparison.OrdinalIgnoreCase)))
+                {
+                    instances.Add(instance);
+                }
+            }
+            FillCombo();
+            combo.SelectedItem = combo.Items
+                .OfType<ComboBoxItem>()
+                .LastOrDefault(item => item.Tag is McInstance mi
+                    && found.Any(f => string.Equals(f.GameDir, mi.GameDir, StringComparison.OrdinalIgnoreCase)));
+        };
+
+        var rescanBtn = new Button { Content = "重新扫描" };
+        rescanBtn.Click += async (_, _) =>
+        {
+            rescanBtn.IsEnabled = false;
+            try
+            {
+                MinecraftLocator.InvalidateSearchCache();
+                var list = await Task.Run(ScanAllMcInstances);
+                instances.Clear();
+                instances.AddRange(list);
+                FillCombo();
+            }
+            finally
+            {
+                rescanBtn.IsEnabled = true;
+            }
+        };
+
+        var pathRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        pathRow.Children.Add(manualBtn);
+        pathRow.Children.Add(rescanBtn);
 
         var time1 = new TextBox { Header = "早上窗口备份时间", Text = "09:35", Width = 150 };
         var time2 = new TextBox { Header = "上午窗口备份时间", Text = "11:43", Width = 150 };
@@ -655,8 +709,10 @@ public sealed partial class CloudSavePage : Page
 
         var info = new TextBlock
         {
-            Text = "安装前请先退出我的世界。默认在 09:35 / 11:43 / 16:03 自动备份并上传，"
-                   + "时间可以在这里改；首次安装后可用 /autobackup now 立即测试。",
+            Text = instances.Count > 0
+                ? "安装前请先退出我的世界。默认在 09:35 / 11:43 / 16:03 自动备份并上传，"
+                  + "时间可以在这里改；首次安装后可用 /autobackup now 立即测试。"
+                : "没有自动扫描到我的世界目录。请点「手动选择整合包目录…」，选择包含 versions / mods / saves 的目录。",
             TextWrapping = TextWrapping.Wrap,
             FontSize = 12,
             Foreground = SecondaryTextBrush()
@@ -664,17 +720,19 @@ public sealed partial class CloudSavePage : Page
 
         var panel = new StackPanel { Spacing = 12, MinWidth = 480 };
         panel.Children.Add(combo);
+        panel.Children.Add(pathRow);
         panel.Children.Add(timesRow);
         panel.Children.Add(info);
 
-        var dialog = new ContentDialog
+        dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
             Title = "我的世界自动备份模组",
             Content = panel,
             PrimaryButtonText = "安装并配置",
             CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary
+            DefaultButton = ContentDialogButton.Primary,
+            IsPrimaryButtonEnabled = combo.Items.Count > 0
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
         {
@@ -687,7 +745,8 @@ public sealed partial class CloudSavePage : Page
 
         try
         {
-            var jarName = $"autobackup-{target.Loader}-{target.McVersion}.jar";
+            var unknownJar = string.IsNullOrWhiteSpace(target.McVersion) || target.Loader == "unknown";
+            var jarName = unknownJar ? "autobackup.jar" : $"autobackup-{target.Loader}-{target.McVersion}.jar";
             var jarPath = Path.Combine(AppContext.BaseDirectory, "minecraft-mods", jarName);
             // 安装包不再内置模组 jar，缺失时仍写好配置，提示用户手动放入。
             var bundled = File.Exists(jarPath);
@@ -704,6 +763,8 @@ public sealed partial class CloudSavePage : Page
             Directory.CreateDirectory(configDir);
             var configPath = Path.Combine(configDir, "autobackup.json");
             WriteMinecraftBackupConfig(configPath, time1.Text, time2.Text, time3.Text);
+            // 记住这台机器上选中的实例，下次直接命中（换电脑不会沿用旧绝对路径）。
+            MinecraftLocator.Remember(target.Name, target.McVersion, target.GameDir);
 
             var fabricApiMissing = string.Equals(target.Loader, "fabric", StringComparison.Ordinal)
                 && !Directory.GetFiles(modsDir, "fabric-api*.jar").Any();
@@ -722,7 +783,9 @@ public sealed partial class CloudSavePage : Page
             {
                 result.Children.Add(new TextBlock
                 {
-                    Text = $"安装包未内置 {jarName}，请手动下载后放到下面的目录：",
+                    Text = unknownJar
+                        ? "已写入自动上传配置；请确认 mods 里已有你手动放入的备份模组 jar。"
+                        : $"安装包未内置 {jarName}，请手动下载后放到下面的目录：",
                     TextWrapping = TextWrapping.Wrap
                 });
                 result.Children.Add(new TextBlock
@@ -787,11 +850,10 @@ public sealed partial class CloudSavePage : Page
             .ToList();
     }
 
-    /// <summary>扫描默认目录与常见启动器目录，按游戏目录去重。</summary>
-    private static List<McInstance> ScanAllMcInstances(string mcDir)
+    /// <summary>扫描全部已发现目录，按游戏目录去重。</summary>
+    private static List<McInstance> ScanAllMcInstances()
     {
         return MinecraftLocator.SearchRoots()
-            .Append(mcDir)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .SelectMany(ScanMcInstances)
             .GroupBy(i => i.GameDir, StringComparer.OrdinalIgnoreCase)
@@ -805,6 +867,7 @@ public sealed partial class CloudSavePage : Page
         "fabric" => "Fabric",
         "forge" => "Forge",
         "neoforge" => "NeoForge",
+        "unknown" => "整合包",
         _ => "原版"
     };
 
