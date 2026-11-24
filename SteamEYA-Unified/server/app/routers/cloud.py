@@ -16,8 +16,6 @@ import requests
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from .. import security
-from .. import cloud_refresh
-from .. import mihoyo_qr
 from .. import presence
 from .. import pushplus
 from ..config import DATA_DIR
@@ -519,7 +517,7 @@ def upload(payload: dict = Body(...), user: dict = Depends(get_current_user)):
     game = payload.get("game") or DEFAULT_GAME_KEY
     cookies = payload.get("cookies")
     combo_token = payload.get("combo_token") or ""
-    # 有些来源把云游戏凭证放在 Cookie 里，这里补到 combo_token，后续检测 / 续期才用得上
+    # 有些来源把云游戏凭证放在 Cookie 里，这里补到 combo_token，后续检测才用得上
     if not combo_token:
         for c in cookies or []:
             if str(c.get("name") or "").lower() in ("combo_token", "x-rpc-combo_token"):
@@ -529,10 +527,6 @@ def upload(payload: dict = Body(...), user: dict = Depends(get_current_user)):
         raise HTTPException(400, "未知游戏")
     if not cookies:
         raise HTTPException(400, "Cookie 数据为空")
-    # 网页抓到的 Cookie 通常没有 stoken；如果之前扫码存过，这里直接补进 Cookie 再入库，
-    # 后续下载 / 检测 / 后台巡检就都能无感续期。
-    if game in cloud_refresh.MIHOYO_GAMES:
-        cookies, _device = cloud_refresh.merge_stoken(cookies, user["id"])
     # 先检测：用 game_uid 区分同一用户下的多个游戏账号（同游戏可存多条）
     result = check_cookie_valid(cookies, game, combo_token)
     game_uid = str(result.get("game_uid") or "").strip()[:64]
@@ -556,30 +550,9 @@ def upload(payload: dict = Body(...), user: dict = Depends(get_current_user)):
     # 自定义游戏：首个成功上传的人让它对所有人可见，其他人就不用再自己建一遍。
     execute_update("UPDATE cloud_games SET visible=1 WHERE game_key=? AND visible=0", (game,))
 
-    # 上传后不立刻强制换票：刚抓到的 Cookie 本身是最新鲜的，而浏览器 profile 里
-    # 可能残留别的/已注销账号的 stoken，强制换票会报「ltoken 续期失败 -100」，
-    # 甚至把新 Cookie 换成那个旧号的 token。这里只重置续期状态（避免客户端继续显示
-    # 旧错误），等真正上号 / 检测时再按需续期。
-    # 会话型游戏（异环/哔哩哔哩）没有可换的票，refresh_ok 返回 null，客户端不提示。
-    if game in cloud_refresh.MIHOYO_GAMES:
-        has_stoken = cloud_refresh.stoken_bound(user["id"], cookies)
-        execute(
-            "UPDATE cloud_cookies SET refresh_at=?, refresh_ok=NULL, refresh_msg='' "
-            "WHERE user_id=? AND game=? AND game_uid=?",
-            (now, user["id"], game, game_uid),
-        )
-        refresh_ok = None
-        refresh_msg = ""
-        need_stoken = not has_stoken
-    else:
-        refresh_ok = None
-        refresh_msg = ""
-        need_stoken = False
     return {"ok": True, "msg": "上传成功", "valid": result.get("valid"),
             "nickname": result.get("nickname", ""), "uid": game_uid,
-            "detail": result.get("msg"),
-            "refresh_ok": refresh_ok, "refresh_msg": refresh_msg,
-            "need_stoken": need_stoken}
+            "detail": result.get("msg")}
 
 
 # ---------------- 内部转发：让旧 6966 上号器服务跨库同步 ----------------
@@ -668,8 +641,7 @@ def download(request: Request, game: str = "genshin", uid: str = "", owner: int 
 
     owner 非 0 表示上号用的是别人分享给我的账号（必须先有分享关系）。
 
-    米哈游账号超过 12 小时没续期会先自动换票，客户端拿到的就是新鲜 Cookie，
-    用户完全无感；换票失败不影响返回旧 Cookie，但会带上失败原因。
+    Cookie 原样返回，不做自动换票；过期后需要重新抓取，安卓端可用静默续期。
 
     这里同时记一条上号日志：安卓端上号只调这个接口（不调 report_login），
     在服务端补记才能让各端上号记录统一。
@@ -684,14 +656,12 @@ def download(request: Request, game: str = "genshin", uid: str = "", owner: int 
         )
         if not shared:
             raise HTTPException(403, "该账号未分享给你")
-    refresh_result = cloud_refresh.refresh_stored(owner_id, game, uid, force=False)
-    need_stoken = bool(refresh_result.get("need_stoken"))
     if uid:
-        row = query_one("SELECT data, combo_token, updated_at, game_uid, refresh_at, refresh_ok, refresh_msg "
+        row = query_one("SELECT data, combo_token, updated_at, game_uid "
                         "FROM cloud_cookies WHERE user_id=? AND game=? AND game_uid=?",
                         (owner_id, game, uid))
     else:
-        row = query_one("SELECT data, combo_token, updated_at, game_uid, refresh_at, refresh_ok, refresh_msg "
+        row = query_one("SELECT data, combo_token, updated_at, game_uid "
                         "FROM cloud_cookies WHERE user_id=? AND game=? "
                         "ORDER BY updated_at DESC, id DESC LIMIT 1", (owner_id, game))
     if not row:
@@ -703,11 +673,7 @@ def download(request: Request, game: str = "genshin", uid: str = "", owner: int 
     _record_cloud_login(user["id"], game, _client_ip(request), row["game_uid"] or uid)
     return {"ok": True, "cookies": cookies, "combo_token": row["combo_token"] or "",
             "game_uid": row["game_uid"] or "", "owner_id": owner_id,
-            "updated_at": row["updated_at"],
-            "refresh_at": row["refresh_at"],
-            "refresh_ok": None if row["refresh_ok"] is None else bool(row["refresh_ok"]),
-            "refresh_msg": row["refresh_msg"] or "",
-            "need_stoken": need_stoken}
+            "updated_at": row["updated_at"]}
 
 
 @router.delete("/my")
@@ -808,37 +774,6 @@ def save_share(payload: dict = Body(...), user: dict = Depends(get_current_user)
     return {"ok": True, "count": len(valid_ids), "users": users}
 
 
-# ---------------- 米游社扫码补 stoken ----------------
-# 云游戏网页 Cookie 只有短期 token，没有 stoken 就无法自动续期。
-# 这里用米游社 App 扫码拿长期 stoken（不是云游戏 combo_token）。
-@router.post("/stoken/create")
-def stoken_create(user: dict = Depends(get_current_user)):
-    result = mihoyo_qr.create_session(user["id"])
-    if not result.get("ok"):
-        raise HTTPException(400, result.get("msg") or "生成二维码失败")
-    return result
-
-
-@router.post("/stoken/poll")
-def stoken_poll(payload: dict = Body(...), user: dict = Depends(get_current_user)):
-    session = str(payload.get("session") or "").strip()
-    if not session:
-        raise HTTPException(400, "缺少扫码会话")
-    result = mihoyo_qr.poll_session(user["id"], session)
-    if result.get("state") == "confirmed":
-        matched = cloud_refresh.bind_and_refresh(
-            user["id"], result["stoken"], result["mid"], result.get("stuid", ""),
-            result.get("device_id", ""))
-        result["matched"] = matched
-        if matched:
-            result["msg"] = f"{result['msg']}，已为 {matched} 个云账号续期"
-        else:
-            result["msg"] = f"{result['msg']}；下次抓取 Cookie 时会自动合并"
-    # stoken 属于敏感凭据，不回传给客户端
-    result.pop("stoken", None)
-    return result
-
-
 @router.post("/report_login")
 def report_login(request: Request, payload: dict = Body(...), user: dict = Depends(get_current_user)):
     game = payload.get("game") or "genshin"
@@ -899,22 +834,6 @@ def check(payload: dict = Body(...), user: dict = Depends(get_current_user)):
     row_id = row["id"]
     cookies = security.decrypt_blob(row["data"])
     result = check_cookie_valid(cookies, game, row["combo_token"] or "")
-    refresh_msg = ""
-    need_stoken = False
-    if result.get("valid") is False and game in cloud_refresh.MIHOYO_GAMES:
-        # 检测到失效先尝试 stoken 换票，再复检一次：很多「失效」只是短期 token 到期。
-        rr = cloud_refresh.refresh_stored(user["id"], game, row["game_uid"] or "", force=True)
-        if rr.get("ok"):
-            fresh = query_one("SELECT data, combo_token, game_uid, nickname FROM cloud_cookies WHERE id=?",
-                              (row["id"],))
-            if fresh:
-                cookies = security.decrypt_blob(fresh["data"])
-                result = check_cookie_valid(cookies, game, fresh["combo_token"] or "")
-                row = fresh
-                refresh_msg = "检测前已自动续期"
-        elif rr.get("refreshed"):
-            refresh_msg = rr.get("msg") or "自动续期失败"
-            need_stoken = bool(rr.get("need_stoken"))
     execute(
         "UPDATE cloud_cookies SET valid=?, checked_at=?, game_uid=?, nickname=?, free_duration=?, "
         "paid_duration=?, total_duration=? WHERE id=?",
@@ -924,7 +843,7 @@ def check(payload: dict = Body(...), user: dict = Depends(get_current_user)):
          result.get("free_duration"), result.get("paid_duration"),
          result.get("total_duration"), row_id),
     )
-    return {"ok": True, **result, "refresh_msg": refresh_msg, "need_stoken": need_stoken}
+    return {"ok": True, **result}
 
 
 @router.get("/my")
@@ -932,7 +851,7 @@ def my(include_shared: int = 0, user: dict = Depends(get_current_user)):
     """我的云账号；include_shared=1 时附带别人分享给我的账号（可直接上号）。"""
     rows = query_all(
         "SELECT game, updated_at, valid, checked_at, nickname, game_uid, free_duration, paid_duration, "
-        "total_duration, refresh_at, refresh_ok, refresh_msg, data FROM cloud_cookies WHERE user_id=? "
+        "total_duration, data FROM cloud_cookies WHERE user_id=? "
         "ORDER BY game, updated_at DESC, id DESC", (user["id"],),
     )
     names = game_name_map()
@@ -940,9 +859,7 @@ def my(include_shared: int = 0, user: dict = Depends(get_current_user)):
     def build(row, owner_id: int = 0, owner_name: str = "", owner_username: str = "",
               shared: bool = False) -> dict:
         item = dict(row)
-        blob = item.pop("data", None)
-        item["refresh_at"] = int(item.get("refresh_at") or 0)
-        item["refresh_msg"] = item.get("refresh_msg") or ""
+        item.pop("data", None)
         item["game_name"] = names.get(item["game"]) or item["game"]
         item["shared"] = shared
         item["owner_id"] = owner_id
@@ -953,23 +870,13 @@ def my(include_shared: int = 0, user: dict = Depends(get_current_user)):
             free, total = item.get("free_duration"), item.get("total_duration")
             item["paid_duration"] = (max(int(total) - int(free), 0)
                                     if free is not None and total is not None else None)
-        # 客户端据此显示「stoken 未补」并引导扫码；会话型游戏恒为 False。
-        has_stoken = False
-        if item["game"] in cloud_refresh.MIHOYO_GAMES and blob:
-            try:
-                has_stoken = cloud_refresh.stoken_bound(owner_id or user["id"],
-                                                        security.decrypt_blob(blob))
-            except Exception:
-                has_stoken = False
-        item["has_stoken"] = has_stoken
         return item
 
     out = [build(row) for row in rows]
     if include_shared:
         shared_rows = query_all(
             "SELECT c.game, c.updated_at, c.valid, c.checked_at, c.nickname, c.game_uid, "
-            "c.free_duration, c.paid_duration, c.total_duration, c.refresh_at, c.refresh_ok, "
-            "c.refresh_msg, c.data, "
+            "c.free_duration, c.paid_duration, c.total_duration, c.data, "
             "c.user_id AS owner_id, u.username AS owner_username, u.nickname AS owner_nickname "
             "FROM cloud_shares s "
             "JOIN cloud_cookies c ON c.user_id=s.owner_id AND c.game=s.game "
@@ -1111,18 +1018,10 @@ def admin_accounts(admin: dict = Depends(require_admin)):
     names = game_name_map()
     for r in rows:
         d = dict(r)
-        blob = d.pop("data", None)
+        d.pop("data", None)
         d["game_name"] = names.get(r["game"]) or r["game"]
         d["has_combo_token"] = bool(r["combo_token"])
         d.pop("combo_token", None)
-        # 后台直接看这个账号能不能长期自动续期（stoken 是否已补）
-        has_stoken = False
-        if r["game"] in cloud_refresh.MIHOYO_GAMES and blob:
-            try:
-                has_stoken = cloud_refresh.stoken_bound(r["user_id"], security.decrypt_blob(blob))
-            except Exception:
-                has_stoken = False
-        d["has_stoken"] = has_stoken
         out.append(d)
     return {"ok": True, "accounts": out}
 

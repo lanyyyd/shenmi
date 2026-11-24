@@ -52,7 +52,7 @@ import kotlinx.coroutines.launch
  * Activity 这一层处理；而转屏如果不写 configChanges，Activity 会重建，WebView 直接重载、
  * 串流中断。
  *
- * 登录态来自 /api/cloud/download（服务端已按需用 stoken 换票），注入 CookieManager 后
+ * 登录态来自 /api/cloud/download（Cookie 原样返回），注入 CookieManager 后
  * 云游戏页面会自己换 combo_token，不需要额外塞 header。
  */
 class CloudPlayActivity : ComponentActivity() {

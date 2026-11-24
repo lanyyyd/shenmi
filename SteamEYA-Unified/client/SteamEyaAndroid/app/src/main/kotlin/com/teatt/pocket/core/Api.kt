@@ -190,13 +190,6 @@ data class CloudAccountDto(
     @SerialName("updated_at") val updatedAt: Long? = null,
     @SerialName("free_duration") val freeDuration: Int? = null,
     @SerialName("total_duration") val totalDuration: Int? = null,
-    /** 最近一次自动续期时间（Unix 秒）；0 表示还没续过。 */
-    @SerialName("refresh_at") val refreshAt: Long = 0,
-    /** 1 成功、0 失败、null 未续期。 */
-    @SerialName("refresh_ok") val refreshOk: Int? = null,
-    @SerialName("refresh_msg") val refreshMsg: String = "",
-    /** 是否已补长期 stoken（能自动续期）；米哈游游戏才有意义。 */
-    @SerialName("has_stoken") val hasStoken: Boolean = false,
     /** 是否是别人分享给我的账号（只读，可直接上号）。 */
     val shared: Boolean = false,
     /** 分享者用户 id；自己的账号为 0。上号下载 Cookie 时要用它。 */
@@ -217,15 +210,6 @@ data class CloudAccountDto(
         0 -> "已失效"
         else -> "未检测"
     }
-
-    /** 服务端用 stoken 换票后的续期状态，直接在卡片上展示。 */
-    val renewalText: String get() {
-        if (refreshAt <= 0) return ""
-        val whenText = java.time.Instant.ofEpochSecond(refreshAt)
-            .atZone(java.time.ZoneId.systemDefault())
-            .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"))
-        return if (refreshMsg.isBlank()) "自动续期 $whenText" else "自动续期 $whenText（$refreshMsg）"
-    }
 }
 
 @Serializable
@@ -244,18 +228,14 @@ data class CloudGameDto(
 @Serializable
 data class CloudGamesDto(val ok: Boolean = false, val games: List<CloudGameDto> = emptyList())
 
-/** /api/cloud/download：注入 WebView 用的新鲜 Cookie（服务端已按需换票续期）。 */
+/** /api/cloud/download：注入 WebView 用的 Cookie。 */
 @Serializable
 data class CloudDownloadDto(
     val ok: Boolean = false,
     val cookies: List<CookieDto> = emptyList(),
     @SerialName("combo_token") val comboToken: String = "",
     @SerialName("game_uid") val gameUid: String = "",
-    @SerialName("updated_at") val updatedAt: Long? = null,
-    @SerialName("refresh_at") val refreshAt: Long? = null,
-    @SerialName("refresh_ok") val refreshOk: Boolean? = null,
-    @SerialName("refresh_msg") val refreshMsg: String = "",
-    @SerialName("need_stoken") val needStoken: Boolean = false
+    @SerialName("updated_at") val updatedAt: Long? = null
 )
 
 @Serializable
@@ -268,34 +248,7 @@ data class CloudCheckDto(
     val detail: String = "",
     val nickname: String = "",
     @SerialName("game_uid") val gameUid: String = "",
-    @SerialName("free_duration") val freeDuration: Int? = null,
-    /** 米哈游游戏上传后服务端立刻换票的结果；null 表示该游戏不支持自动续期。 */
-    @SerialName("refresh_ok") val refreshOk: Boolean? = null,
-    @SerialName("refresh_msg") val refreshMsg: String = "",
-    /** Cookie 缺少 stoken，需要先扫码补。 */
-    @SerialName("need_stoken") val needStoken: Boolean = false
-)
-
-@Serializable
-data class StokenCreateDto(
-    val ok: Boolean = false,
-    val session: String = "",
-    val url: String = "",
-    val size: Int = 0,
-    /** 二维码 0/1 矩阵，每行一个字符串。 */
-    val rows: List<String> = emptyList(),
-    val msg: String = ""
-)
-
-@Serializable
-data class StokenPollDto(
-    val ok: Boolean = false,
-    /** waiting / scanned / confirmed / expired / canceled / error */
-    val state: String = "",
-    val msg: String = "",
-    val mid: String = "",
-    val stuid: String = "",
-    val matched: Int = 0
+    @SerialName("free_duration") val freeDuration: Int? = null
 )
 
 /** 云游戏 Cookie 过期提醒（PushPlus 扫码绑定）状态。 */

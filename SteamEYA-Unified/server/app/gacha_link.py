@@ -1,7 +1,7 @@
-"""用米游社 stoken 生成游戏抽卡记录链接（Auth Key B）。
+"""用 Cookie 里的米游社 stoken 生成游戏抽卡记录链接（Auth Key B）。
 
 流程：
-1. 用扫码存下的 stoken 调 getUserGameRolesByStoken 拿到绑定的游戏角色（uid/region）。
+1. 用云游戏 Cookie 里的 stoken 调 getUserGameRolesByStoken 拿到绑定的游戏角色（uid/region）。
 2. 调 genAuthKey（auth_appid=webview_gacha）换一个临时 authkey。
 3. 拼成可直接请求的 getGachaLog 链接（参数与 HoYoGet 输出一致）。
 
@@ -19,8 +19,8 @@ import urllib.parse
 import requests
 
 from . import security
-from .cloud_refresh import MIHOYO_GAMES, credentials_from, device_id_for
 from .db import query_all
+from .mihoyo_common import MIHOYO_GAMES, credentials_from, device_id_for
 
 APP_VERSION = "2.81.1"
 APP_ID = "bll8iq97cem8"
@@ -80,7 +80,7 @@ def _failure(data: dict) -> str:
     code = data.get("retcode")
     msg = str(data.get("message") or "请求失败")
     if code in (-100, -111, -101):
-        return "米游社 stoken 已失效，请重新扫码"
+        return "米游社 stoken 已失效，请重新抓取包含 stoken 的 Cookie"
     if code == 1016:
         return "该游戏账号没有绑定这个米游社账号"
     if code == 1002:
@@ -154,27 +154,9 @@ def build_link(game: str, authkey: str, region: str) -> dict:
 
 
 def accounts(user_id: int) -> list[dict]:
-    """所有可用的 stoken：优先扫码表，其次手动上传的云 Cookie 里自带的。"""
+    """所有可用的 stoken：只取手动上传的云 Cookie 里自带的。"""
     out: list[dict] = []
     seen: set[tuple[str, str]] = set()
-
-    for row in query_all(
-        "SELECT mid, stuid, stoken, device_id FROM cloud_stokens "
-        "WHERE user_id=? ORDER BY updated_at DESC", (user_id,)
-    ):
-        try:
-            stoken = security.decrypt_blob(row["stoken"])
-        except Exception:
-            continue
-        if not stoken:
-            continue
-        mid = str(row["mid"] or "")
-        key = (mid, str(stoken))
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append({"stoken": str(stoken), "mid": mid, "stuid": str(row["stuid"] or ""),
-                    "device_id": str(row["device_id"] or "")})
 
     for row in query_all(
         "SELECT game_uid, data FROM cloud_cookies WHERE user_id=? AND game IN (?,?)",
@@ -199,7 +181,7 @@ def accounts(user_id: int) -> list[dict]:
 def roles_for_user(user_id: int) -> tuple[list[dict], list[str]]:
     accs = accounts(user_id)
     if not accs:
-        raise ValueError("还没有可用的米游社 stoken，请先在客户端用米游社 App 扫码")
+        raise ValueError("云游戏 Cookie 里没有 stoken，请重新抓取包含 stoken 的 Cookie")
     roles: list[dict] = []
     errors: list[str] = []
     for acc in accs:
@@ -224,9 +206,9 @@ def link_for_user(user_id: int, game: str, game_uid: str, region: str,
     if mid:
         accs = [a for a in accs if a["mid"] == mid]
     if not accs:
-        raise ValueError("还没有可用的米游社 stoken，请先在客户端用米游社 App 扫码")
+        raise ValueError("云游戏 Cookie 里没有 stoken，请重新抓取包含 stoken 的 Cookie")
 
-    last = "没有可用的 stoken"
+    last = "Cookie 里没有 stoken"
     for acc in accs:
         got = gen_authkey(acc["stoken"], acc["mid"], acc["device_id"],
                           cfg["biz"], game_uid, region)

@@ -1,4 +1,4 @@
-"""米哈游账号工具：用扫码得到的 stoken 生成抽卡记录链接。
+"""米哈游账号工具：用 Cookie 里的 stoken 生成抽卡记录链接。
 
   GET  /api/mihoyo/gacha/roles   当前用户所有米游社账号绑定的游戏角色
   POST /api/mihoyo/gacha/link    生成某个角色的抽卡链接 {game, game_uid, region, mid?}

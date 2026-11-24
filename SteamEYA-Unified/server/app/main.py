@@ -133,11 +133,6 @@ def _startup():
     # 导航 tips：后台预热一言缓冲池（上游较慢，避免首批请求只拿到兜底句）
     tips.start_prefetch()
 
-    # 云游戏 Cookie 自动续期：后台每 30 分钟巡检一次，把超过 24 小时没换票的
-    # 米哈游账号用 stoken 续期；上号/检测时还会做懒续期（见 routers/cloud.py）
-    from . import cloud_refresh
-    cloud_refresh.start_background()
-
     # 在线状态：云游戏剩余时长探测 + Steam 在线状态；聊天室「在玩 xxx」用
     from . import presence
     presence.start_background()

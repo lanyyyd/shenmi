@@ -366,20 +366,10 @@ public sealed partial class CloudGamePage : Page
             }
 
             var loggedIn = TryGetBool(body, "logged_in");
-            // 米哈游账号：服务端在下载前已用 stoken 换过票，这里把结果一并告诉用户。
-            var refreshNote = data.RefreshOk switch
-            {
-                true => "，已自动续期 Cookie",
-                false when data.NeedStoken => "，Cookie 里没有 stoken：请点「扫码补 stoken」",
-                false when !string.IsNullOrWhiteSpace(data.RefreshMsg)
-                    => $"，自动续期失败：{data.RefreshMsg}",
-                _ => string.Empty
-            };
-            var failedRefresh = data.RefreshOk == false;
             SetLoginProgress(loggedIn ? "上号完成" : "已注入 Cookie，请在浏览器确认登录", 100);
             HideLoginProgressSoon();
-            ShowInfo((loggedIn ? "登录成功，浏览器已打开" : "已注入 Cookie，请在浏览器确认登录状态") + refreshNote,
-                failedRefresh ? InfoBarSeverity.Warning : (loggedIn ? InfoBarSeverity.Success : InfoBarSeverity.Warning));
+            ShowInfo(loggedIn ? "登录成功，浏览器已打开" : "已注入 Cookie，请在浏览器确认登录状态",
+                loggedIn ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
             await _cloud.ReportLoginAsync(game, uid);
             StartPlayHeartbeat(game, uid);
         }
@@ -545,15 +535,8 @@ public sealed partial class CloudGamePage : Page
 
         var combo = TryGetString(body, "combo_token") ?? string.Empty;
         var result = await _cloud.UploadAsync(game, cookies, combo);
-        var refreshNote = result.RefreshOk switch
-        {
-            true => "，stoken 自动续期已开启",
-            false when result.NeedStoken => "（Cookie 里没有 stoken，请点「扫码补 stoken」）",
-            false when !string.IsNullOrWhiteSpace(result.RefreshMsg) => $"（自动续期失败：{result.RefreshMsg}）",
-            _ => string.Empty
-        };
-        ShowInfo(result.Ok ? $"已上传（检测：{result.Detail}{refreshNote}）" : (result.Msg ?? "上传失败"),
-            result.Ok && result.RefreshOk != false ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
+        ShowInfo(result.Ok ? $"已上传（检测：{result.Detail}）" : (result.Msg ?? "上传失败"),
+            result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
         // 上传成功后选中刚上传的那个账号（同一个游戏可能已经有好几个号）
         await RefreshStatusAsync(result.Uid);
     }
@@ -577,7 +560,7 @@ public sealed partial class CloudGamePage : Page
         try
         {
             var result = await _cloud.CheckAsync(CurrentGame, uid);
-            // 检测提示只显示结论；剩余时长、续期/ stoken 提示都在右侧账号列表里。
+            // 检测提示只显示结论；剩余时长在右侧账号列表里。
             var text = result.Ok
                 ? result.Valid switch
                 {
@@ -716,289 +699,6 @@ public sealed partial class CloudGamePage : Page
         {
             ShowInfo($"保存分享失败：{ex.Message}", InfoBarSeverity.Error);
         }
-    }
-
-    // ---------------- 米游社扫码补 stoken ----------------
-
-    private async void OnScanStoken(object sender, RoutedEventArgs e)
-    {
-        StokenButton.IsEnabled = false;
-        try
-        {
-            var created = await _cloud.StokenCreateAsync();
-            if (!created.Ok || created.Rows.Count == 0)
-            {
-                ShowInfo(created.Msg ?? "生成米游社二维码失败", InfoBarSeverity.Error);
-                return;
-            }
-
-            var status = new TextBlock
-            {
-                Text = "请用米游社 App 扫描二维码",
-                TextWrapping = TextWrapping.Wrap,
-                TextAlignment = TextAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Center
-            };
-            var canvas = BuildQrCanvas(created.Rows, Math.Max(1, created.Size));
-            var panel = new StackPanel { Spacing = 12 };
-            panel.Children.Add(new Border
-            {
-                Background = new SolidColorBrush(Microsoft.UI.Colors.White),
-                CornerRadius = new CornerRadius(12),
-                Padding = new Thickness(10),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Child = canvas
-            });
-            panel.Children.Add(status);
-            panel.Children.Add(new TextBlock
-            {
-                Text = "扫码只用来获取长期 stoken，不会上传账号密码；云游戏 combo_token 仍需按原方式抓取。",
-                FontSize = 12,
-                TextWrapping = TextWrapping.Wrap,
-                Foreground = new SolidColorBrush(Microsoft.UI.Colors.Gray)
-            });
-
-            var dialog = new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                Title = "扫码补 stoken（米游社）",
-                Content = panel,
-                CloseButtonText = "关闭"
-            };
-
-            using var cts = new CancellationTokenSource();
-            _ = Task.Run(() => PollStokenAsync(created.Session, status, dialog, cts.Token));
-            try
-            {
-                await dialog.ShowAsync();
-            }
-            finally
-            {
-                cts.Cancel();
-            }
-            await RefreshStatusAsync();
-        }
-        catch (Exception ex)
-        {
-            AppLog.Error("扫码补 stoken 失败。", ex);
-            ShowInfo($"扫码补 stoken 失败：{ex.Message}", InfoBarSeverity.Error);
-        }
-        finally
-        {
-            StokenButton.IsEnabled = true;
-        }
-    }
-
-    /// <summary>2 秒一次查询扫码状态；确认后服务端已入库并续期，直接关掉弹窗刷新列表。</summary>
-    private async Task PollStokenAsync(string session, TextBlock status, ContentDialog dialog, CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                await Task.Delay(2000, ct);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-
-            StokenPollDto result;
-            try
-            {
-                result = await _cloud.StokenPollAsync(session, ct);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-            catch (Exception ex)
-            {
-                DispatcherQueue.TryEnqueue(() => status.Text = $"查询扫码状态失败：{ex.Message}");
-                continue;
-            }
-
-            DispatcherQueue.TryEnqueue(() => status.Text = result.Msg ?? "请用米游社 App 扫描二维码");
-            if (result.State == "confirmed")
-            {
-                DispatcherQueue.TryEnqueue(() =>
-                {
-                    status.Text = result.Msg ?? "扫码成功";
-                    dialog.Hide();
-                    ShowInfo(result.Msg ?? "扫码成功，stoken 已保存", InfoBarSeverity.Success);
-                });
-                return;
-            }
-            if (result.State is "expired" or "canceled" or "error")
-            {
-                return;
-            }
-        }
-    }
-
-    /// <summary>把服务端给的 0/1 矩阵画成二维码（不引第三方 QR 库）。</summary>
-    private static Canvas BuildQrCanvas(IReadOnlyList<string> rows, int size)
-    {
-        const double side = 320;
-        var cell = side / size;
-        var canvas = new Canvas
-        {
-            Width = side,
-            Height = side,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.White)
-        };
-        var fill = new SolidColorBrush(Microsoft.UI.Colors.Black);
-        for (var r = 0; r < rows.Count; r++)
-        {
-            var row = rows[r];
-            for (var c = 0; c < row.Length; c++)
-            {
-                if (row[c] != '1')
-                {
-                    continue;
-                }
-                var rect = new Rectangle { Width = cell, Height = cell, Fill = fill };
-                Canvas.SetLeft(rect, c * cell);
-                Canvas.SetTop(rect, r * cell);
-                canvas.Children.Add(rect);
-            }
-        }
-        return canvas;
-    }
-
-    // ---------------- 抽卡链接（米游社 stoken -> Auth Key B） ----------------
-
-    private async void OnGachaLink(object sender, RoutedEventArgs e)
-    {
-        GachaLinkButton.IsEnabled = false;
-        try
-        {
-            var rolesDto = await _cloud.GachaRolesAsync();
-            if (!rolesDto.Ok || rolesDto.Roles.Count == 0)
-            {
-                var error = rolesDto.Detail;
-                if (string.IsNullOrWhiteSpace(error) && rolesDto.Errors.Count > 0)
-                {
-                    error = string.Join("；", rolesDto.Errors.Distinct());
-                }
-                ShowInfo(error ?? "没有找到绑定的原神/星铁角色，请先用米游社 App 扫码补 stoken，并确认米游社已绑定游戏角色。",
-                    InfoBarSeverity.Error);
-                return;
-            }
-
-            var roles = rolesDto.Roles;
-            var picker = new ComboBox
-            {
-                MinWidth = 460,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                ItemsSource = roles.Select(RoleLabel).ToList(),
-                SelectedIndex = 0
-            };
-            var linkBox = new TextBox
-            {
-                IsReadOnly = true,
-                TextWrapping = TextWrapping.Wrap,
-                MinHeight = 90,
-                PlaceholderText = "点「生成链接」后显示，复制后粘贴到提瓦特小助手等抽卡分析工具"
-            };
-            var status = new TextBlock
-            {
-                TextWrapping = TextWrapping.Wrap,
-                FontSize = 12,
-                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-                Text = "链接约 24 小时有效，只用来读取抽卡记录，不要发给陌生人。"
-            };
-            var generate = new Button
-            {
-                Content = "生成链接",
-                Style = (Style)Application.Current.Resources["AccentButtonStyle"]
-            };
-            var copy = new Button { Content = "复制链接", IsEnabled = false };
-            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            buttons.Children.Add(generate);
-            buttons.Children.Add(copy);
-
-            var panel = new StackPanel { Spacing = 10, MinWidth = 480 };
-            panel.Children.Add(new TextBlock { Text = "选择游戏账号", FontSize = 12 });
-            panel.Children.Add(picker);
-            panel.Children.Add(buttons);
-            panel.Children.Add(linkBox);
-            panel.Children.Add(status);
-
-            var dialog = new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                Title = "获取抽卡链接（米游社）",
-                Content = panel,
-                CloseButtonText = "关闭"
-            };
-
-            generate.Click += async (_, _) =>
-            {
-                var index = picker.SelectedIndex;
-                if (index < 0 || index >= roles.Count)
-                {
-                    return;
-                }
-                var role = roles[index];
-                generate.IsEnabled = false;
-                status.Text = "正在生成…";
-                try
-                {
-                    var result = await _cloud.GachaLinkAsync(role.Game, role.GameUid, role.Region, role.Mid);
-                    if (string.IsNullOrWhiteSpace(result.Url))
-                    {
-                        status.Text = $"生成失败：{result.Detail ?? "请确认该账号已绑定米游社，并重新扫码补 stoken"}";
-                        return;
-                    }
-                    linkBox.Text = result.Url;
-                    copy.IsEnabled = true;
-                    status.Text = "生成成功，链接约 24 小时有效；复制后粘贴到抽卡分析工具。";
-                }
-                catch (Exception ex)
-                {
-                    status.Text = $"生成失败：{ex.Message}";
-                }
-                finally
-                {
-                    generate.IsEnabled = true;
-                }
-            };
-
-            copy.Click += (_, _) =>
-            {
-                if (string.IsNullOrWhiteSpace(linkBox.Text))
-                {
-                    return;
-                }
-                var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
-                package.SetText(linkBox.Text);
-                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
-                status.Text = "已复制到剪贴板。";
-            };
-
-            await dialog.ShowAsync();
-        }
-        catch (Exception ex)
-        {
-            AppLog.Error("获取抽卡链接失败。", ex);
-            ShowInfo($"获取抽卡链接失败：{ex.Message}", InfoBarSeverity.Error);
-        }
-        finally
-        {
-            GachaLinkButton.IsEnabled = true;
-        }
-    }
-
-    private static string RoleLabel(GachaRoleDto role)
-    {
-        var region = role.RegionName;
-        if (!role.IsOfficial)
-        {
-            region = string.IsNullOrEmpty(region) ? "渠道服" : $"{region}·渠道服";
-        }
-        var nick = string.IsNullOrWhiteSpace(role.Nickname) ? "未命名" : role.Nickname;
-        return $"{role.GameName} · {nick} · UID {role.GameUid} · {region}";
     }
 
     // ---------------- Cookie 过期微信提醒（PushPlus 扫码绑定） ----------------

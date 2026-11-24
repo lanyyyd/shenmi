@@ -103,21 +103,6 @@ internal sealed class CloudGameItem
     [JsonPropertyName("game_name")]
     public string GameNameFromServer { get; set; } = string.Empty;
 
-    /// <summary>最近一次自动续期时间（Unix 秒）；0 表示还没续过。</summary>
-    [JsonPropertyName("refresh_at")]
-    public long RefreshAt { get; set; }
-
-    /// <summary>最近一次自动续期结果：1 成功、0 失败、null 未续期。</summary>
-    [JsonPropertyName("refresh_ok")]
-    public int? RefreshOk { get; set; }
-
-    [JsonPropertyName("refresh_msg")]
-    public string RefreshMsg { get; set; } = string.Empty;
-
-    /// <summary>该账号是否已补长期 stoken（能自动续期）。</summary>
-    [JsonPropertyName("has_stoken")]
-    public bool HasStoken { get; set; }
-
     /// <summary>
     /// 显示名优先级：服务端 → 客户端已知列表（/api/cloud/games 拉到的）→ 内置硬编码 → key。
     /// 之前只有内置 switch，自定义游戏（key 形如 custom_xxxxxxxx）会直接把 key 显示给用户。
@@ -191,29 +176,6 @@ internal sealed class CloudGameItem
             return string.Join(" ", parts);
         }
     }
-
-    /// <summary>自动续期状态：米哈游账号由服务端用 stoken 定期换票，这里只做展示。</summary>
-    public string RenewalText
-    {
-        get
-        {
-            if (RefreshAt <= 0)
-            {
-                return string.Empty;
-            }
-            var when = System.DateTimeOffset.FromUnixTimeSeconds(RefreshAt)
-                .ToLocalTime()
-                .ToString("MM-dd HH:mm");
-            return string.IsNullOrWhiteSpace(RefreshMsg)
-                ? $"自动续期 {when}"
-                : $"自动续期 {when}（{RefreshMsg}）";
-        }
-    }
-
-    /// <summary>米哈游账号缺 stoken 时提示去扫码（会话型游戏没有这个概念）。</summary>
-    public string StokenHint => !HasStoken && (Game is "genshin" or "starrail")
-        ? "stoken 未补：点左侧「扫码补 stoken」，之后 Cookie 会自动续期"
-        : string.Empty;
 }
 
 internal sealed class CloudMyDto
@@ -229,17 +191,6 @@ internal sealed class CloudDownloadDto
 
     [JsonPropertyName("combo_token")]
     public string? ComboToken { get; set; }
-
-    /// <summary>本次下载前是否做过自动续期（成功为 true）。</summary>
-    [JsonPropertyName("refresh_ok")]
-    public bool? RefreshOk { get; set; }
-
-    [JsonPropertyName("refresh_msg")]
-    public string? RefreshMsg { get; set; }
-
-    /// <summary>Cookie 缺少 stoken，需要先扫码补（米哈游账号）。</summary>
-    [JsonPropertyName("need_stoken")]
-    public bool NeedStoken { get; set; }
 
     public string? Msg { get; set; }
 }
@@ -261,39 +212,6 @@ internal sealed class CloudActionResultDto
 
     [JsonPropertyName("total_duration")]
     public int? TotalDuration { get; set; }
-
-    /// <summary>上传后立即做的一次 stoken 换票结果；null 表示该游戏不支持自动续期。</summary>
-    [JsonPropertyName("refresh_ok")]
-    public bool? RefreshOk { get; set; }
-
-    [JsonPropertyName("refresh_msg")]
-    public string? RefreshMsg { get; set; }
-
-    /// <summary>Cookie 缺少 stoken，需要先扫码补（米哈游账号）。</summary>
-    [JsonPropertyName("need_stoken")]
-    public bool NeedStoken { get; set; }
-}
-
-/// <summary>POST /api/cloud/stoken/create：米游社扫码二维码（rows 是 0/1 矩阵）。</summary>
-internal sealed class StokenCreateDto
-{
-    public bool Ok { get; set; }
-    public string Session { get; set; } = string.Empty;
-    public string Url { get; set; } = string.Empty;
-    public int Size { get; set; }
-    public List<string> Rows { get; set; } = [];
-    public string? Msg { get; set; }
-}
-
-/// <summary>POST /api/cloud/stoken/poll：waiting / scanned / confirmed / expired / canceled / error。</summary>
-internal sealed class StokenPollDto
-{
-    public bool Ok { get; set; }
-    public string State { get; set; } = string.Empty;
-    public string? Msg { get; set; }
-    public string Mid { get; set; } = string.Empty;
-    public string Stuid { get; set; } = string.Empty;
-    public int Matched { get; set; }
 }
 
 /// <summary>GET /api/cloud/expiry-push：Cookie 过期微信提醒的绑定状态。</summary>
@@ -322,69 +240,6 @@ internal sealed class ExpiryPushQrDto
     public string? Nonce { get; set; }
 
     [JsonPropertyName("expiresIn")]
-    public int ExpiresIn { get; set; }
-
-    public string? Detail { get; set; }
-}
-
-/// <summary>GET /api/mihoyo/gacha/roles：扫码 stoken 绑定的游戏角色。</summary>
-internal sealed class GachaRolesDto
-{
-    public bool Ok { get; set; }
-    public List<GachaRoleDto> Roles { get; set; } = [];
-    public List<string> Errors { get; set; } = [];
-    public string? Detail { get; set; }
-}
-
-internal sealed class GachaRoleDto
-{
-    [JsonPropertyName("game_biz")]
-    public string GameBiz { get; set; } = string.Empty;
-
-    public string Game { get; set; } = string.Empty;
-
-    [JsonPropertyName("game_name")]
-    public string GameName { get; set; } = string.Empty;
-
-    [JsonPropertyName("game_uid")]
-    public string GameUid { get; set; } = string.Empty;
-
-    public string Region { get; set; } = string.Empty;
-
-    [JsonPropertyName("region_name")]
-    public string RegionName { get; set; } = string.Empty;
-
-    public string Nickname { get; set; } = string.Empty;
-
-    public int? Level { get; set; }
-
-    [JsonPropertyName("is_official")]
-    public bool IsOfficial { get; set; }
-
-    public string Mid { get; set; } = string.Empty;
-}
-
-/// <summary>POST /api/mihoyo/gacha/link：生成的抽卡链接。</summary>
-internal sealed class GachaLinkDto
-{
-    public bool Ok { get; set; }
-    public string Game { get; set; } = string.Empty;
-
-    [JsonPropertyName("game_name")]
-    public string GameName { get; set; } = string.Empty;
-
-    [JsonPropertyName("game_uid")]
-    public string GameUid { get; set; } = string.Empty;
-
-    public string Region { get; set; } = string.Empty;
-    public string Url { get; set; } = string.Empty;
-
-    [JsonPropertyName("api_url")]
-    public string ApiUrl { get; set; } = string.Empty;
-
-    public string Authkey { get; set; } = string.Empty;
-
-    [JsonPropertyName("expires_in")]
     public int ExpiresIn { get; set; }
 
     public string? Detail { get; set; }
@@ -569,13 +424,9 @@ internal sealed class CloudShareSaveDto
 [JsonSerializable(typeof(CloudPlayingDto))]
 [JsonSerializable(typeof(CloudShareUsersDto))]
 [JsonSerializable(typeof(CloudShareSaveDto))]
-[JsonSerializable(typeof(StokenCreateDto))]
-[JsonSerializable(typeof(StokenPollDto))]
+[JsonSerializable(typeof(CloudUserDto))]
 [JsonSerializable(typeof(ExpiryPushStatusDto))]
 [JsonSerializable(typeof(ExpiryPushQrDto))]
-[JsonSerializable(typeof(GachaRolesDto))]
-[JsonSerializable(typeof(GachaRoleDto))]
-[JsonSerializable(typeof(GachaLinkDto))]
 [JsonSerializable(typeof(SyncMessage))]
 [JsonSerializable(typeof(SyncPendingDto))]
 [JsonSerializable(typeof(SyncPushRequest))]

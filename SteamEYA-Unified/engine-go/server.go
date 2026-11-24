@@ -188,13 +188,6 @@ func (e *engine) handleCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, result)
 }
 
-func (e *engine) handleRefresh(w http.ResponseWriter, r *http.Request) {
-	p := decodePayload(r)
-	// Python: {"ok": True, **refresh_cookies(...)} — the function's own ok
-	// (possibly false) wins over the initial true.
-	writeJSON(w, refreshCookies(p.Cookies, p.Game))
-}
-
 func registerRoutes(mux *http.ServeMux, e *engine) {
 	mux.HandleFunc("/engine/health", e.handleHealth)
 	mux.HandleFunc("/engine/status", e.handleStatus)
@@ -203,5 +196,4 @@ func registerRoutes(mux *http.ServeMux, e *engine) {
 	mux.HandleFunc("/engine/capture", e.handleCapture)
 	mux.HandleFunc("/engine/login", e.handleLogin)
 	mux.HandleFunc("/engine/check", e.handleCheck)
-	mux.HandleFunc("/engine/refresh", e.handleRefresh)
 }

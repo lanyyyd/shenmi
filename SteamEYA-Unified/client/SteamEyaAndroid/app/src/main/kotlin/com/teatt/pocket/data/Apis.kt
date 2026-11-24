@@ -19,8 +19,6 @@ import com.teatt.pocket.core.GachaLinkDto
 import com.teatt.pocket.core.GachaRolesDto
 import com.teatt.pocket.core.LoginDto
 import com.teatt.pocket.core.MeDto
-import com.teatt.pocket.core.StokenCreateDto
-import com.teatt.pocket.core.StokenPollDto
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -70,7 +68,7 @@ object CloudApi {
     }
 
     /**
-     * 拉某个账号的 Cookie（uid 为空取该游戏最新一条）；服务端会先按需用 stoken 换票。
+     * 拉某个账号的 Cookie（uid 为空取该游戏最新一条），原样返回给 WebView 注入。
      * owner 非 0 表示上号的是别人分享给我的账号。
      */
     suspend fun download(token: String, game: String, uid: String = "", owner: Int = 0): CloudDownloadDto {
@@ -171,16 +169,6 @@ object CloudApi {
         Api.delete("/api/cloud/my", query, token)
     }
 
-    /** 米游社扫码补 stoken：生成二维码（服务端返回 0/1 矩阵）。 */
-    suspend fun stokenCreate(token: String): StokenCreateDto =
-        Api.decode(Api.postJson("/api/cloud/stoken/create", "{}", token))
-
-    /** 查询扫码状态；confirmed 时服务端已保存 stoken 并续期对得上的账号。 */
-    suspend fun stokenPoll(token: String, session: String): StokenPollDto {
-        val body = buildJsonObject { put("session", JsonPrimitive(session)) }.toString()
-        return Api.decode(Api.postJson("/api/cloud/stoken/poll", body, token))
-    }
-
     // ---------------- Cookie 过期微信提醒（PushPlus 扫码绑定） ----------------
 
     suspend fun expiryPushStatus(token: String): ExpiryPushStatusDto =
@@ -203,7 +191,7 @@ object CloudApi {
         Api.postJson("/api/cloud/expiry-push/test", "{}", token)
     }
 
-    /** 列出扫码 stoken 绑定的原神/星铁角色。 */
+    /** 列出 Cookie stoken 绑定的原神/星铁角色。 */
     suspend fun gachaRoles(token: String): GachaRolesDto =
         Api.decode(Api.get("/api/mihoyo/gacha/roles", token))
 

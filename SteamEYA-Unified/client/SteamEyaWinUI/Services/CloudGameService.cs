@@ -198,23 +198,6 @@ internal sealed class CloudGameService
         return await SendAsync(req, CloudApiJsonContext.Default.CloudActionResultDto, ct) ?? new CloudActionResultDto();
     }
 
-    // ---------------- 米游社扫码补 stoken ----------------
-    /// <summary>生成米游社扫码二维码（服务端返回 0/1 矩阵，客户端自己画）。</summary>
-    public async Task<StokenCreateDto> StokenCreateAsync(CancellationToken ct = default)
-    {
-        using var req = Auth(HttpMethod.Post, "/api/cloud/stoken/create");
-        return await SendAsync(req, CloudApiJsonContext.Default.StokenCreateDto, ct) ?? new StokenCreateDto();
-    }
-
-    /// <summary>查询扫码状态；confirmed 时服务端已保存 stoken 并续期对得上的云账号。</summary>
-    public async Task<StokenPollDto> StokenPollAsync(string session, CancellationToken ct = default)
-    {
-        var json = new JsonObject { ["session"] = session }.ToJsonString();
-        using var req = Auth(HttpMethod.Post, "/api/cloud/stoken/poll");
-        req.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        return await SendAsync(req, CloudApiJsonContext.Default.StokenPollDto, ct) ?? new StokenPollDto();
-    }
-
     // ---------------- Cookie 过期提醒（PushPlus 扫码绑定） ----------------
     /// <summary>查询当前账号的提醒绑定状态。</summary>
     public async Task<ExpiryPushStatusDto> ExpiryPushStatusAsync(CancellationToken ct = default)
@@ -249,29 +232,6 @@ internal sealed class CloudGameService
     {
         using var req = Auth(HttpMethod.Post, "/api/cloud/expiry-push/test");
         return await SendAsync(req, CloudApiJsonContext.Default.CloudActionResultDto, ct) ?? new CloudActionResultDto();
-    }
-
-    // ---------------- 抽卡链接（米游社 stoken -> Auth Key B） ----------------
-
-    /// <summary>列出 stoken 账号下绑定的原神/星铁角色。</summary>
-    public async Task<GachaRolesDto> GachaRolesAsync(CancellationToken ct = default)
-        => await SendAsync(Auth(HttpMethod.Get, "/api/mihoyo/gacha/roles"),
-            CloudApiJsonContext.Default.GachaRolesDto, ct) ?? new GachaRolesDto();
-
-    /// <summary>为指定角色生成抽卡记录链接（24 小时内有效）。</summary>
-    public async Task<GachaLinkDto> GachaLinkAsync(string game, string gameUid, string region,
-        string mid = "", CancellationToken ct = default)
-    {
-        var obj = new JsonObject
-        {
-            ["game"] = game,
-            ["game_uid"] = gameUid,
-            ["region"] = region,
-            ["mid"] = mid
-        };
-        using var req = Auth(HttpMethod.Post, "/api/mihoyo/gacha/link");
-        req.Content = new StringContent(obj.ToJsonString(), Encoding.UTF8, "application/json");
-        return await SendAsync(req, CloudApiJsonContext.Default.GachaLinkDto, ct) ?? new GachaLinkDto();
     }
 
     public async Task ReportLoginAsync(string game, string uid = "", CancellationToken ct = default)
@@ -437,13 +397,6 @@ internal sealed class CloudGameService
 
         return body;
     }
-
-    public async Task<(bool ok, string body, string? error)> EngineRefreshAsync(string game, JsonElement cookies, CancellationToken ct = default)
-        => await EnginePostAsync("/engine/refresh", new JsonObject
-        {
-            ["game"] = game,
-            ["cookies"] = JsonNode.Parse(cookies.GetRawText())
-        }, ct);
 
     private static async Task<(bool ok, string body, string? error)> EnginePostAsync(string path, JsonObject payload, CancellationToken ct)
     {

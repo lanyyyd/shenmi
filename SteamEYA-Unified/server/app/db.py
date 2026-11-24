@@ -155,9 +155,6 @@ CREATE TABLE IF NOT EXISTS cloud_cookies (
     free_duration INTEGER,
     paid_duration INTEGER,
     total_duration INTEGER,
-    refresh_at    INTEGER,
-    refresh_ok    INTEGER,
-    refresh_msg   TEXT,
     UNIQUE(user_id, game, game_uid)
 );
 
@@ -182,21 +179,6 @@ CREATE TABLE IF NOT EXISTS cloud_shares (
 );
 CREATE INDEX IF NOT EXISTS idx_cloud_shares_target ON cloud_shares(target_id, game);
 CREATE INDEX IF NOT EXISTS idx_cloud_shares_owner ON cloud_shares(owner_id, game, game_uid);
-
--- 米游社扫码补的 stoken：云游戏 Cookie 里没有 stoken 时，拿这里的长期凭据去换票。
--- 同一个用户按 mid 只留一条；stuid（账号 aid）用于和 Cookie 里的 stuid 对上。
-CREATE TABLE IF NOT EXISTS cloud_stokens (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER NOT NULL,
-    mid        TEXT NOT NULL,
-    stuid      TEXT DEFAULT '',
-    stoken     BLOB NOT NULL,              -- 加密存储
-    device_id  TEXT DEFAULT '',
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    UNIQUE(user_id, mid)
-);
-CREATE INDEX IF NOT EXISTS idx_cloud_stokens_stuid ON cloud_stokens(user_id, stuid);
 
 -- PushPlus 扫码绑定：用户微信扫码后，pushplus 回调把好友令牌绑到账号上。
 -- 令牌加密存储，只用于给本人推送云游戏 Cookie 失效提醒。
@@ -750,12 +732,8 @@ def init_db() -> None:
                 COMMIT;
             """)
 
-    # 兼容旧库：云游戏 Cookie 自动续期状态（refresh_at / refresh_ok / refresh_msg）。
     cloud_cols = {row["name"] for row in query_all("PRAGMA table_info(cloud_cookies)")}
     for col, ddl in (
-        ("refresh_at", "ALTER TABLE cloud_cookies ADD COLUMN refresh_at INTEGER"),
-        ("refresh_ok", "ALTER TABLE cloud_cookies ADD COLUMN refresh_ok INTEGER"),
-        ("refresh_msg", "ALTER TABLE cloud_cookies ADD COLUMN refresh_msg TEXT"),
         # 0=本次失效还没推送；1=已推送。恢复有效时清零，下次失效才会再提醒。
         ("expiry_notified", "ALTER TABLE cloud_cookies ADD COLUMN expiry_notified INTEGER DEFAULT 0"),
         # 剩余付费时长（分钟）：畅玩卡 + 游玩币/10，检测时写入，账号列表直接展示。
