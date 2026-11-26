@@ -42,6 +42,9 @@ public sealed partial class MainWindow : Window
     private bool _exiting;
     private bool _closeDialogOpen;
 
+    // 通知点击跳转防重入：灵动岛淡出期间仍可再点，重复导航会让页面初始化重入。
+    private int _notificationClickBusy;
+
     /// <summary>主窗口句柄，供文件/目录选择器等 WinRT 互操作（InitializeWithWindow）使用；在 ConfigureWindowSize 中赋值。</summary>
     public static nint Hwnd => s_hwnd;
 
@@ -638,15 +641,51 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        try
+
+        // 灵动岛淡出期间还能再点一次，重复事件会让导航重入；直接丢弃。
+        if (Interlocked.Exchange(ref _notificationClickBusy, 1) == 1)
         {
-            Activate();
-            ChatHub.RequestOpenRoom(room!);
-            RootNavigationView.SelectedItem = ChatNavItem;
+            return;
         }
-        catch (Exception ex)
+
+        // 不在通知回调里同步做「窗口激活 + 页面导航」：排到下一轮 UI 队列，
+        // 避免和通知通道、WebView2/页面初始化互相卡住。
+        var queued = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () =>
         {
-            AppLog.Warn($"处理通知点击失败：{ex.Message}");
+            try
+            {
+                AppWindow.Show();
+                Activate();
+                SetForegroundWindow(s_hwnd);
+
+                if (ContentFrame.CurrentSourcePageType != typeof(ChatPage))
+                {
+                    // 从通知跳进来时优先原生聊天室，绕开 WebView2 初始化卡死。
+                    ChatHub.PreferNativeOnNextOpen();
+                    ChatHub.PendingRoom = room;
+                    RootNavigationView.SelectedItem = ChatNavItem;
+                }
+                else
+                {
+                    RootNavigationView.SelectedItem = ChatNavItem;
+                    ChatHub.RequestOpenRoom(room!);
+                }
+
+                AppLog.Info($"通知点击跳转聊天室：room={room}");
+            }
+            catch (Exception ex)
+            {
+                AppLog.Warn($"处理通知点击失败：{ex.Message}");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _notificationClickBusy, 0);
+            }
+        });
+
+        if (!queued)
+        {
+            Interlocked.Exchange(ref _notificationClickBusy, 0);
         }
     }
 

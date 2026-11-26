@@ -345,10 +345,38 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     // ---------------- 网页版 / 原生版 ----------------
     private async Task InitializeModeAsync()
     {
+        // 通知/灵动岛跳转：本次直接进原生界面，不碰 WebView2
+        // （部分 Win10 上 EnsureCoreWebView2Async 会卡死 UI 线程）。
+        if (ChatHub.ConsumePreferNative())
+        {
+            SwitchMode(false);
+            return;
+        }
+
         if (SessionState.Offline || string.IsNullOrWhiteSpace(SessionState.Token))
         {
             SwitchMode(false);
             ModeButton.IsEnabled = false;
+            return;
+        }
+
+        // 设置页的「聊天室运行模式」优先于自动策略；之前这个开关只写不读。
+        var configured = AppState.SettingsService.Load().ChatMode;
+        if (string.Equals(configured, "Native", StringComparison.OrdinalIgnoreCase))
+        {
+            SwitchMode(false);
+            return;
+        }
+        if (string.Equals(configured, "Web", StringComparison.OrdinalIgnoreCase))
+        {
+            if (await TryStartWebAsync())
+            {
+                SwitchMode(true);
+                return;
+            }
+
+            SwitchMode(false);
+            MainWindow.Instance?.ShowStatus(Loc.T("Chat_WebFailed"), InfoBarSeverity.Warning);
             return;
         }
 

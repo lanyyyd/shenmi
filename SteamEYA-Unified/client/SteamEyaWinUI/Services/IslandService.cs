@@ -280,6 +280,7 @@ internal static class IslandService
                 _ = ReadString(reader);   // id，当前不需要
                 if (!string.IsNullOrWhiteSpace(action))
                 {
+                    AppLog.Debug($"灵动岛点击：{action}");
                     NotificationService.InvokeFromIsland(action);
                 }
             }

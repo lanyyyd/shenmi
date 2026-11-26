@@ -35,6 +35,17 @@ internal static class ChatHub
     /// <summary>请求打开某房间（点击通知时触发）；聊天室页已打开则立即切房，否则等下次加载。</summary>
     public static event Action<string>? RoomOpenRequested;
 
+    private static int _preferNativeNextOpen;
+
+    /// <summary>
+    /// 下一次首次打开聊天室时强制用原生界面。点击灵动岛/通知跳转时使用：
+    /// WebView2 在部分 Win10 机器上初始化会卡住 UI 线程，跳转必须保证能打开。
+    /// </summary>
+    public static void PreferNativeOnNextOpen() => Interlocked.Exchange(ref _preferNativeNextOpen, 1);
+
+    /// <summary>取出并清除「强制原生」标记。</summary>
+    public static bool ConsumePreferNative() => Interlocked.Exchange(ref _preferNativeNextOpen, 0) == 1;
+
     public static void RequestOpenRoom(string room)
     {
         if (string.IsNullOrWhiteSpace(room))
