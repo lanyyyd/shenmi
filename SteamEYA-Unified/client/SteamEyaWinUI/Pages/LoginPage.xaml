@@ -56,12 +56,14 @@
                                 x:Name="RemoteUsernameBox"
                                 Header="{x:Bind Strings.Get('Login_Label_UserName'), Mode=OneWay}"
                                 PlaceholderText="{x:Bind Strings.Get('Login_Remote_Username_Placeholder'), Mode=OneWay}"
-                                IsSpellCheckEnabled="False" />
+                                IsSpellCheckEnabled="False"
+                                KeyDown="RemoteUsernameBox_KeyDown" />
 
                             <PasswordBox
                                 x:Name="RemotePasswordBox"
                                 Header="{x:Bind Strings.Get('Creds_Field_Password'), Mode=OneWay}"
-                                PlaceholderText="{x:Bind Strings.Get('Login_Remote_Password_Placeholder'), Mode=OneWay}" />
+                                PlaceholderText="{x:Bind Strings.Get('Login_Remote_Password_Placeholder'), Mode=OneWay}"
+                                KeyDown="RemotePasswordBox_KeyDown" />
 
                             <!-- 邀请码：与网页版注册共用后台开关，未开启必填时可留空 -->
                             <TextBox
@@ -157,7 +159,8 @@
                             TextWrapping="Wrap"
                             IsSpellCheckEnabled="False"
                             ScrollViewer.VerticalScrollBarVisibility="Auto"
-                            TextChanged="ManualCredentialBox_TextChanged" />
+                            TextChanged="ManualCredentialBox_TextChanged"
+                            KeyDown="EyaTokenBox_KeyDown" />
                     </StackPanel>
                 </Border>
 
@@ -174,12 +177,14 @@
                             x:Name="CredAccountNameBox"
                             Header="{x:Bind Strings.Get('Creds_Field_AccountName'), Mode=OneWay}"
                             PlaceholderText="{x:Bind Strings.Get('Creds_Field_AccountName_Placeholder'), Mode=OneWay}"
-                            IsSpellCheckEnabled="False" />
+                            IsSpellCheckEnabled="False"
+                            KeyDown="CredAccountNameBox_KeyDown" />
 
                         <PasswordBox
                             x:Name="CredPasswordBox"
                             Header="{x:Bind Strings.Get('Creds_Field_Password'), Mode=OneWay}"
-                            PlaceholderText="{x:Bind Strings.Get('Creds_Field_Password_Placeholder'), Mode=OneWay}" />
+                            PlaceholderText="{x:Bind Strings.Get('Creds_Field_Password_Placeholder'), Mode=OneWay}"
+                            KeyDown="CredPasswordBox_KeyDown" />
 
                         <Button
                             x:Name="CredFetchButton"

@@ -27,6 +27,21 @@ internal sealed class ChatUserDto
 
     /// <summary>当前账号是否是管理员（决定撤回样式与表情删除按钮）。</summary>
     public bool IsAdmin { get; set; }
+
+    /// <summary>在玩状态文案（如「在玩原神」）；未在玩时为空串。</summary>
+    public string Activity { get; set; } = string.Empty;
+
+    /// <summary>该用户当前在线的设备列表（侧栏显示设备数 / IP）。</summary>
+    public ChatUserDeviceDto[] Devices { get; set; } = [];
+}
+
+/// <summary>在线设备（GET /api/users 的 devices 元素）。</summary>
+internal sealed class ChatUserDeviceDto
+{
+    public string DeviceId { get; set; } = string.Empty;
+    public string Ip { get; set; } = string.Empty;
+    public string Ua { get; set; } = string.Empty;
+    public long At { get; set; }
 }
 
 internal sealed class ChatUsersResponse

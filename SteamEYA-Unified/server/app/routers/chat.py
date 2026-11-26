@@ -26,7 +26,7 @@ from .. import security
 from ..config import (AVATAR_DIR, MAX_AVATAR, MAX_STICKER, MAX_UPLOAD, STICKER_DIR, UPLOAD_DIR)
 from ..db import execute, execute_update, query_all, query_one
 from ..deps import resolve_user, user_public
-from ..hub import hub, online_user_ids as hub_online_user_ids
+from ..hub import hub
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -394,7 +394,9 @@ def users(request: Request, authorization: Optional[str] = Header(default=None))
     u = _me(None, request, authorization)
     if not u:
         return _err("请先登录", 401)
-    online_ids = hub_online_user_ids()
+    # 在线快照同时给出「在玩什么」与设备数/IP：原生聊天室要和网页版一样能看到这些。
+    snap = hub.online_snapshot()
+    online_map = {x["id"]: x for x in snap["users"]}
     # lastSeen = 最后登录 / 最后在线 / 会话活跃 / 最后发言 取最大（毫秒），
     # 与后台「最后活跃」口径保持一致（会话活跃来自 sessions.last_seen，浏览器打开页面即会刷新）。
     rows = query_all(
@@ -407,7 +409,7 @@ def users(request: Request, authorization: Optional[str] = Header(default=None))
         "WHERE u.is_active=1 AND u.is_admin=0 ORDER BY u.id DESC")
     # 离线（局域网）模式只显示真正在线的人，隐藏历史注册账号和消息影子用户。
     if os.getenv("EYA_LAN_MODE") == "1":
-        rows = [r for r in rows if r["id"] in online_ids and not r["is_ai"]]
+        rows = [r for r in rows if r["id"] in online_map and not r["is_ai"]]
     out = []
     for r in rows:
         login_seen = r["last_login_at"] or 0
@@ -415,10 +417,13 @@ def users(request: Request, authorization: Optional[str] = Header(default=None))
             login_seen *= 1000    # 兼容旧数据：云游戏登录曾把「秒」写进毫秒字段
         last_seen = max(login_seen, r["online_seen"] or 0,
                         r["session_seen"] or 0, r["msg_seen"] or 0)
+        info = online_map.get(r["id"]) or {}
         out.append({"id": r["id"], "username": r["username"], "nickname": r["nickname"],
                     "avatar": r["avatar"] or "", "displayName": CL.display_name(r),
                     "level": LV.level_of(r["exp"]), "exp": int(r["exp"] or 0),
-                    "online": r["id"] in online_ids, "lastSeen": last_seen,
+                    "online": r["id"] in online_map, "lastSeen": last_seen,
+                    "activity": info.get("activity", "") or "",
+                    "devices": info.get("devices", []) or [],
                     "isAi": bool(r["is_ai"])})
     return {"ok": True, "users": out}
 

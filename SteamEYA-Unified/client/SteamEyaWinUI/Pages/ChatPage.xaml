@@ -813,7 +813,9 @@
 
         <!-- ================= 网页版界面（默认；加载失败回退原生） ================= -->
         <Grid x:Name="WebRoot" Grid.Row="1" Visibility="Collapsed">
-            <WebView2 x:Name="WebChat" />
+            <!-- WebView2 不在这里静态声明：只有真正切到网页版时才创建，
+                 避免原生模式下 WebView2 初始化拖住 UI 线程（部分 Win10 会卡死）。 -->
+            <Grid x:Name="WebHost" />
             <ProgressRing
                 x:Name="WebLoading"
                 Width="48"

@@ -264,10 +264,10 @@ public sealed partial class LoginPage : Page, INotifyPropertyChanged
 
     private async void LoginButton_Click(object sender, RoutedEventArgs e)
     {
-        // 首次会自动检测并持久化 Steam 路径；失效则重新检测；都不行才弹框让用户选。用户取消即中止上号。
-        if (!await SteamPathCoordinator.EnsureResolvedAsync())
+        // 不弹框：自动探测失败时只在状态栏提示去设置页手动指定。
+        if (!await EnsureSteamPathSilentlyAsync())
         {
-            ShowStatus(Loc.T("SteamPath_Status_Required"), InfoBarSeverity.Warning);
+            ShowStatus(Loc.T("SteamPath_Status_SetInSettings"), InfoBarSeverity.Warning);
             return;
         }
 
@@ -389,6 +389,73 @@ public sealed partial class LoginPage : Page, INotifyPropertyChanged
             e.Handled = true;
         }
     }
+
+    /// <summary>令牌框回车直接上号（AcceptsReturn 默认会换行，这里拦下来当登录）。</summary>
+    private void EyaTokenBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Enter)
+        {
+            return;
+        }
+        e.Handled = true;
+        if (LoginButton.IsEnabled)
+        {
+            LoginButton_Click(LoginButton, new RoutedEventArgs());
+        }
+    }
+
+    private void RemoteUsernameBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Enter)
+        {
+            RemotePasswordBox.Focus(FocusState.Programmatic);
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>远程账号：密码框回车直接登录。</summary>
+    private void RemotePasswordBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Enter)
+        {
+            return;
+        }
+        e.Handled = true;
+        if (RemoteLoginButton.IsEnabled && RemoteLoginButton.Visibility == Visibility.Visible)
+        {
+            RemoteLoginButton_Click(RemoteLoginButton, new RoutedEventArgs());
+        }
+    }
+
+    private void CredAccountNameBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Enter)
+        {
+            CredPasswordBox.Focus(FocusState.Programmatic);
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>账密模式：密码框回车直接获取令牌。</summary>
+    private void CredPasswordBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Enter)
+        {
+            return;
+        }
+        e.Handled = true;
+        if (CredFetchButton.IsEnabled)
+        {
+            CredFetchButton_Click(CredFetchButton, new RoutedEventArgs());
+        }
+    }
+
+    /// <summary>
+    /// 静默解析 Steam 路径（自动探测 + 持久化），不再弹「未找到 Steam」对话框；
+    /// 找不到时由调用方在状态栏提示去设置页指定。
+    /// </summary>
+    private static async Task<bool> EnsureSteamPathSilentlyAsync()
+        => await Task.Run(SteamPathCoordinator.TryResolveInstallPath) is not null;
 
     private Task<(string AccountName, string EyaToken)> GetCredentialsAsync(CancellationToken cancellationToken = default)
     {
@@ -665,9 +732,9 @@ public sealed partial class LoginPage : Page, INotifyPropertyChanged
     /// <summary>从服务器获取账号并直接一键上号。</summary>
     private async void RemoteGetAccountButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!await SteamPathCoordinator.EnsureResolvedAsync())
+        if (!await EnsureSteamPathSilentlyAsync())
         {
-            ShowStatus(Loc.T("SteamPath_Status_Required"), InfoBarSeverity.Warning);
+            ShowStatus(Loc.T("SteamPath_Status_SetInSettings"), InfoBarSeverity.Warning);
             return;
         }
 

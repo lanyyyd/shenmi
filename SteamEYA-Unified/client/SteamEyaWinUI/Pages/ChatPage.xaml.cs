@@ -86,6 +86,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     private string _room = "group";
     private bool _initialized;
     private bool _webMode;
+    private WebView2? _webChat;
 
     private long _oldestId;
     private bool _hasMore;
@@ -176,6 +177,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         }
         _initialized = true;
 
+        AppLog.Info("聊天室页开始初始化（首次加载）。");
         ChatHub.IsChatPageOpen = true;
         ChatHub.ResetPendingNotifications();
         EnsurePalette();
@@ -202,12 +204,14 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             await LoadContactsAsync();
             _rawUsers = await _chat.GetUsersAsync();
             RebuildUsers();
+            AppLog.Info($"聊天室页已加载用户列表：{_rawUsers.Length} 人。");
 
             var initialRoom = ChatHub.PendingRoom ?? "group";
             ChatHub.PendingRoom = null;
             await OpenRoomAsync(initialRoom);
             ChatHub.EnsureStarted();
             await RefreshUnreadAsync();
+            AppLog.Info($"聊天室页已完成房间加载：room={initialRoom}。");
         }
         catch (Exception ex)
         {
@@ -215,6 +219,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         }
 
         await InitializeModeAsync();
+        AppLog.Info($"聊天室页界面模式就绪：{(_webMode ? "网页版" : "原生版")}。");
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -345,14 +350,6 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
     // ---------------- 网页版 / 原生版 ----------------
     private async Task InitializeModeAsync()
     {
-        // 通知/灵动岛跳转：本次直接进原生界面，不碰 WebView2
-        // （部分 Win10 上 EnsureCoreWebView2Async 会卡死 UI 线程）。
-        if (ChatHub.ConsumePreferNative())
-        {
-            SwitchMode(false);
-            return;
-        }
-
         if (SessionState.Offline || string.IsNullOrWhiteSpace(SessionState.Token))
         {
             SwitchMode(false);
@@ -521,7 +518,8 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
                 AppLog.Warn($"设置 WebView2 数据目录失败：{ex.Message}");
             }
 
-            var ensure = WebChat.EnsureCoreWebView2Async().AsTask();
+            var web = GetOrCreateWebView();
+            var ensure = web.EnsureCoreWebView2Async().AsTask();
             if (await Task.WhenAny(ensure, Task.Delay(TimeSpan.FromSeconds(10))) != ensure)
             {
                 AppLog.Warn("网页版聊天初始化超时，改用原生界面。");
@@ -529,7 +527,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             }
             await ensure;
 
-            if (WebChat.CoreWebView2 is { } core)
+            if (web.CoreWebView2 is { } core)
             {
                 core.Settings.IsStatusBarEnabled = false;
             }
@@ -537,16 +535,16 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             var tcs = new TaskCompletionSource<bool>();
             void OnNav(WebView2 sender, CoreWebView2NavigationCompletedEventArgs args) => tcs.TrySetResult(args.IsSuccess);
 
-            WebChat.NavigationCompleted += OnNav;
+            web.NavigationCompleted += OnNav;
             try
             {
-                WebChat.Source = new Uri(AutologinUrl());
+                web.Source = new Uri(AutologinUrl());
                 var done = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(15)));
                 return done == tcs.Task && tcs.Task.Result;
             }
             finally
             {
-                WebChat.NavigationCompleted -= OnNav;
+                web.NavigationCompleted -= OnNav;
             }
         }
         catch (Exception ex)
@@ -558,6 +556,17 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         {
             WebLoading.IsActive = false;
         }
+    }
+
+    /// <summary>首次切网页版时才创建 WebView2；原生模式完全不碰它。</summary>
+    private WebView2 GetOrCreateWebView()
+    {
+        if (_webChat is null)
+        {
+            _webChat = new WebView2();
+            WebHost.Children.Add(_webChat);
+        }
+        return _webChat;
     }
 
     private static string AutologinUrl()
@@ -767,12 +776,24 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
         }
         else if (user is not null && user.Online)
         {
-            RoomStatusText.Text = Loc.T("Chat_Online_Status");
+            // 与网页版一致：在玩时显示「在玩 xx」，否则「在线 · IP」。
+            RoomStatusText.Text = PrivateOnlineStatus(user);
         }
         else
         {
             RoomStatusText.Text = Loc.T("Chat_Offline_Status");
         }
+    }
+
+    /// <summary>私聊标题下的在线状态，与网页版 updateHead 一致。</summary>
+    private static string PrivateOnlineStatus(ChatUserDto u)
+    {
+        if (!string.IsNullOrWhiteSpace(u.Activity))
+        {
+            return u.Activity;
+        }
+        var ip = u.Devices.Length > 0 ? u.Devices[0].Ip : null;
+        return string.IsNullOrWhiteSpace(ip) ? Loc.T("Chat_Online") : Loc.Tf("Chat_Online_Ip_Format", ip);
     }
 
     private void UpdateProfileButton()
@@ -942,7 +963,7 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             SubText = isAi
                 ? Loc.T("Chat_Ai_Sub")
                 : u.Online
-                    ? Loc.T("Chat_Online")
+                    ? OnlineSubText(u)
                     : ChatPageFormatting.Ago(u.LastSeen),
             TailText = isAi ? string.Empty : u.Online ? string.Empty : Loc.T("Chat_Offline_Tag"),
             UnreadText = unread > 99 ? "99+" : unread.ToString(),
@@ -962,6 +983,22 @@ public sealed partial class ChatPage : Page, INotifyPropertyChanged
             PeerId = u.Id,
             IsHeader = false
         };
+    }
+
+    /// <summary>侧栏在线用户的子行文案，与网页版一致：在玩 &gt; 多设备 &gt; IP &gt; 在线。</summary>
+    private static string OnlineSubText(ChatUserDto u)
+    {
+        if (!string.IsNullOrWhiteSpace(u.Activity))
+        {
+            return u.Activity;
+        }
+        var devices = u.Devices;
+        if (devices.Length > 1)
+        {
+            return Loc.Tf("Chat_Devices_Format", devices.Length);
+        }
+        var ip = devices.Length > 0 ? devices[0].Ip : null;
+        return string.IsNullOrWhiteSpace(ip) ? Loc.T("Chat_Online") : ip;
     }
 
     private Brush RowActiveBrush() => new SolidColorBrush(

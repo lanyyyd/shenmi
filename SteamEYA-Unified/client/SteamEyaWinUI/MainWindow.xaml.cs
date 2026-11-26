@@ -273,13 +273,14 @@ public sealed partial class MainWindow : Window
         await NetworkModeService.SyncPendingAsync();
     }
 
-    // 启动时解析 Steam 路径：成功则静默持久化；自动检测失败时弹框让用户手动选择含 steam.exe 的目录。
+    // 启动时静默解析 Steam 路径：只做自动探测并持久化，不再弹「未找到 Steam」对话框
+    // （需要手动指定时，用户可在设置页 → Steam 安装路径里更改）。
     private async void OnRootNavigationViewLoaded(object sender, RoutedEventArgs e)
     {
         RootNavigationView.Loaded -= OnRootNavigationViewLoaded;
         try
         {
-            await SteamPathCoordinator.EnsureResolvedAsync();
+            await Task.Run(SteamPathCoordinator.TryResolveInstallPath);
         }
         catch (Exception ex)
         {
@@ -650,28 +651,44 @@ public sealed partial class MainWindow : Window
 
         // 不在通知回调里同步做「窗口激活 + 页面导航」：排到下一轮 UI 队列，
         // 避免和通知通道、WebView2/页面初始化互相卡住。
-        var queued = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () =>
+        var queued = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, async () =>
         {
             try
             {
+                AppLog.Info($"收到灵动岛点击：room={room}，当前页={ContentFrame.CurrentSourcePageType?.Name ?? "无"}");
+
+                // 最小化时 AppWindow.Show() 不会还原窗口（只能处理「已隐藏到托盘」），
+                // 必须先 Restore()，否则窗口一直最小化、看起来像卡死。
+                if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
+                {
+                    presenter.Restore();
+                    AppLog.Info("通知点击：窗口已从最小化还原。");
+                }
+
                 AppWindow.Show();
+                TrayIconService.Hide(s_hwnd);
                 Activate();
                 SetForegroundWindow(s_hwnd);
+                AppLog.Info("通知点击：窗口已显示并激活。");
 
+                // 让窗口激活先落地，再创建聊天页（页面 XAML 较重），避免同一轮消息循环里
+                // 激活 + 建页互相卡住。
+                await Task.Delay(30);
+
+                // 是否用原生/网页聊天室，完全交给 ChatPage 按「设置 → 聊天室运行模式」和
+                // 周一/周三 07:00–09:40 的定时规则判断，这里不再强制。
                 if (ContentFrame.CurrentSourcePageType != typeof(ChatPage))
                 {
-                    // 从通知跳进来时优先原生聊天室，绕开 WebView2 初始化卡死。
-                    ChatHub.PreferNativeOnNextOpen();
                     ChatHub.PendingRoom = room;
                     RootNavigationView.SelectedItem = ChatNavItem;
+                    AppLog.Info("通知点击：开始导航到聊天室页。");
                 }
                 else
                 {
                     RootNavigationView.SelectedItem = ChatNavItem;
                     ChatHub.RequestOpenRoom(room!);
+                    AppLog.Info("通知点击：聊天室页已打开，直接切房。");
                 }
-
-                AppLog.Info($"通知点击跳转聊天室：room={room}");
             }
             catch (Exception ex)
             {
