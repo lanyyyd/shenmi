@@ -38,6 +38,7 @@ public sealed partial class CloudGamePage : Page
             GameCombo.Items.Add(new ComboBoxItem { Content = name, Tag = key });
         }
         GameCombo.SelectedIndex = 0;
+        UpdateLoginButtonText();
 
         Loaded += async (_, _) =>
         {
@@ -262,7 +263,23 @@ public sealed partial class CloudGamePage : Page
 
     private async void OnRefreshStatus(object sender, RoutedEventArgs e) => await RefreshStatusAsync();
 
-    private void OnGameChanged(object sender, SelectionChangedEventArgs e) => RebuildAccountCombo();
+    private void OnGameChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateLoginButtonText();
+        RebuildAccountCombo();
+    }
+
+    /// <summary>只改按钮显示：指定游戏用彩蛋文案，其余游戏保持「一键上号」。</summary>
+    private void UpdateLoginButtonText()
+    {
+        LoginButton.Content = CurrentGame switch
+        {
+            "genshin" => "原神 启动",
+            "starrail" => "崩崩崩！？",
+            "bilibili" => "守护最好的噼里啪啦",
+            _ => "一键上号"
+        };
+    }
 
     private void OnAccountChanged(object sender, SelectionChangedEventArgs e) { }
 

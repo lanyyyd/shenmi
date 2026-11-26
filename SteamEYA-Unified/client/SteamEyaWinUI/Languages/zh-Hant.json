@@ -538,6 +538,8 @@
     "Settings_Notify_Mode_InApp": "僅應用程式內浮窗",
     "Settings_Notify_Mode_System": "僅系統通知（推薦）",
     "Settings_Notify_Mode_Off": "關閉",
+    "Settings_Island_Duration": "靈動島停留時長",
+    "Settings_Island_Seconds": "秒",
     "Settings_Notify_TestDone": "已送出測試通知，下方為通道狀態",
     "Settings_Debug_Section": "偵錯模式",
     "Settings_Debug_Desc": "開啟後額外記錄通知、下載、聊天等過程日誌，排查問題時使用。",

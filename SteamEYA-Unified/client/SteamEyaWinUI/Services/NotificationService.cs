@@ -510,8 +510,20 @@ internal static partial class NotificationService
             Title = body,
             Glyph = glyph ?? string.Empty,
             CoalesceKey = string.Empty,
-            DurationMs = 6000
+            DurationMs = 3000
         };
+
+        // 停留时长统一由设置页控制（默认 3 秒），聊天/下载/测试通知按同一节奏收起。
+        try
+        {
+            var seconds = Math.Clamp(AppState.SettingsService.Load().IslandDurationSeconds, 1, 60);
+            notice.DurationMs = seconds * 1000;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Debug($"读取灵动岛停留时长失败，使用默认 3 秒：{ex.Message}");
+        }
+
         notice.Action = invocation ?? string.Empty;
         if (!IslandService.TryShow(notice))
         {
@@ -576,7 +588,7 @@ internal static partial class NotificationService
             AvatarUrl = avatarUrl ?? string.Empty,
             Glyph = "\uE8BD",
             CoalesceKey = "chat:" + room,
-            DurationMs = 9000
+            DurationMs = 3000
         };
         Show(title, body, "room", room, "\uE8BD", island);
     }
@@ -591,7 +603,7 @@ internal static partial class NotificationService
             Body = directory,
             Glyph = "\uE896",
             CoalesceKey = "download:" + fileName,
-            DurationMs = 8000
+            DurationMs = 3000
         };
         Show(Loc.T("Dl_Notify_Completed_Title"),
              Loc.Tf("Dl_Notify_Completed_Body_Format", fileName),
@@ -612,7 +624,7 @@ internal static partial class NotificationService
             Body = text,
             Glyph = "\uEA39",
             CoalesceKey = "download:" + fileName,
-            DurationMs = 9000
+            DurationMs = 3000
         };
         Show(Loc.T("Dl_Notify_Failed_Title"), body, null, null, "\uEA39", island);
     }

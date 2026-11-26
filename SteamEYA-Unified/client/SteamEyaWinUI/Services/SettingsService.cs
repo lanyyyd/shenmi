@@ -287,6 +287,9 @@ internal sealed class AppSettings
     /// </summary>
     public string NotificationMode { get; set; } = "system";
 
+    /// <summary>灵动岛通知自动收起时长（秒），默认 3 秒；设置页可调。</summary>
+    public int IslandDurationSeconds { get; set; } = 3;
+
     /// <summary>聊天室新消息是否弹系统通知（个人中心可关闭；与全局 <see cref="NotificationMode"/> 叠加生效）。</summary>
     public bool ChatNotifyEnabled { get; set; } = true;
 

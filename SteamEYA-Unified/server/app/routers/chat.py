@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import os
 import pathlib
 import quopri
@@ -23,14 +24,18 @@ from .. import levelcore as LV
 from .. import media
 from .. import security
 from ..config import (AVATAR_DIR, MAX_AVATAR, MAX_STICKER, MAX_UPLOAD, STICKER_DIR, UPLOAD_DIR)
-from ..db import execute, query_all, query_one
+from ..db import execute, execute_update, query_all, query_one
 from ..deps import resolve_user, user_public
 from ..hub import hub, online_user_ids as hub_online_user_ids
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
+log = logging.getLogger("gateway")
+
 _USERNAME_RE = re.compile(r"^[\u4e00-\u9fa5\w-]{2,20}$")
 _IMG_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif"}
+# 头像只收桌面端 WIC 一定能解码的格式：svg/avif 在部分 Windows 上显示不出来。
+_AVATAR_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 _VID_EXT = {".mp4", ".webm", ".ogv", ".ogg", ".m4v", ".mov"}
 _STICKER_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 
@@ -297,11 +302,28 @@ async def profile_avatar(request: Request, file: UploadFile = File(...),
     if not u:
         return _err("请先登录", 401)
     ext = pathlib.Path(file.filename or "").suffix.lower()
-    if not (file.content_type or "").startswith("image/") or ext not in _IMG_EXT:
+    if not (file.content_type or "").startswith("image/") or ext not in _AVATAR_EXT:
         return _err("头像仅支持 png/jpg/gif/webp/bmp，且不超过 2MB")
     data = await file.read()
     if len(data) > MAX_AVATAR:
         return _err("头像需 2MB 以内")
+
+    # 部分 Windows 10 的 WIC 没有 WebP 解码器（桌面端/灵动岛都靠它），
+    # 上传时就转成 PNG 存盘，保证任何客户端都能显示。
+    if ext == ".webp":
+        try:
+            from io import BytesIO
+            from PIL import Image
+            with Image.open(BytesIO(data)) as img:
+                img.load()
+                frame = img.convert("RGBA") if img.mode not in ("RGB", "RGBA") else img.copy()
+                out = BytesIO()
+                frame.save(out, format="PNG")
+            data = out.getvalue()
+            ext = ".png"
+        except Exception:
+            return _err("头像图片无法解析，请换一张 png/jpg 再试")
+
     name = f"{_now()}-{security.gen_token(6)}{ext}"
     (AVATAR_DIR / name).write_bytes(data)
     url = f"/uploads/avatars/{name}"
@@ -313,6 +335,52 @@ async def profile_avatar(request: Request, file: UploadFile = File(...),
         except Exception:
             pass
     return {"ok": True, "avatar": url}
+
+
+def normalize_stored_avatars() -> None:
+    """把历史 WebP/AVIF 头像转成 PNG。
+
+    旧版本允许直接上传 WebP/AVIF，而桌面端（含灵动岛）用 WIC 解码，
+    部分 Windows 10 机器没有对应解码器，头像就显示不出来。启动时转一次
+    并回写 users.avatar，失败不影响服务。
+    """
+    try:
+        from io import BytesIO
+        from PIL import Image
+    except Exception:
+        return
+
+    try:
+        rows = query_all("SELECT id, avatar FROM users WHERE avatar LIKE '/uploads/avatars/%'")
+    except Exception:
+        return
+
+    converted = 0
+    for row in rows:
+        rel = (row["avatar"] or "")[len("/uploads/"):]
+        src = UPLOAD_DIR / rel
+        if src.suffix.lower() not in {".webp", ".avif"} or not src.is_file():
+            continue
+        try:
+            with Image.open(src) as img:
+                img.load()
+                frame = img.convert("RGBA") if img.mode not in ("RGB", "RGBA") else img.copy()
+                out = BytesIO()
+                frame.save(out, format="PNG")
+            dst = src.with_suffix(".png")
+            dst.write_bytes(out.getvalue())
+            execute_update("UPDATE users SET avatar = ? WHERE id = ?",
+                           (f"/uploads/avatars/{dst.name}", row["id"]))
+            try:
+                src.unlink()
+            except Exception:
+                pass
+            converted += 1
+        except Exception as e:
+            log.warning("头像格式转换失败 %s：%s", src.name, e)
+
+    if converted:
+        log.info("已把 %d 个 WebP/AVIF 头像转换为 PNG", converted)
 
 
 # ---------------- 在线 / 用户 / 历史 ----------------

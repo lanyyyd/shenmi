@@ -141,6 +141,10 @@ def _startup():
     from . import cloud_schedule
     cloud_schedule.start_background()
 
+    # 历史头像兼容：后台把 WebP/AVIF 转成 PNG（部分 Windows 10 的 WIC 解码不了）。
+    threading.Thread(target=chat.normalize_stored_avatars,
+                     name="avatar-normalizer", daemon=True).start()
+
 
 @app.get("/health")
 @app.get("/api/health")

@@ -538,6 +538,8 @@
     "Settings_Notify_Mode_InApp": "In-app popup only",
     "Settings_Notify_Mode_System": "System notification only (recommended)",
     "Settings_Notify_Mode_Off": "Off",
+    "Settings_Island_Duration": "Notification island duration",
+    "Settings_Island_Seconds": "sec",
     "Settings_Notify_TestDone": "Test notification sent; channel status is shown below",
     "Settings_Debug_Section": "Debug mode",
     "Settings_Debug_Desc": "Also log notification, download and chat details. Useful when reporting an issue.",

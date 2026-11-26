@@ -212,7 +212,7 @@ internal sealed class ChatService : IAsyncDisposable
         using var form = new MultipartFormDataContent();
         var bytes = await File.ReadAllBytesAsync(filePath, ct);
         var content = new ByteArrayContent(bytes);
-        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        content.Headers.ContentType = new MediaTypeHeaderValue(AvatarContentType(filePath));
         form.Add(content, "file", Path.GetFileName(filePath));
         req.Content = form;
         using var resp = await _http.SendAsync(req, ct);
@@ -220,6 +220,17 @@ internal sealed class ChatService : IAsyncDisposable
         return await JsonSerializer.DeserializeAsync(stream, ChatJsonContext.Default.ChatProfileResponse, ct)
                ?? new ChatProfileResponse();
     }
+
+    /// <summary>按扩展名补正确的 image/* 类型；服务端会校验 content-type，octet-stream 会被直接拒绝。</summary>
+    private static string AvatarContentType(string filePath) => Path.GetExtension(filePath).ToLowerInvariant() switch
+    {
+        ".png" => "image/png",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".gif" => "image/gif",
+        ".webp" => "image/webp",
+        ".bmp" => "image/bmp",
+        _ => "application/octet-stream"
+    };
 
     /// <summary>联系人备注与置顶列表（GET /api/contacts）。</summary>
     public async Task<ChatContactsResponse> GetContactsAsync(CancellationToken ct = default)

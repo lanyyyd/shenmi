@@ -535,6 +535,36 @@
                         </Button>
                     </Grid>
 
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            Text="{x:Bind Strings.Get('Settings_Island_Duration'), Mode=OneWay}"
+                            Style="{StaticResource FieldLabelTextStyle}" />
+                        <StackPanel
+                            Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            VerticalAlignment="Center">
+                            <NumberBox
+                                x:Name="IslandDurationBox"
+                                Width="120"
+                                Minimum="1"
+                                Maximum="30"
+                                SmallChange="1"
+                                SpinButtonPlacementMode="Compact"
+                                ValueChanged="IslandDurationBox_ValueChanged" />
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Text="{x:Bind Strings.Get('Settings_Island_Seconds'), Mode=OneWay}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                    </Grid>
+
                     <TextBlock
                         x:Name="NotifyDiagText"
                         IsTextSelectionEnabled="True"

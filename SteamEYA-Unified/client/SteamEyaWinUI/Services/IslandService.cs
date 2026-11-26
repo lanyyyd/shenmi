@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Net.Http;
@@ -14,9 +15,10 @@ namespace SteamEyaWinUI.Services;
 internal static class IslandService
 {
     private static readonly object Gate = new();
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(6) };
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
     private static readonly SemaphoreSlim WriteLock = new(1, 1);
     private static readonly Channel<byte[]> Outbound = Channel.CreateUnbounded<byte[]>();
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> AvatarGates = new(StringComparer.OrdinalIgnoreCase);
 
     private static NamedPipeServerStream? _pipe;
     private static Process? _process;
@@ -380,6 +382,15 @@ internal static class IslandService
             }
         }
 
+        // WIC 没有 SVG 解码器，下载了也显示不出来，直接走原生默认图标。
+        if (url.Split('?', '#')[0].EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
+        {
+            AppLog.Debug($"灵动岛跳过 SVG 头像：{url}");
+            return string.Empty;
+        }
+
+        var path = string.Empty;
+        var temp = string.Empty;
         try
         {
             _avatarDir ??= Path.Combine(
@@ -393,34 +404,85 @@ internal static class IslandService
             {
                 ext = ".png";
             }
-            var path = Path.Combine(_avatarDir, hash[..32] + ext.ToLowerInvariant());
-            if (File.Exists(path) && new FileInfo(path).Length > 0)
+            path = Path.Combine(_avatarDir, hash[..32] + ext.ToLowerInvariant());
+
+            // 同一条消息的连续通知会并发下载同一个头像：串行化，避免共用 .tmp
+            // 互相覆盖/截断后把损坏的图片永久缓存下来。
+            var gate = AvatarGates.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
+            await gate.WaitAsync().ConfigureAwait(false);
+            try
             {
+                if (File.Exists(path) && new FileInfo(path).Length > 0)
+                {
+                    return path;
+                }
+
+                using var response = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    AppLog.Debug($"灵动岛头像下载失败：HTTP {(int)response.StatusCode} {url}");
+                    return string.Empty;
+                }
+                if (response.Content.Headers.ContentLength is > 4 * 1024 * 1024)
+                {
+                    return string.Empty;
+                }
+                var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                if (bytes.Length is 0 or > 4 * 1024 * 1024)
+                {
+                    return string.Empty;
+                }
+                if (!LooksLikeImage(bytes))
+                {
+                    AppLog.Debug($"灵动岛头像不是可识别的图片，已忽略：{url}");
+                    return string.Empty;
+                }
+
+                temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                await File.WriteAllBytesAsync(temp, bytes).ConfigureAwait(false);
+                File.Move(temp, path, overwrite: true);
                 return path;
             }
-
-            using var response = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            finally
             {
-                return string.Empty;
+                gate.Release();
             }
-            if (response.Content.Headers.ContentLength is > 4 * 1024 * 1024)
-            {
-                return string.Empty;
-            }
-            var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-            if (bytes.Length is 0 or > 4 * 1024 * 1024)
-            {
-                return string.Empty;
-            }
-            var temp = path + ".tmp";
-            await File.WriteAllBytesAsync(temp, bytes).ConfigureAwait(false);
-            File.Move(temp, path, overwrite: true);
-            return path;
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.Debug($"灵动岛头像处理失败：{url} / {ex.Message}");
             return string.Empty;
         }
+        finally
+        {
+            if (temp.Length > 0)
+            {
+                try
+                {
+                    if (File.Exists(temp))
+                    {
+                        File.Delete(temp);
+                    }
+                }
+                catch
+                {
+                    // 临时文件清理失败不影响通知显示
+                }
+            }
+        }
+    }
+
+    /// <summary>只缓存真正的图片，防止错误页/代理响应被当成头像缓存下来。</summary>
+    private static bool LooksLikeImage(byte[] data)
+    {
+        if (data.Length < 12)
+        {
+            return false;
+        }
+        if (data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47) return true; // PNG
+        if (data[0] == 0xFF && data[1] == 0xD8) return true;                                       // JPEG
+        if (data[0] == 0x47 && data[1] == 0x49 && data[2] == 0x46) return true;                     // GIF
+        if (data[0] == 0x42 && data[1] == 0x4D) return true;                                       // BMP
+        return data[8] == 0x57 && data[9] == 0x45 && data[10] == 0x42 && data[11] == 0x50;          // WEBP
     }
 }

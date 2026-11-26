@@ -266,6 +266,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
             DownloadThreadBox.Value = Math.Clamp(settings.DownloadThreadCount, 1, 256);
             RefreshMirrorList();
             BuildNotifyModeItems(settings.NotificationMode);
+            IslandDurationBox.Value = Math.Clamp(settings.IslandDurationSeconds, 1, 30);
             DebugModeSwitch.IsOn = settings.DebugMode;
             LogPathText.Text = AppLog.LogFilePath;
             RefreshNotifyDiagnostics();
@@ -1154,6 +1155,25 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         NotificationService.ReloadChannel();
         AppLog.Debug($"通知方式改为 {mode}");
         RefreshNotifyDiagnostics();
+    }
+
+    private void IslandDurationBox_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_syncing || double.IsNaN(args.NewValue))
+        {
+            return;
+        }
+
+        var seconds = (int)Math.Clamp(Math.Round(args.NewValue), 1, 30);
+        var settings = AppState.SettingsService.Load();
+        if (settings.IslandDurationSeconds == seconds)
+        {
+            return;
+        }
+
+        settings.IslandDurationSeconds = seconds;
+        AppState.SettingsService.Save(settings);
+        AppLog.Debug($"灵动岛停留时长改为 {seconds} 秒");
     }
 
     // 自检：立刻弹一条测试通知，并把两条通道的实际状态写在下方，便于用户直接回传。

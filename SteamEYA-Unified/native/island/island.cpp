@@ -425,7 +425,7 @@ struct State {
     void ResetHideTimer() {
         KillTimer(g_hwnd, kHideTimer);
         if (current) {
-            UINT duration = static_cast<UINT>(std::clamp(current->durationMs, 1500, 60000));
+            UINT duration = static_cast<UINT>(std::clamp(current->durationMs, 1000, 60000));
             SetTimer(g_hwnd, kHideTimer, duration, nullptr);
         }
     }

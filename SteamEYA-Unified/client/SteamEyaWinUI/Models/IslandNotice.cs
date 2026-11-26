@@ -28,5 +28,5 @@ internal sealed class IslandNotice
     /// <summary>点击后回传给客户端的动作，格式与系统通知的 argument 一致。</summary>
     public string Action { get; set; } = string.Empty;
 
-    public int DurationMs { get; set; } = 9000;
+    public int DurationMs { get; set; } = 3000;
 }
