@@ -313,7 +313,8 @@ struct Renderer {
             params.maskTransform = D2D1::IdentityMatrix();
             params.opacity = 1.0f;
             params.layerOptions = D2D1_LAYER_OPTIONS_NONE;
-            if (layer && mask && SUCCEEDED(target->PushLayer(params, layer.Get()))) {
+            if (layer && mask) {
+                target->PushLayer(params, layer.Get());
                 target->DrawBitmap(avatarBitmap.Get(), D2D1::RectF(x, y, x + size, y + size), 1.0f,
                                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
                 target->PopLayer();
