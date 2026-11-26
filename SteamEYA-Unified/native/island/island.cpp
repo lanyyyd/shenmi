@@ -309,7 +309,7 @@ struct Renderer {
             params.geometricMask = mask.Get();
             params.maskAntialiasMode = D2D1_ANTIALIAS_MODE_PER_PRIMITIVE;
             target->PushLayer(params, layer.Get());
-            target->DrawBitmap(bitmap.Get(), D2D1::RectF(x, y, x + size, y + size), 1.0f,
+            target->DrawBitmap(avatarBitmap.Get(), D2D1::RectF(x, y, x + size, y + size), 1.0f,
                                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
             target->PopLayer();
             return;
