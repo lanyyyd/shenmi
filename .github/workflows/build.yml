@@ -154,7 +154,7 @@ jobs:
       - name: 构建灵动岛窗口（C++）
         shell: pwsh
         run: |
-          cmake -S SteamEYA-Unified/native/island -B build-island -G "Visual Studio 17 2022" -A x64
+          cmake -S SteamEYA-Unified/native/island -B build-island
           if ($LASTEXITCODE -ne 0) { throw "灵动岛 CMake 配置失败" }
           cmake --build build-island --config Release --target steameya-island
           if ($LASTEXITCODE -ne 0) { throw "灵动岛编译失败" }
