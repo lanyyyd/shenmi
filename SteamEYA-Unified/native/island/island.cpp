@@ -18,10 +18,12 @@
 #include <cmath>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #pragma comment(lib, "d2d1.lib")
@@ -143,6 +145,9 @@ struct Renderer {
     ComPtr<ID2D1SolidColorBrush> text;
     ComPtr<ID2D1SolidColorBrush> muted;
     ComPtr<ID2D1SolidColorBrush> accent;
+    ComPtr<ID2D1Bitmap> avatarBitmap;
+    std::wstring avatarPath;
+    std::map<std::pair<std::wstring, int>, ComPtr<IDWriteTextFormat>> formats;
     HBITMAP dib = nullptr;
     HDC mem = nullptr;
     HGDIOBJ oldBitmap = nullptr;
@@ -208,6 +213,9 @@ struct Renderer {
     void ReleaseSurface() {
         target.Reset();
         fill.Reset(); border.Reset(); text.Reset(); muted.Reset(); accent.Reset();
+        avatarBitmap.Reset();
+        avatarPath.clear();
+        formats.clear();
         if (mem && oldBitmap) SelectObject(mem, oldBitmap);
         if (dib) DeleteObject(dib);
         if (mem) DeleteDC(mem);
@@ -219,11 +227,17 @@ struct Renderer {
 
     ComPtr<IDWriteTextFormat> Format(float size, DWRITE_FONT_WEIGHT weight,
                                      const wchar_t* family = L"Segoe UI") {
+        int keySize = static_cast<int>(std::lround(size * 100));
+        auto key = std::make_pair(std::wstring(family), keySize * 10 + static_cast<int>(weight));
+        auto found = formats.find(key);
+        if (found != formats.end()) return found->second;
+
         ComPtr<IDWriteTextFormat> format;
         dwrite->CreateTextFormat(family, nullptr, weight, DWRITE_FONT_STYLE_NORMAL,
                                  DWRITE_FONT_STRETCH_NORMAL, size, L"zh-CN", &format);
         if (format) {
             format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+            formats.emplace(key, format);
         }
         return format;
     }
@@ -263,26 +277,29 @@ struct Renderer {
     }
 
     void Avatar(const std::wstring& path, float x, float y, float size, const std::wstring& glyph) {
-        ComPtr<ID2D1Bitmap> bitmap;
-        if (!path.empty()) {
-            ComPtr<IWICBitmapDecoder> decoder;
-            if (SUCCEEDED(wic->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ,
-                                                         WICDecodeMetadataCacheOnDemand, &decoder))) {
-                ComPtr<IWICBitmapFrameDecode> frame;
-                if (SUCCEEDED(decoder->GetFrame(0, &frame))) {
-                    ComPtr<IWICFormatConverter> converter;
-                    if (SUCCEEDED(wic->CreateFormatConverter(&converter)) &&
-                        SUCCEEDED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA,
-                                                       WICBitmapDitherTypeNone, nullptr, 0,
-                                                       WICBitmapPaletteTypeCustom))) {
-                        target->CreateBitmapFromWicBitmap(converter.Get(), nullptr, &bitmap);
+        if (path != avatarPath) {
+            avatarPath = path;
+            avatarBitmap.Reset();
+            if (!path.empty()) {
+                ComPtr<IWICBitmapDecoder> decoder;
+                if (SUCCEEDED(wic->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ,
+                                                             WICDecodeMetadataCacheOnDemand, &decoder))) {
+                    ComPtr<IWICBitmapFrameDecode> frame;
+                    if (SUCCEEDED(decoder->GetFrame(0, &frame))) {
+                        ComPtr<IWICFormatConverter> converter;
+                        if (SUCCEEDED(wic->CreateFormatConverter(&converter)) &&
+                            SUCCEEDED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA,
+                                                           WICBitmapDitherTypeNone, nullptr, 0,
+                                                           WICBitmapPaletteTypeCustom))) {
+                            target->CreateBitmapFromWicBitmap(converter.Get(), nullptr, &avatarBitmap);
+                        }
                     }
                 }
             }
         }
 
         float cx = x + size / 2.0f, cy = y + size / 2.0f, r = size / 2.0f;
-        if (bitmap) {
+        if (avatarBitmap) {
             ComPtr<ID2D1Layer> layer;
             target->CreateLayer(nullptr, &layer);
             ComPtr<ID2D1EllipseGeometry> mask;
