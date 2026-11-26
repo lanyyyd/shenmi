@@ -28,6 +28,9 @@ public sealed partial class CloudGamePage : Page
     private bool _expiryBound;
     private bool _suppressExpiryToggle;
 
+    /// <summary>原神按钮文案：每次刷新页面时在两个彩蛋之间 50% 随机。</summary>
+    private string _genshinStartText = "原神 启动";
+
     public CloudGamePage()
     {
         InitializeComponent();
@@ -38,10 +41,11 @@ public sealed partial class CloudGamePage : Page
             GameCombo.Items.Add(new ComboBoxItem { Content = name, Tag = key });
         }
         GameCombo.SelectedIndex = 0;
-        UpdateLoginButtonText();
+        RollGenshinLabel();
 
         Loaded += async (_, _) =>
         {
+            RollGenshinLabel();
             // 切到本页先把账号列表刷出来（含别人分享给我的账号），再准备引擎和检测。
             await RefreshStatusAsync();
             await LoadGamesAsync();
@@ -274,11 +278,18 @@ public sealed partial class CloudGamePage : Page
     {
         LoginButton.Content = CurrentGame switch
         {
-            "genshin" => "原神 启动",
+            "genshin" => _genshinStartText,
             "starrail" => "崩崩崩！？",
             "bilibili" => "守护最好的噼里啪啦",
             _ => "一键上号"
         };
+    }
+
+    /// <summary>原神按钮文案在「原神 启动」和「！！？原原？！」之间各 50% 随机，每次进页面重掷。</summary>
+    private void RollGenshinLabel()
+    {
+        _genshinStartText = Random.Shared.Next(2) == 0 ? "原神 启动" : "！！？原原？！";
+        UpdateLoginButtonText();
     }
 
     private void OnAccountChanged(object sender, SelectionChangedEventArgs e) { }

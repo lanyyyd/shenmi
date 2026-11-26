@@ -308,10 +308,19 @@ struct Renderer {
             params.contentBounds = D2D1::InfiniteRect();
             params.geometricMask = mask.Get();
             params.maskAntialiasMode = D2D1_ANTIALIAS_MODE_PER_PRIMITIVE;
-            target->PushLayer(params, layer.Get());
-            target->DrawBitmap(avatarBitmap.Get(), D2D1::RectF(x, y, x + size, y + size), 1.0f,
-                               D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-            target->PopLayer();
+            // 这两个字段默认是 0：opacity=0 会让头像整层透明，零矩阵会把遮罩缩成一个点，
+            // 表现就是头像永远显示不出来。必须显式给不透明和单位矩阵。
+            params.maskTransform = D2D1::IdentityMatrix();
+            params.opacity = 1.0f;
+            params.layerOptions = D2D1_LAYER_OPTIONS_NONE;
+            if (layer && mask && SUCCEEDED(target->PushLayer(params, layer.Get()))) {
+                target->DrawBitmap(avatarBitmap.Get(), D2D1::RectF(x, y, x + size, y + size), 1.0f,
+                                   D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                target->PopLayer();
+            } else {
+                target->DrawBitmap(avatarBitmap.Get(), D2D1::RectF(x, y, x + size, y + size), 1.0f,
+                                   D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            }
             return;
         }
 
