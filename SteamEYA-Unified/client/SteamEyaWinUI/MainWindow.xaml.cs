@@ -86,6 +86,7 @@ public sealed partial class MainWindow : Window
             StopBackgroundVideo();
             NetworkModeService.Stop();
             ChatHub.Shutdown();
+            IslandService.Stop();
             EngineLauncher.Stop();
             GatewayLauncher.Stop();
 

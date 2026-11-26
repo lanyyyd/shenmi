@@ -401,6 +401,9 @@ internal static partial class NotificationService
         }
     }
 
+    /// <summary>灵动岛点击回调：参数格式与系统通知一致（room=... / openpath=...）。</summary>
+    internal static void InvokeFromIsland(string? argument) => RaiseInvoked(argument);
+
     // ---------------- 发送 ----------------
 
     /// <summary>发送一条通知。任何异常都不得影响调用方业务。</summary>
@@ -409,12 +412,14 @@ internal static partial class NotificationService
     /// <param name="argKey">点击回调的键（如 room / openpath）；为 null 表示点击不携带参数。</param>
     /// <param name="argValue">与 <paramref name="argKey"/> 配对的值，系统通道会自动做 URL 编码。</param>
     /// <param name="glyph">浮窗图标字形（Segoe Fluent Icons），为空时用默认消息图标。</param>
+    /// <param name="island">灵动岛用的富通知；为空时按 title/body 生成一条基础通知。</param>
     internal static void Show(
         string title,
         string body,
         string? argKey = null,
         string? argValue = null,
-        string? glyph = null)
+        string? glyph = null,
+        IslandNotice? island = null)
     {
         try
         {
@@ -457,9 +462,12 @@ internal static partial class NotificationService
                 ShowSystem(title, body, argKey, argValue);
             }
 
-            if (wantInApp)
+            // 灵动岛独立于系统通知：只要应用在运行就尝试显示，保证聊天/下载
+            // 通知一定能在岛上看得到；原生岛不可用时才退回旧浮窗。
+            var islandShown = ShowIsland(title, body, argKey, argValue, glyph, island);
+            if (wantInApp && !islandShown)
             {
-                ShowInApp(title, body, argKey, argValue, glyph);
+                ShowToastFallback(title, body, argKey, argValue, glyph);
             }
         }
         catch (Exception ex)
@@ -490,9 +498,33 @@ internal static partial class NotificationService
         }
     }
 
-    private static void ShowInApp(string title, string body, string? argKey, string? argValue, string? glyph)
+    private static bool ShowIsland(string title, string body, string? argKey, string? argValue,
+        string? glyph, IslandNotice? island)
     {
-        // 与系统通道保持一致：点击回传 "key=URL编码值"，解析端统一做解码。
+        var invocation = string.IsNullOrWhiteSpace(argKey)
+            ? null
+            : $"{argKey}={Uri.EscapeDataString(argValue ?? string.Empty)}";
+        var notice = island ?? new IslandNotice
+        {
+            Heading = title,
+            Title = body,
+            Glyph = glyph ?? string.Empty,
+            CoalesceKey = string.Empty,
+            DurationMs = 6000
+        };
+        notice.Action = invocation ?? string.Empty;
+        if (!IslandService.TryShow(notice))
+        {
+            return false;
+        }
+        _lastChannelUsed = "灵动岛";
+        AppLog.Debug($"已弹出灵动岛通知：{title}");
+        return true;
+    }
+
+    private static void ShowToastFallback(string title, string body, string? argKey, string? argValue,
+        string? glyph)
+    {
         var invocation = string.IsNullOrWhiteSpace(argKey)
             ? null
             : $"{argKey}={Uri.EscapeDataString(argValue ?? string.Empty)}";
@@ -533,28 +565,56 @@ internal static partial class NotificationService
     // ---------------- 业务入口 ----------------
 
     /// <summary>聊天消息提醒。点击后回到对应房间。</summary>
-    internal static void NotifyChat(string title, string body, string room) =>
-        Show(title, body, "room", room, "\uE8BD");   // Message
+    internal static void NotifyChat(string title, string body, string room,
+        string? senderName = null, string? avatarUrl = null)
+    {
+        var island = new IslandNotice
+        {
+            Heading = string.IsNullOrWhiteSpace(senderName) ? title : senderName,
+            Title = body,
+            Body = room == "group" ? "群聊 · 点击进入聊天室" : "私聊 · 点击进入聊天室",
+            AvatarUrl = avatarUrl ?? string.Empty,
+            Glyph = "\uE8BD",
+            CoalesceKey = "chat:" + room,
+            DurationMs = 9000
+        };
+        Show(title, body, "room", room, "\uE8BD", island);
+    }
 
     /// <summary>下载完成。</summary>
-    internal static void NotifyDownloadCompleted(string fileName, string directory) =>
+    internal static void NotifyDownloadCompleted(string fileName, string directory)
+    {
+        var island = new IslandNotice
+        {
+            Heading = Loc.T("Dl_Notify_Completed_Title"),
+            Title = fileName,
+            Body = directory,
+            Glyph = "\uE896",
+            CoalesceKey = "download:" + fileName,
+            DurationMs = 8000
+        };
         Show(Loc.T("Dl_Notify_Completed_Title"),
              Loc.Tf("Dl_Notify_Completed_Body_Format", fileName),
-             "openpath",
-             directory,
-             "\uE896");   // Download
+             "openpath", directory, "\uE896", island);
+    }
 
     /// <summary>下载失败（带原因）。引擎给出的是错误码，这里统一翻成用户能看懂的说明。</summary>
     internal static void NotifyDownloadFailed(string fileName, string? reason)
     {
         var text = LocalizeDownloadError(reason);
-        Show(Loc.T("Dl_Notify_Failed_Title"),
-             string.IsNullOrWhiteSpace(text)
-                 ? Loc.Tf("Dl_Notify_Failed_Body_Format", fileName)
-                 : Loc.Tf("Dl_Notify_Failed_Body_Reason_Format", fileName, text),
-             null,
-             null,
-             "\uEA39");   // ErrorBadge
+        var body = string.IsNullOrWhiteSpace(text)
+            ? Loc.Tf("Dl_Notify_Failed_Body_Format", fileName)
+            : Loc.Tf("Dl_Notify_Failed_Body_Reason_Format", fileName, text);
+        var island = new IslandNotice
+        {
+            Heading = Loc.T("Dl_Notify_Failed_Title"),
+            Title = fileName,
+            Body = text,
+            Glyph = "\uEA39",
+            CoalesceKey = "download:" + fileName,
+            DurationMs = 9000
+        };
+        Show(Loc.T("Dl_Notify_Failed_Title"), body, null, null, "\uEA39", island);
     }
 
     private static string LocalizeDownloadError(string? raw)

@@ -345,6 +345,6 @@ internal static class ChatHub
 
         var title = Loc.Tf(dto.Room == "group" ? "Chat_Notify_Group" : "Chat_Notify_Private", dto.FromName);
         AppLog.Debug($"收到聊天消息：room={dto.Room} from={dto.FromName} kind={dto.EffectiveKind} len={preview.Length}");
-        NotificationService.NotifyChat(title, preview, dto.Room);   // 带房间参数，点击通知可直接跳到该房间
+        NotificationService.NotifyChat(title, preview, dto.Room, dto.FromName, dto.FromAvatar);   // 带房间参数，点击通知可直接跳到该房间
     }
 }

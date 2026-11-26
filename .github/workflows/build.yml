@@ -150,6 +150,21 @@ jobs:
           go build -trimpath -ldflags="-s -w" -o "$env:GITHUB_WORKSPACE\publish\engine\steameya-engine.exe" .
           if (-not (Test-Path "$env:GITHUB_WORKSPACE\publish\engine\steameya-engine.exe")) { throw "云游戏引擎 exe 未生成" }
 
+      # ---- 灵动岛通知窗口（Win32 分层窗口 + Direct2D 自绘）----
+      - name: 构建灵动岛窗口（C++）
+        shell: pwsh
+        run: |
+          cmake -S SteamEYA-Unified/native/island -B build-island -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "灵动岛 CMake 配置失败" }
+          cmake --build build-island --config Release --target steameya-island
+          if ($LASTEXITCODE -ne 0) { throw "灵动岛编译失败" }
+          $exe = Get-ChildItem build-island -Recurse -Filter steameya-island.exe |
+            Where-Object { $_.FullName -match '\\Release\\' } | Select-Object -First 1
+          if (-not $exe) { throw "steameya-island.exe 未生成" }
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\publish\island" | Out-Null
+          Copy-Item $exe.FullName "$env:GITHUB_WORKSPACE\publish\island\steameya-island.exe" -Force
+          Get-Item "$env:GITHUB_WORKSPACE\publish\island\steameya-island.exe" | Select-Object Name, Length
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup -y --no-progress
