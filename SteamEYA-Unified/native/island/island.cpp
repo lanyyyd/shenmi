@@ -17,6 +17,9 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cwchar>
 #include <deque>
 #include <map>
 #include <memory>
@@ -65,7 +68,36 @@ struct Notice {
 HANDLE g_pipe = INVALID_HANDLE_VALUE;
 std::mutex g_pipeWriteLock;
 HWND g_hwnd = nullptr;
+HWND g_mainWnd = nullptr;   // 主程序窗口（--hwnd 传入），点击时直接把它带到前台
 UINT g_dpi = 96;
+
+// 岛进程自己的小日志（%TEMP%\SteamEYA-island.log），用于确认点击是否真的发生。
+void IslandLog(const wchar_t* message) {
+    wchar_t temp[MAX_PATH]{};
+    DWORD n = GetTempPathW(MAX_PATH, temp);
+    if (n == 0 || n >= MAX_PATH) return;
+    std::wstring path = std::wstring(temp) + L"SteamEYA-island.log";
+    HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                              OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    SYSTEMTIME st{};
+    GetLocalTime(&st);
+    wchar_t line[512]{};
+    swprintf_s(line, _countof(line), L"%04d-%02d-%02d %02d:%02d:%02d.%03d %s\r\n",
+               st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+               st.wMilliseconds, message);
+    DWORD written = 0;
+    WriteFile(file, line, static_cast<DWORD>(wcslen(line) * sizeof(wchar_t)), &written, nullptr);
+    CloseHandle(file);
+}
+
+// 把主程序窗口恢复并置前；即使随后的管道写入有问题，用户也能看到窗口弹出来。
+void ActivateMainWindow() {
+    if (!g_mainWnd || !IsWindow(g_mainWnd)) return;
+    ShowWindowAsync(g_mainWnd, IsIconic(g_mainWnd) ? SW_RESTORE : SW_SHOW);
+    SetForegroundWindow(g_mainWnd);
+}
 
 std::wstring Utf8ToWide(const std::string& value) {
     if (value.empty()) return {};
@@ -111,8 +143,8 @@ bool ReadString(HANDLE pipe, std::wstring& out) {
     return true;
 }
 
-bool WriteFrame(const std::wstring& action, const std::wstring& id) {
-    std::lock_guard<std::mutex> lock(g_pipeWriteLock);
+// 调用方必须持有 g_pipeWriteLock。
+bool WriteFrameLocked(const std::wstring& action, const std::wstring& id) {
     if (g_pipe == INVALID_HANDLE_VALUE) return false;
     std::string actionUtf8 = WideToUtf8(action);
     std::string idUtf8 = WideToUtf8(id);
@@ -131,6 +163,19 @@ bool WriteFrame(const std::wstring& action, const std::wstring& id) {
     memcpy(p, idUtf8.data(), n);
     DWORD written = 0;
     return WriteFile(g_pipe, buffer.data(), static_cast<DWORD>(buffer.size()), &written, nullptr) != FALSE;
+}
+
+// 点击动作绝不能在 UI 线程做同步 IPC：管道另一端一旦不读，WriteFile 会把岛的消息循环
+// 卡住，表现为岛窗口「未响应」而主程序没事。这里丢给后台线程写，UI 立即返回。
+void SendActionAsync(std::wstring action, std::wstring id) {
+    std::thread([action = std::move(action), id = std::move(id)]() {
+        bool ok = false;
+        {
+            std::lock_guard<std::mutex> lock(g_pipeWriteLock);
+            ok = WriteFrameLocked(action, id);
+        }
+        IslandLog(ok ? L"click frame written" : L"click frame write failed");
+    }).detach();
 }
 
 // ---------------------------------------------------------------- 渲染
@@ -416,9 +461,15 @@ struct State {
         hover = false;
         targetW = kCompactW; targetH = kCompactH;
         ShowWindow(g_hwnd, SW_SHOWNOACTIVATE);
-        SetTimer(g_hwnd, kAnimTimer, kAnimIntervalMs, nullptr);
-        ResetHideTimer();
         lastTick = GetTickCount64();
+        EnsureAnimTimer();
+        ResetHideTimer();
+    }
+
+    // 只在有动画时开 15ms 定时器；静止后停掉，避免岛空转 66fps 占满一个核。
+    void EnsureAnimTimer() {
+        if (lastTick == 0) lastTick = GetTickCount64();
+        SetTimer(g_hwnd, kAnimTimer, kAnimIntervalMs, nullptr);
     }
 
     void SetTargets(bool instant = false) {
@@ -429,6 +480,8 @@ struct State {
         }
         if (instant) {
             w = targetW; h = targetH; vw = vh = 0;
+        } else {
+            EnsureAnimTimer();
         }
     }
 
@@ -458,6 +511,7 @@ struct State {
         phase = Phase::Hidden;
         current.reset();
         alpha = 0;
+        lastTick = 0;
         if (!queue.empty()) {
             current = std::make_unique<Notice>(std::move(queue.front()));
             queue.pop_front();
@@ -473,6 +527,10 @@ struct State {
     }
 
     void Tick() {
+        if (lastTick == 0) {
+            KillTimer(g_hwnd, kAnimTimer);
+            return;
+        }
         ULONGLONG now = GetTickCount64();
         float dt = std::min(0.05f, static_cast<float>(now - lastTick) / 1000.0f);
         lastTick = now;
@@ -502,7 +560,14 @@ struct State {
             FinishHide();
             return;
         }
+
+        const bool settled = std::fabs(w - targetW) < 0.5f && std::fabs(h - targetH) < 0.5f &&
+                             std::fabs(vw) < 1.0f && std::fabs(vh) < 1.0f;
         Render();
+        if (phase == Phase::Visible && settled) {
+            KillTimer(g_hwnd, kAnimTimer);
+            lastTick = 0;
+        }
     }
 
     void Render() {
@@ -660,13 +725,17 @@ void OnClick(int px, int py) {
         return;
     }
     if (!g_state.expanded) {
+        IslandLog(L"click expand");
         g_state.expanded = true;
         g_state.SetTargets();
         KillTimer(g_hwnd, kHideTimer);
         return;
     }
+    IslandLog(L"click activate");
+    // 先直接把主窗口拉到前台（不依赖管道），再异步把房间号发给主程序。
+    ActivateMainWindow();
     if (g_state.current && !g_state.current->action.empty()) {
-        WriteFrame(g_state.current->action, g_state.current->id);
+        SendActionAsync(g_state.current->action, g_state.current->id);
     }
     g_state.Dismiss();
 }
@@ -721,6 +790,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_APP_PIPE_LOST:
+        IslandLog(L"pipe lost, exiting");
         DestroyWindow(hwnd);
         return 0;
     case WM_DPICHANGED: {
@@ -811,6 +881,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int) {
     for (int i = 1; i + 1 < argc; ++i) {
         if (!wcscmp(argv[i], L"--pipe")) pipeName = argv[i + 1];
         else if (!wcscmp(argv[i], L"--parent")) parentPid = wcstoul(argv[i + 1], nullptr, 10);
+        else if (!wcscmp(argv[i], L"--hwnd")) g_mainWnd = reinterpret_cast<HWND>(_wcstoui64(argv[i + 1], nullptr, 16));
     }
     if (argv) LocalFree(argv);
     if (pipeName.empty() || !ConnectPipe(pipeName, 3000)) {
@@ -837,6 +908,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int) {
 
     std::thread(PipeReader, hwnd).detach();
     if (parentPid) std::thread(WatchParent, parentPid, hwnd).detach();
+    IslandLog(L"island started");
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0)) {

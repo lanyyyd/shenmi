@@ -29,6 +29,8 @@ internal sealed class RemoteAccountService
         }
 
         SessionState.EnterOnline(result.AccessToken, result.User?.Username ?? username, result.User?.Nickname ?? username);
+        // 个性化设置跟随账号：登录后拉取服务端保存的主题/壁纸/透明度。
+        _ = SettingsSyncService.PullAsync();
         return new RemoteAuthResult(true, "登录成功");
     }
 
@@ -44,6 +46,7 @@ internal sealed class RemoteAccountService
         }
 
         SessionState.EnterOnline(result.AccessToken, result.User?.Username ?? username, result.User?.Nickname ?? username);
+        _ = SettingsSyncService.PullAsync();
         return new RemoteAuthResult(true, "注册成功");
     }
 

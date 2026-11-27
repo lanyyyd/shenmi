@@ -621,6 +621,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         settings.Theme = theme;
         AppState.SettingsService.Save(settings);
         ApplyThemeSettings(settings);
+        SettingsSyncService.NotifyChanged();
     }
 
     /// <summary>套用主题：内容根主题 + 整套 Aurora 换色，并同步主题色控件的显示。</summary>
@@ -669,6 +670,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         AppState.SettingsService.Save(settings);
         AppState.UiColorService.Apply(settings.UiColor, settings.UiColorAnimated, settings.Theme);
         ThemeColorSwatch.Background = new SolidColorBrush(args.NewColor);
+        SettingsSyncService.NotifyChanged();
     }
 
     private void ResetThemeColorButton_Click(object sender, RoutedEventArgs e)
@@ -679,6 +681,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         AppState.UiColorService.Apply(settings.UiColor, settings.UiColorAnimated, settings.Theme);
         MainWindow.Instance?.ApplyTheme(UiColorService.ResolveElementTheme(settings.Theme, settings.UiColor));
         UpdateThemeColorControls(settings);
+        SettingsSyncService.NotifyChanged();
     }
 
     // ---------- 自定义背景 ----------
@@ -710,6 +713,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
                 AppState.SettingsService.Save(settings);
                 MainWindow.Instance?.ApplyCustomBackground(settings);
                 UpdateCustomBackgroundControls();
+                SettingsSyncService.NotifyChanged();
             }
 
             return;
@@ -719,6 +723,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         AppState.SettingsService.Save(settings);
         MainWindow.Instance?.ApplyCustomBackground(settings);
         UpdateCustomBackgroundControls();
+        SettingsSyncService.NotifyChanged();
     }
 
     private async void ChooseCustomBackgroundButton_Click(object sender, RoutedEventArgs e)
@@ -813,6 +818,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         // 服务器壁纸走的是这条路径：这里必须刷新一次，否则透明度滑杆还停留在
         // 「没有背景」时的禁用状态，用户得先关掉再打开开关才能拖。
         UpdateCustomBackgroundControls();
+        SettingsSyncService.NotifyChanged(backgroundChanged: true);
         return true;
     }
 
@@ -1000,6 +1006,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         {
             MainWindow.Instance?.ApplyCustomBackground(settings);
         }
+        SettingsSyncService.NotifyChanged();
     }
 
     private void ResetCustomBackgroundOpacityButton_Click(object sender, RoutedEventArgs e)
@@ -1022,6 +1029,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         {
             MainWindow.Instance?.ApplyCustomBackground(settings);
         }
+        SettingsSyncService.NotifyChanged();
     }
 
     /// <summary>刷新背景卡片的文件状态文案与按钮可用性。</summary>

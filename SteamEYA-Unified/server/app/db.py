@@ -663,6 +663,13 @@ CREATE TABLE IF NOT EXISTS wallpapers (
     created_by INTEGER,
     created_at INTEGER NOT NULL
 );
+
+-- 客户端个性化设置紧跟账号：换机器登录后由服务端下发，壁纸文件单独存 /uploads/backgrounds
+CREATE TABLE IF NOT EXISTS user_client_settings (
+    user_id    INTEGER PRIMARY KEY,
+    value      TEXT NOT NULL DEFAULT '{}',
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
 """
 
 

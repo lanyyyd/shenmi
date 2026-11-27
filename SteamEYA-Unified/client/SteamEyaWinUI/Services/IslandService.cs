@@ -26,6 +26,7 @@ internal static class IslandService
     private static string _pipeName = string.Empty;
     private static bool _connected;
     private static string? _avatarDir;
+    private static long _startedAtTicks;
 
     /// <summary>尝试通过灵动岛显示；原生程序不可用时返回 false，调用方回退旧浮窗。</summary>
     public static bool TryShow(IslandNotice notice)
@@ -102,7 +103,24 @@ internal static class IslandService
     {
         if (_process is { HasExited: false })
         {
-            return true;
+            // 进程还在但管道长时间没连上/已断开：上次连接可能坏了，重启岛进程，
+            // 否则后续通知和点击都没有任何反应。
+            if (_connected || Environment.TickCount64 - _startedAtTicks < 8000)
+            {
+                return true;
+            }
+            AppLog.Warn("灵动岛进程仍在但管道已断开，重启岛进程。");
+            try
+            {
+                _process.Kill(entireProcessTree: true);
+                _process.WaitForExit(1000);
+            }
+            catch
+            {
+                // 已退出
+            }
+            _process.Dispose();
+            _process = null;
         }
 
         _connected = false;
@@ -139,11 +157,13 @@ internal static class IslandService
             var psi = new ProcessStartInfo
             {
                 FileName = exe,
-                Arguments = $"--pipe \"\\\\.\\pipe\\{_pipeName}\" --parent {Environment.ProcessId}",
+                // 把主窗口句柄一并传过去：点击岛时岛进程可以先把窗口拉到前台，不依赖管道往返。
+                Arguments = $"--pipe \"\\\\.\\pipe\\{_pipeName}\" --parent {Environment.ProcessId} --hwnd 0x{MainWindow.Hwnd.ToInt64():X}",
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
             _process = Process.Start(psi);
+            _startedAtTicks = Environment.TickCount64;
             if (_process is null)
             {
                 _pipe.Dispose();
@@ -265,6 +285,7 @@ internal static class IslandService
                 var length = BitConverter.ToInt32(header);
                 if (length <= 0 || length > 1024 * 1024)
                 {
+                    AppLog.Warn($"灵动岛帧长度异常，结束读取并等待重连：{length}");
                     break;
                 }
                 var payload = new byte[length];

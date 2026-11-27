@@ -210,6 +210,12 @@ internal sealed class AppSettings
     /// <summary>界面语言代码：zh-Hans / en / zh-Hant。null 表示尚未选择（首次启动按系统语言推断）。</summary>
     public string? Language { get; set; }
 
+    /// <summary>这份设置当前归属的账号（登录名）；用于换账号时判断是否需要从服务端覆盖。</summary>
+    public string? SettingsOwnerUsername { get; set; }
+
+    /// <summary>个性化设置最后一次本地修改时间（Unix 毫秒），与云端 updatedAt 比较决定拉取还是推送。</summary>
+    public long SettingsUpdatedAt { get; set; }
+
     /// <summary>主题：Default（跟随系统）/ Light / Dark。</summary>
     public string Theme { get; set; } = "Default";
 

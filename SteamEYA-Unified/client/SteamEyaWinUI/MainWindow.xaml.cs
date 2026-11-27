@@ -158,6 +158,8 @@ public sealed partial class MainWindow : Window
         if (!SessionState.Offline)
         {
             _ = RunStartupSyncAsync();
+            // 已登录（有免登令牌）时，启动即拉取跟随账号的个性化设置。
+            _ = SettingsSyncService.PullAsync();
         }
 
         // 「在玩 Steam」客户端心跳（服务端 Steam API 的兜底，退出 Steam 后 90 秒内消失）
