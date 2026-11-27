@@ -63,6 +63,7 @@ struct Notice {
     std::wstring coalesceKey;
     std::wstring action;
     int durationMs = 9000;
+    bool actionSent = false;   // 同一条通知只允许发一次点击，避免重复/双击重复触发
 };
 
 HANDLE g_pipe = INVALID_HANDLE_VALUE;
@@ -144,12 +145,12 @@ bool ReadString(HANDLE pipe, std::wstring& out) {
 }
 
 // 调用方必须持有 g_pipeWriteLock。
-bool WriteFrameLocked(const std::wstring& action, const std::wstring& id) {
+bool WriteFrameLocked(const std::wstring& action, const std::wstring& id, uint64_t sentAt) {
     if (g_pipe == INVALID_HANDLE_VALUE) return false;
     std::string actionUtf8 = WideToUtf8(action);
     std::string idUtf8 = WideToUtf8(id);
     uint32_t payloadSize = 1 + 4 + static_cast<uint32_t>(actionUtf8.size()) +
-                           4 + static_cast<uint32_t>(idUtf8.size());
+                           4 + static_cast<uint32_t>(idUtf8.size()) + 8;
     std::vector<char> buffer(4 + payloadSize);
     char* p = buffer.data();
     memcpy(p, &payloadSize, 4);
@@ -160,19 +161,20 @@ bool WriteFrameLocked(const std::wstring& action, const std::wstring& id) {
     memcpy(p, actionUtf8.data(), n); p += n;
     n = static_cast<uint32_t>(idUtf8.size());
     memcpy(p, &n, 4); p += 4;
-    memcpy(p, idUtf8.data(), n);
+    memcpy(p, idUtf8.data(), n); p += n;
+    memcpy(p, &sentAt, 8);   // 点击发生时刻（GetTickCount64），C# 据此丢弃过期帧
     DWORD written = 0;
     return WriteFile(g_pipe, buffer.data(), static_cast<DWORD>(buffer.size()), &written, nullptr) != FALSE;
 }
 
 // 点击动作绝不能在 UI 线程做同步 IPC：管道另一端一旦不读，WriteFile 会把岛的消息循环
 // 卡住，表现为岛窗口「未响应」而主程序没事。这里丢给后台线程写，UI 立即返回。
-void SendActionAsync(std::wstring action, std::wstring id) {
-    std::thread([action = std::move(action), id = std::move(id)]() {
+void SendActionAsync(std::wstring action, std::wstring id, uint64_t sentAt) {
+    std::thread([action = std::move(action), id = std::move(id), sentAt]() {
         bool ok = false;
         {
             std::lock_guard<std::mutex> lock(g_pipeWriteLock);
-            ok = WriteFrameLocked(action, id);
+            ok = WriteFrameLocked(action, id, sentAt);
         }
         IslandLog(ok ? L"click frame written" : L"click frame write failed");
     }).detach();
@@ -428,11 +430,24 @@ struct State {
                 current->glyph = notice.glyph;
                 current->action = notice.action;
                 current->durationMs = notice.durationMs;
+                current->actionSent = false;   // 新消息重置「已发送点击」标记
                 if (phase == Phase::Hidden) {
                     Show();
                 } else {
+                    // 正在淡出时又来了同房间消息：取消淡出，重新显示并按新消息重新计 3 秒，
+                    // 否则岛会按第一条消息的时间直接消失。
+                    if (phase == Phase::Hiding) {
+                        phase = Phase::Visible;
+                        alpha = 1.0f;
+                        expanded = false;
+                        SetTargets(true);
+                    } else if (phase == Phase::Visible) {
+                        SetTargets(true);
+                    }
+                    // Showing 阶段保持入场动画，不强制跳尺寸。
                     ResetHideTimer();
-                    SetTargets(true);
+                    EnsureAnimTimer();
+                    Render();
                 }
                 return;
             }
@@ -466,7 +481,8 @@ struct State {
         ResetHideTimer();
     }
 
-    // 只在有动画时开 15ms 定时器；静止后停掉，避免岛空转 66fps 占满一个核。
+    // 定时器从显示一直保留到 FinishHide；静止时 Tick 不做重绘，开销极小。
+    // 不能像之前那样静止就 KillTimer，否则到点收起时没有动画驱动，岛会卡在屏幕上。
     void EnsureAnimTimer() {
         if (lastTick == 0) lastTick = GetTickCount64();
         SetTimer(g_hwnd, kAnimTimer, kAnimIntervalMs, nullptr);
@@ -500,6 +516,8 @@ struct State {
             targetW = kCompactW - 30;
             targetH = kCompactH - 8;
             KillTimer(g_hwnd, kHideTimer);
+            // 淡出必须有动画定时器驱动；之前「静止后停掉定时器」会导致这里永远停在屏幕上。
+            EnsureAnimTimer();
         }
     }
 
@@ -528,13 +546,14 @@ struct State {
 
     void Tick() {
         if (lastTick == 0) {
-            KillTimer(g_hwnd, kAnimTimer);
-            return;
+            lastTick = GetTickCount64();
         }
         ULONGLONG now = GetTickCount64();
         float dt = std::min(0.05f, static_cast<float>(now - lastTick) / 1000.0f);
         lastTick = now;
         if (dt <= 0) return;
+
+        const bool wasVisible = phase == Phase::Visible;
 
         if (phase == Phase::Showing) {
             alpha = std::min(1.0f, alpha + dt * 5.0f);
@@ -561,12 +580,11 @@ struct State {
             return;
         }
 
+        // 只在动画期间重绘；静止仍保留定时器（很轻量），确保后续 Dismiss 一定能淡出。
         const bool settled = std::fabs(w - targetW) < 0.5f && std::fabs(h - targetH) < 0.5f &&
                              std::fabs(vw) < 1.0f && std::fabs(vh) < 1.0f;
-        Render();
-        if (phase == Phase::Visible && settled) {
-            KillTimer(g_hwnd, kAnimTimer);
-            lastTick = 0;
+        if (!wasVisible || phase != Phase::Visible || !settled) {
+            Render();
         }
     }
 
@@ -696,7 +714,7 @@ void OnMouseMove(int px, int py) {
     bool closeHover = g_state.expanded && x >= g_state.w - 52 && y <= 50;
     if (closeHover != g_state.closeHover) {
         g_state.closeHover = closeHover;
-        InvalidateRect(g_hwnd, nullptr, FALSE);
+        g_state.Render();
     }
     if (!g_state.hover) {
         g_state.hover = true;
@@ -718,24 +736,21 @@ void OnMouseLeave() {
 }
 
 void OnClick(int px, int py) {
+    if (g_state.phase == Phase::Hiding) {
+        return;   // 淡出中，忽略点击，避免同一次点击重复发帧
+    }
     float scale = static_cast<float>(g_dpi) / 96.0f;
     float x = px / scale, y = py / scale;
     if (g_state.expanded && x >= g_state.w - 52 && y <= 50) {
         g_state.Dismiss();
         return;
     }
-    if (!g_state.expanded) {
-        IslandLog(L"click expand");
-        g_state.expanded = true;
-        g_state.SetTargets();
-        KillTimer(g_hwnd, kHideTimer);
-        return;
-    }
+    // 单击即跳转，不再要求「第一次展开、第二次才生效」；悬停仍然负责展开看正文。
     IslandLog(L"click activate");
-    // 先直接把主窗口拉到前台（不依赖管道），再异步把房间号发给主程序。
     ActivateMainWindow();
-    if (g_state.current && !g_state.current->action.empty()) {
-        SendActionAsync(g_state.current->action, g_state.current->id);
+    if (g_state.current && !g_state.current->action.empty() && !g_state.current->actionSent) {
+        g_state.current->actionSent = true;
+        SendActionAsync(g_state.current->action, g_state.current->id, GetTickCount64());
     }
     g_state.Dismiss();
 }

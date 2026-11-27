@@ -386,10 +386,10 @@ internal static partial class NotificationService
         }
     }
 
-    private static void RaiseInvoked(string? argument)
+    private static void RaiseInvoked(string? argument, string source = "系统通知")
     {
         var value = argument ?? string.Empty;
-        AppLog.Debug($"通知被点击，参数：{value}");
+        AppLog.Debug($"[{source}] 通知被点击，参数：{value}");
 
         if (_ui is { } ui)
         {
@@ -402,7 +402,7 @@ internal static partial class NotificationService
     }
 
     /// <summary>灵动岛点击回调：参数格式与系统通知一致（room=... / openpath=...）。</summary>
-    internal static void InvokeFromIsland(string? argument) => RaiseInvoked(argument);
+    internal static void InvokeFromIsland(string? argument) => RaiseInvoked(argument, "灵动岛");
 
     // ---------------- 发送 ----------------
 
@@ -546,7 +546,7 @@ internal static partial class NotificationService
             try
             {
                 var toast = new ToastWindow(title, body, glyph);
-                toast.Clicked += () => RaiseInvoked(invocation);
+                toast.Clicked += () => RaiseInvoked(invocation, "站内浮窗");
                 toast.ShowToast();
                 _lastChannelUsed = "应用内浮窗";
                 AppLog.Debug($"已弹出应用内浮窗：{title}");

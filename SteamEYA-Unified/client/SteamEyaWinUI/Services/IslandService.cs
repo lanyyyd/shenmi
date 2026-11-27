@@ -28,6 +28,11 @@ internal static class IslandService
     private static string? _avatarDir;
     private static long _startedAtTicks;
 
+    // 同一次点击可能被重复投递（双击/淡出期抖动）：同一 action 1 秒内只处理一次。
+    private static readonly object ClickGate = new();
+    private static string? _lastAction;
+    private static long _lastActionTicks;
+
     /// <summary>尝试通过灵动岛显示；原生程序不可用时返回 false，调用方回退旧浮窗。</summary>
     public static bool TryShow(IslandNotice notice)
     {
@@ -298,12 +303,50 @@ internal static class IslandService
                     continue;
                 }
                 var action = ReadString(reader);
-                _ = ReadString(reader);   // id，当前不需要
-                if (!string.IsNullOrWhiteSpace(action))
+                var id = ReadString(reader);
+                // 新协议在 action/id 之后附带点击时刻（GetTickCount64，同机可直接比较）；
+                // 旧岛没有这 8 字节，读不到就按 0 处理。
+                long sentAt = 0;
+                try
                 {
-                    AppLog.Debug($"灵动岛点击：{action}");
-                    NotificationService.InvokeFromIsland(action);
+                    if (reader.BaseStream.Position + 8 <= reader.BaseStream.Length)
+                    {
+                        sentAt = reader.ReadInt64();
+                    }
                 }
+                catch
+                {
+                    sentAt = 0;
+                }
+
+                if (string.IsNullOrWhiteSpace(action))
+                {
+                    continue;
+                }
+
+                var nowTicks = Environment.TickCount64;
+                var age = sentAt > 0 ? nowTicks - sentAt : 0;
+                if (sentAt > 0 && (age < 0 || age > 2500))
+                {
+                    // 过期点击（管道积压/重复帧）不能再把窗口弹出来。
+                    AppLog.Warn($"丢弃过期的灵动岛点击：{action}（age={age}ms, id={id}）");
+                    continue;
+                }
+
+                lock (ClickGate)
+                {
+                    if (string.Equals(action, _lastAction, StringComparison.Ordinal) &&
+                        nowTicks - _lastActionTicks < 1000)
+                    {
+                        AppLog.Debug($"忽略重复的灵动岛点击：{action}");
+                        continue;
+                    }
+                    _lastAction = action;
+                    _lastActionTicks = nowTicks;
+                }
+
+                AppLog.Debug($"灵动岛点击：{action}（age={age}ms, id={id}）");
+                NotificationService.InvokeFromIsland(action);
             }
         }
         catch (Exception ex)
